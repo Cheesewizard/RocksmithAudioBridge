@@ -335,8 +335,8 @@ namespace RSMods.Util
                 var rs2RootDir = string.Empty;
                 var steamRootPath = GetSteamDirectory();
 
-                if (Directory.GetParent(Application.StartupPath).FullName.IsRSFolder()) // Before we ask the user to say where RS is located, lets check to see if we are located in a RS Install folder.
-                    return Directory.GetParent(Application.StartupPath).FullName;
+                if (Application.StartupPath.IsRSFolder()) // Before we ask the user to say where RS is located, lets check to see if we are located in a RS Install folder.
+                    return Application.StartupPath;
 
                 if (!string.IsNullOrEmpty(steamRootPath))
                 {

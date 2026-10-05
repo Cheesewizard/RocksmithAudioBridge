@@ -5,11 +5,11 @@ using System.Runtime.InteropServices;
 // General Information about an assembly is controlled through the following
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
-[assembly: AssemblyTitle("Rocksmith2014-Mod-Installer")]
+[assembly: AssemblyTitle("Rocksmith Audio Bridge Installer")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
-[assembly: AssemblyProduct("Rocksmith2014-Mod-Installer")]
+[assembly: AssemblyProduct("Rocksmith Audio Bridge")]
 [assembly: AssemblyCopyright("Copyright © 2026")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
@@ -29,6 +29,6 @@ using System.Runtime.InteropServices;
 //      Build Number
 //      Revision
 // 
-[assembly: AssemblyVersion("1.2.8.3")]
-[assembly: AssemblyFileVersion("1.2.8.3")]
+[assembly: AssemblyVersion("4.0.0.0")]   // the Rocksmith Audio Bridge version (GUI/ProductInfo.cs VERSION)
+[assembly: AssemblyFileVersion("4.0.0.0")]
 

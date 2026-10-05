@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32"><Configuration>Debug</Configuration><Platform>Win32</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Debug with Wwise Logging|Win32"><Configuration>Debug with Wwise Logging</Configuration><Platform>Win32</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32"><Configuration>Release</Configuration><Platform>Win32</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release with Wwise Logging|Win32"><Configuration>Release with Wwise Logging</Configuration><Platform>Win32</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64"><Configuration>Debug</Configuration><Platform>x64</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals"><ProjectGuid>{C7A9E1F2-3B4D-4E5A-9C6B-1D2E3F4A5B6C}</ProjectGuid><WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion></PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration"><ConfigurationType>DynamicLibrary</ConfigurationType><PlatformToolset>v143</PlatformToolset><UseDebugLibraries>false</UseDebugLibraries></PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup><TargetName>RocksmithAudioBridgeAsio</TargetName><OutDir>$(ProjectDir)..\..\Installer\Resources\$(Configuration)\</OutDir><IntDir>$(ProjectDir)..\..\build\AsioProxy\$(Configuration)\</IntDir></PropertyGroup>
+  <!-- The 64-bit build exists for the external amp link: 64-bit amp sims such as AmpliTube 5 only
+       list 64-bit ASIO drivers. In a 64-bit process the driver is always the link's guest (AmpLinkGuest.cpp);
+       it never loads the real interface driver. It is built automatically after every Win32 build of this
+       project (BuildGuestX64 below), so the solution stays Win32-only. -->
+  <PropertyGroup Condition="'$(Platform)'=='x64'"><TargetName>RocksmithAudioBridgeAsio64</TargetName><IntDir>$(ProjectDir)..\..\build\AsioProxy\x64\$(Configuration)\</IntDir></PropertyGroup>
+  <!-- avrt.dll is delay-loaded. regsvr32 loads this DLL with LOAD_WITH_ALTERED_SEARCH_PATH, so a
+       static avrt import would resolve to the game folder's avrt.dll, which is RS_ASIO's loader shim; outside
+       Rocksmith it cannot load RS_ASIO.dll and shows "Failed to load RS_ASIO.dll" on Install/Uninstall.
+       Delay-loaded, avrt is only resolved on the first MMCSS call (audio threads), which never happens in
+       regsvr32; inside the game it binds to the avrt.dll the game already loaded. -->
+  <ItemDefinitionGroup>
+    <ClCompile><LanguageStandard>stdcpp17</LanguageStandard><RuntimeLibrary>MultiThreaded</RuntimeLibrary><Optimization>MaxSpeed</Optimization><PrecompiledHeader>NotUsing</PrecompiledHeader><PreprocessorDefinitions Condition="'$(Platform)'!='x64'">WIN32;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions><PreprocessorDefinitions Condition="'$(Platform)'=='x64'">_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile>
+    <Link><ModuleDefinitionFile>RocksmithAudioBridge.def</ModuleDefinitionFile><AdditionalDependencies>ole32.lib;advapi32.lib;propsys.lib;delayimp.lib;%(AdditionalDependencies)</AdditionalDependencies><DelayLoadDLLs>avrt.dll;%(DelayLoadDLLs)</DelayLoadDLLs><GenerateDebugInformation>true</GenerateDebugInformation></Link>
+  </ItemDefinitionGroup>
+  <ItemGroup><ClCompile Include="AsioProxyDriver.cpp" /><ClCompile Include="VirtualCableCapture.cpp" /><ClCompile Include="AmpLinkHost.cpp" /><ClCompile Include="AmpLinkGuest.cpp" /><ClCompile Include="..\Audio\DelayLinePitchShifter.cpp"><AdditionalIncludeDirectories>$(ProjectDir)shim;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ClCompile></ItemGroup>
+  <ItemGroup><ClInclude Include="AmpLink.hpp" /><ClInclude Include="AmpLinkHost.hpp" /><ClInclude Include="AmpLinkGuest.hpp" /></ItemGroup>
+  <ItemGroup><None Include="RocksmithAudioBridge.def" /></ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <!-- Ships the proxy driver into the game root after every build (shared DeployToGame.targets). The
+       driver is registered by path, so replacing the file in place keeps the registration. -->
+  <Target Name="CollectGameDeployFiles" BeforeTargets="DeployToGame">
+    <ItemGroup>
+      <GameDeployFile Include="$(TargetPath)" Destination="$(RocksmithInstallDir)\$(TargetName)$(TargetExt)" />
+    </ItemGroup>
+  </Target>
+  <!-- After the Win32 build, build (and so deploy) the 64-bit guest of the same flavour. Command-line global
+       properties (DeployToGame, RocksmithInstallDir) flow into this nested build. -->
+  <Target Name="BuildGuestX64" AfterTargets="Build" Condition="'$(Platform)'=='Win32'">
+    <PropertyGroup>
+      <GuestX64Configuration>Release</GuestX64Configuration>
+      <GuestX64Configuration Condition="$(Configuration.StartsWith('Debug'))">Debug</GuestX64Configuration>
+    </PropertyGroup>
+    <MSBuild Projects="$(MSBuildProjectFullPath)" Targets="Build" Properties="Configuration=$(GuestX64Configuration);Platform=x64" />
+  </Target>
+  <Import Project="$(MSBuildThisFileDirectory)..\..\DeployToGame.targets" />
+</Project>

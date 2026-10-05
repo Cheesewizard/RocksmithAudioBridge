@@ -2,7 +2,6 @@
 #include "BugPrevention.hpp"
 
 namespace BugPrevention {
-
 	/// <summary>
 	/// When Rocksmith opens with a Oculus / Meta headset connected to the user computer, it can cause a crash.
 	/// This is due to Rocksmith saying it owns memory that it doesn't have access to.

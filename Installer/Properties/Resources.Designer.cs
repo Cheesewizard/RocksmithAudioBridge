@@ -613,16 +613,6 @@ namespace RS2014_Mod_Installer.Properties {
         /// <summary>
         ///   Looks up a localized resource of type System.Byte[].
         /// </summary>
-        internal static byte[] RSMods1 {
-            get {
-                object obj = ResourceManager.GetObject("RSMods1", resourceCulture);
-                return ((byte[])(obj));
-            }
-        }
-        
-        /// <summary>
-        ///   Looks up a localized resource of type System.Byte[].
-        /// </summary>
         internal static byte[] SevenZipSharp {
             get {
                 object obj = ResourceManager.GetObject("SevenZipSharp", resourceCulture);
@@ -899,14 +889,49 @@ namespace RS2014_Mod_Installer.Properties {
                 return ((byte[])(obj));
             }
         }
-        
+
+        internal static byte[] RocksmithAudioBridge {
+            get {
+                object obj = ResourceManager.GetObject("RocksmithAudioBridge", resourceCulture);
+                return ((byte[])(obj));
+            }
+        }
+
         /// <summary>
         ///   Looks up a localized resource of type System.Byte[].
         /// </summary>
-        internal static byte[] xinput1_3_pdb {
+        internal static byte[] RocksmithAudioBridgeGuest64 {
             get {
-                object obj = ResourceManager.GetObject("xinput1_3_pdb", resourceCulture);
+                object obj = ResourceManager.GetObject("RocksmithAudioBridgeGuest64", resourceCulture);
                 return ((byte[])(obj));
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized resource of type System.Byte[].
+        /// </summary>
+        internal static byte[] RocksmithAudioBridgeLibrary {
+            get {
+                object obj = ResourceManager.GetObject("RocksmithAudioBridgeLibrary", resourceCulture);
+                return ((byte[])(obj));
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to the project LICENSE.
+        /// </summary>
+        internal static string ProjectLicense {
+            get {
+                return ResourceManager.GetString("ProjectLicense", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to the project NOTICE.
+        /// </summary>
+        internal static string ProjectNotice {
+            get {
+                return ResourceManager.GetString("ProjectNotice", resourceCulture);
             }
         }
         

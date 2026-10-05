@@ -11,7 +11,19 @@ namespace RS2014_Mod_Installer
         public GUI()
         {
             InitializeComponent();
+            RefreshMode();
         }
+
+        // Install, or Reinstall / Repair plus Uninstall when Rocksmith Audio Bridge is already in the game folder.
+        private void RefreshMode()
+        {
+            string rsPath = RSMods.Util.GenUtil.GetRSDirectory();
+            bool installed = Uninstaller.IsInstalled(rsPath);
+            UseModsButton.Text = installed ? "Reinstall / Repair" : "Install";
+            UninstallButton.Visible = installed;
+        }
+
+        private static bool IsGameRunning() => Process.GetProcessesByName("Rocksmith2014").Length != 0;
 
         private string rsLocation = string.Empty;
 
@@ -47,9 +59,31 @@ namespace RS2014_Mod_Installer
 
             IsVoid(rsPath);
 
+            if (IsGameRunning())
+            {
+                MessageBox.Show("Please close Rocksmith first.", "Rocksmith is open", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                UseModsButton.Text = originalButtonText;
+                return;
+            }
+            // A running RSMods.exe (the settings window) locks its files: the game DLL and driver would be updated but
+            // the settings app and its runtime would not, leaving a mixed install. Ask first instead.
+            if (Uninstaller.IsOurToolRunning(rsPath))
+            {
+                MessageBox.Show("Please close RSMods (the settings window) first.", "RSMods is open", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                UseModsButton.Text = originalButtonText;
+                return;
+            }
+
             if (DLLStuff.InjectDLL(rsPath) && DLLStuff.InjectGUI(rsPath))
             {
-                string rsModsPath = Path.Combine(rsPath, "RSMods") + "\\RSMods.exe";
+                string rsModsPath = Path.Combine(rsPath, "RSMods.exe");
+                try { DLLStuff.SaveInstallManifest(rsPath); } catch { /* uninstall falls back to the core file list */ }
+
+                // Note by Note is switched on from its Riff Repeater menu row, which lives in cache.psarc. Add it (or put
+                // it back after a Steam file check or another tool restored the cache). Only our entry is touched.
+                string menuError = Uninstaller.RunMenuTool(rsPath, add: true);
+                if (menuError != null)
+                    MessageBox.Show("The mod is installed, but the Note by Note entry could not be added to Riff Repeater (" + menuError + ").\n\nRun this installer again to retry.", "Note by Note menu", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 MessageBox.Show("This version of the installer allows you to take advantage of the new mod settings available by opening: " + rsModsPath, "New Mod Settings Available!", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
                 Process.Start(rsModsPath);
@@ -59,6 +93,68 @@ namespace RS2014_Mod_Installer
             }
 
             UseModsButton.Text = originalButtonText;
+        }
+
+        private void UninstallButton_Click(object sender, EventArgs e)
+        {
+            string rsPath = WhereIsRocksmith();
+            if (string.IsNullOrEmpty(rsPath) || !Uninstaller.IsInstalled(rsPath))
+            {
+                MessageBox.Show("Rocksmith Audio Bridge was not found in the Rocksmith folder.", "Uninstall", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            if (IsGameRunning())
+            {
+                MessageBox.Show("Please close Rocksmith first.", "Uninstall", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            if (Uninstaller.IsOurToolRunning(rsPath))
+            {
+                MessageBox.Show("Please close RSMods (the settings window) first.", "Uninstall", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            if (MessageBox.Show("Uninstall Rocksmith Audio Bridge from\n" + rsPath + "?\n\nYour recordings are kept.", "Uninstall",
+                MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+            bool removeSettings = MessageBox.Show("Also remove your mod settings (RSMods.ini, AudioRouting.ini)?\n\nChoose No to keep them for a later reinstall.",
+                "Uninstall", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
+
+            UseWaitCursor = true;
+            try
+            {
+                // 1. The ASIO bridge driver, while its file is still there. Cancelling the admin prompt stops here.
+                if (Uninstaller.IsDriverRegistered())
+                {
+                    try { Uninstaller.RemoveDriverRegistration(); }
+                    catch (OperationCanceledException)
+                    {
+                        MessageBox.Show("Uninstall cancelled: removing the audio bridge driver needs admin approval. Nothing was removed.", "Uninstall", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        return;
+                    }
+                }
+
+                // 2. Our Riff Repeater entry, surgically, from the current cache.psarc.
+                string menuError = Uninstaller.RunMenuTool(rsPath, add: false);
+                if (menuError != null
+                    && MessageBox.Show("The Note by Note entry could not be removed from Riff Repeater (" + menuError + "). Without the mod it only shows an inactive row.\n\nContinue the uninstall?",
+                        "Uninstall", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+
+                // 3. Our files.
+                var failed = Uninstaller.RemoveFiles(rsPath, removeSettings, menuEntryRemoved: menuError == null);
+                if (failed.Count == 0)
+                    MessageBox.Show("Rocksmith Audio Bridge was uninstalled. Your recordings were kept.", "Uninstall", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                else
+                    MessageBox.Show("Uninstalled, but these files could not be removed (close any program using them and run Uninstall again):\n" + string.Join("\n", failed),
+                        "Uninstall", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Uninstall failed: " + ex.Message, "Uninstall", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                UseWaitCursor = false;
+                RefreshMode();
+            }
         }
 
         private void CreateDesktopShortcut(string rsModsPath)

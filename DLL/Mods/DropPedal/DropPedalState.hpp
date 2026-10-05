@@ -7,10 +7,8 @@
 
 namespace DropPedalState
 {
-	void Configure(const std::string& enabledSetting, const std::string& engineSetting);
+	void Configure(const std::string& enabledSetting);
 	bool IsConfiguredEnabled();
-	bool IsAsioEngine();
-	bool IsCableEngine();
 	bool IsEnabled();
 	bool IsSpeakerModeEnabled();
 	DropPedal::PitchMode GetPitchMode();
@@ -31,4 +29,6 @@ namespace DropPedalState
 	std::string GetAbsoluteTuningName(int semitonesFromE);
 	int GetShiftDirection(DropPedal::Player player);
 	unsigned long long GetModeNoticeTick();
+	// Tick of the last F7 press refused because Speaker Mode is locked for the song; 0 if none.
+	unsigned long long GetModeLockedNoticeTick();
 }

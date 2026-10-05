@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
   <PropertyGroup>
@@ -9,6 +9,8 @@
     <RootNamespace>RSMods</RootNamespace>
     <AssemblyName>RSMods</AssemblyName>
     <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+    <PlatformTarget>x64</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <Deterministic>true</Deterministic>
@@ -31,7 +33,6 @@
     </NuGetPackageImportStamp>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
-    <PlatformTarget>AnyCPU</PlatformTarget>
     <DebugSymbols>true</DebugSymbols>
     <DebugType>full</DebugType>
     <Optimize>false</Optimize>
@@ -41,7 +42,6 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-    <PlatformTarget>AnyCPU</PlatformTarget>
     <DebugType>pdbonly</DebugType>
     <Optimize>true</Optimize>
     <OutputPath>..\Installer\Resources\RSModsGUI\</OutputPath>
@@ -51,17 +51,16 @@
   </PropertyGroup>
   <PropertyGroup>
     <ApplicationIcon>Assets\LogoX256.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <PropertyGroup />
   <PropertyGroup>
     <StartupObject />
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x86'">
-    <PlatformTarget>x86</PlatformTarget>
     <OutputPath>..\Installer\Resources\RSModsGUI\</OutputPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x86'">
-    <PlatformTarget>x86</PlatformTarget>
     <OutputPath>..\Installer\Resources\RSModsGUI\</OutputPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'">
@@ -69,20 +68,16 @@
     <OutputPath>..\Installer\Resources\RSModsGUI\</OutputPath>
     <DefineConstants>DEBUG;TRACE</DefineConstants>
     <DebugType>full</DebugType>
-    <PlatformTarget>x64</PlatformTarget>
     <LangVersion>7.3</LangVersion>
     <ErrorReport>prompt</ErrorReport>
-    <Prefer32Bit>true</Prefer32Bit>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x64'">
     <OutputPath>..\Installer\Resources\RSModsGUI\</OutputPath>
     <DefineConstants>TRACE</DefineConstants>
     <Optimize>true</Optimize>
     <DebugType>pdbonly</DebugType>
-    <PlatformTarget>x64</PlatformTarget>
     <LangVersion>7.3</LangVersion>
     <ErrorReport>prompt</ErrorReport>
-    <Prefer32Bit>true</Prefer32Bit>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="MiscUtil, Version=1.0.0.0, Culture=neutral, PublicKeyToken=d3c42c4bfacf7596, processorArchitecture=MSIL">
@@ -129,6 +124,8 @@
     </Compile>
     <Compile Include="GuitarSpeak.cs" />
     <Compile Include="MemoryStream.cs" />
+	<Compile Include="NoteByNoteChartExtractor.cs" />
+    <Compile Include="NoteByNoteMenuInstaller.cs" />
     <Compile Include="Profiles.cs" />
     <Compile Include="PsarcEntryPath.cs" />
     <Compile Include="Rocksmith\ReadSettings.cs" />
@@ -144,6 +141,47 @@
     <Compile Include="Twitch\TwitchReward.cs" />
     <Compile Include="Twitch\TwitchSettings.cs" />
     <Compile Include="Twitch\Auth\WebServer.cs" />
+    <Compile Include="Audio\AudioRoutingPanel.cs" />
+    <Compile Include="Audio\ResponsiveColumns.cs" />
+    <Compile Include="Audio\MixerStrip.cs" />
+    <Compile Include="Audio\MixerGroup.cs" />
+    <Compile Include="Audio\MixerChannels.cs" />
+    <Compile Include="Audio\ChannelMeter.cs" />
+    <Compile Include="Audio\MeterMotion.cs" />
+    <Compile Include="Audio\StudioSelector.cs" />
+    <Compile Include="Audio\StudioNav.cs" />
+    <Compile Include="Audio\StudioVolumeSlider.cs" />
+    <Compile Include="Audio\WindowCaptureRecorder.cs" />
+    <Compile Include="Audio\VideoTakeHost.cs" />
+    <Compile Include="Audio\StudioTheme.cs" />
+    <Compile Include="Audio\StudioButton.cs" />
+    <Compile Include="Audio\StatusChip.cs" />
+    <Compile Include="Audio\SegmentedControl.cs" />
+	<Compile Include="Audio\RockerToggle.cs" />
+    <Compile Include="Audio\StudioCard.cs" />
+    <Compile Include="Audio\StudioExpander.cs" />
+    <Compile Include="Audio\LevelMeter.cs" />
+    <Compile Include="Audio\TakeList.cs" />
+    <Compile Include="Audio\StudioFormat.cs" />
+    <Compile Include="Audio\AudioControlClient.cs" />
+    <Compile Include="Audio\AsioProxySetup.cs" />
+    <Compile Include="Audio\OutputApplyPlan.cs" />
+    <Compile Include="Audio\AudioBufferSnapshot.cs" />
+    <Compile Include="Audio\AudioInputMode.cs" />
+    <Compile Include="Audio\AudioRoutingWindow.cs" />
+    <Compile Include="Audio\AudioBridgeWindow.cs" />
+    <Compile Include="Audio\StudioSlider.cs" />
+    <Compile Include="Audio\StudioCheck.cs" />
+    <Compile Include="Audio\StudioNumber.cs" />
+    <Compile Include="UI.AudioRouting.cs" />
+    <Compile Include="UI.AudioBridgeSetup.cs" />
+    <Compile Include="UI.RSModsPlus.cs" />
+    <Compile Include="Controls\ColourWheel.cs" />
+    <Compile Include="Controls\ColourChip.cs" />
+    <Compile Include="Controls\FeatureSection.cs" />
+    <Compile Include="Controls\ColourPickerDialog.cs" />
+    <Compile Include="Controls\FeatureColourSettings.cs" />
+    <Compile Include="Audio\AudioDeviceChoice.cs" />
     <Compile Include="UI.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -152,6 +190,7 @@
     </Compile>
     <Compile Include="KeyConversion.cs" />
     <Compile Include="Program.cs" />
+    <Compile Include="ProductInfo.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="ReadSettings.cs" />
     <Compile Include="Util\ExeUtil.cs" />
@@ -216,9 +255,13 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
+    <None Include="app.manifest" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Assets\LogoX256.ico" />
+    <EmbeddedResource Include="Assets\AudioBridge256.ico">
+      <LogicalName>RSMods.AudioBridgeLogo.ico</LogicalName>
+    </EmbeddedResource>
     <Content Include="Lib\7z.dll" />
     <Content Include="Lib\ddc\ddc.exe" />
     <Content Include="Lib\ddc\ddc_chords_protector.xml" />
@@ -293,12 +336,55 @@
       <Version>3.1.5-CI-20200907-9</Version>
     </PackageReference>
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\RSModsPlus\RSModsPlus.csproj">
+      <Project>{C92F58F4-75B9-4AE0-A722-8F63833EE42C}</Project>
+      <Name>RSModsPlus</Name>
+    </ProjectReference>
+    <Compile Include="MlModelVerifier.cs" />
+    <Compile Include="MlServiceHost.cs" />
+    <Compile Include="RuntimeBootstrap.cs" />
+    <Reference Include="System.IO.Compression" />
+    <EmbeddedResource Include="$(IntermediateOutputPath)BundledRuntime.zip">
+      <LogicalName>RSMods.BundledRuntime.zip</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+  <Target Name="BuildRuntimePayload" BeforeTargets="PrepareResources" DependsOnTargets="ResolveReferences">
+    <WriteLinesToFile File="$(IntermediateOutputPath)RuntimeReferences.txt" Lines="@(ReferenceCopyLocalPaths)" Overwrite="true" />
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(ProjectDir)BuildRuntimePayload.ps1&quot; -References &quot;$(ProjectDir)$(IntermediateOutputPath)RuntimeReferences.txt&quot; -Output &quot;$(ProjectDir)$(IntermediateOutputPath)BundledRuntime.zip&quot; -ProjectDirectory &quot;$(ProjectDir).&quot;" />
+  </Target>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <Target Name="PlaceMainGameLibrary" AfterTargets="Build">
+    <Copy SourceFiles="$(TargetDir)RocksmithAudioBridge.dll" DestinationFiles="$(TargetDir)..\RocksmithAudioBridge.dll" />
+  </Target>
+  <!-- The GUI lives in TWO places in the game folder: the game root (what the installer writes and
+       what the game DLL launches for the background bridge and the ML service) and <game>\RSMods
+       (where the main window is run from, with its dependency DLLs). Both get every build, through the
+       shared DeployToGame.targets. -->
+  <Target Name="CollectGameDeployFiles" BeforeTargets="DeployToGame" DependsOnTargets="PlaceMainGameLibrary">
+    <ItemGroup>
+      <GameDeployFile Include="$(TargetPath)" Destination="$(RocksmithInstallDir)\RSMods.exe" />
+      <GameDeployFile Include="$(TargetPath).config" Destination="$(RocksmithInstallDir)\RSMods.exe.config" />
+      <GameDeployFile Include="$(TargetDir)RocksmithAudioBridge.dll" Destination="$(RocksmithInstallDir)\RocksmithAudioBridge.dll" />
+      <GameDeployFile Include="$(TargetPath)" Destination="$(RocksmithInstallDir)\RSMods\RSMods.exe" />
+      <GameDeployFile Include="$(TargetPath).config" Destination="$(RocksmithInstallDir)\RSMods\RSMods.exe.config" />
+      <GameDeployFile Include="$(TargetDir)RocksmithAudioBridge.dll" Destination="$(RocksmithInstallDir)\RSMods\RocksmithAudioBridge.dll" />
+      <GuiSupportFile Include="$(TargetDir)**\*" Exclude="$(TargetDir)RSMods.exe;$(TargetDir)RSMods.exe.config;$(TargetDir)RocksmithAudioBridge.dll;$(TargetDir)**\*.pdb" />
+    </ItemGroup>
+  </Target>
+  <!-- Dependency DLLs and tools beside the main window's copy. Unchanged files are skipped, and a file a
+       running window still holds is left for the next build rather than failing this one. -->
+  <Target Name="DeployGuiSupportFiles" AfterTargets="DeployToGame" Condition="'$(DeployToGame)'=='true' And Exists('$(RocksmithInstallDir)\RSMods')">
+    <Copy SourceFiles="@(GuiSupportFile)" DestinationFiles="@(GuiSupportFile->'$(RocksmithInstallDir)\RSMods\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" ContinueOnError="true" />
+  </Target>
+  <Import Project="$(MSBuildThisFileDirectory)..\DeployToGame.targets" />
+  <Target Name="BuildWindowCapture" BeforeTargets="PrepareForBuild">
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(ProjectDir)BuildWindowCapture.ps1&quot; -OutputDirectory &quot;$(ProjectDir)Native\bin&quot;" />
+  </Target>
   <PropertyGroup>
-    <PostBuildEvent>xcopy "$(ProjectDir)lib\*.*" "$(TargetDir)" /Y /I /E
+    <PostBuildEvent Condition="'$(PostBuildEventUseInBuild)' != 'false'">xcopy "$(ProjectDir)lib\*.*" "$(TargetDir)" /Y /I /E
 if not exist "$(TargetDir)\CustomMods" mkdir "$(TargetDir)\CustomMods"
 
-if exist  "C:\Program Files (x86)\Steam\steamapps\common\Rocksmith2014\RSMods" xcopy "$(TargetDir)" "C:\Program Files (x86)\Steam\steamapps\common\Rocksmith2014\RSMods" /Y /I /E
 </PostBuildEvent>
   </PropertyGroup>
 </Project>

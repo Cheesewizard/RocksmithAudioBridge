@@ -1,4 +1,4 @@
-﻿using System.Windows.Forms;
+using System.Windows.Forms;
 using System.Collections.Generic;
 
 
@@ -29,7 +29,8 @@ namespace RSMods
             TooltipDictionary.Add(checkBox_RainbowStrings, "Experimental.\nHow Pro are you? This makes the players guitar strings constantly cycling through colors.");
             TooltipDictionary.Add(checkBox_RainbowNotes, "Experimental.\nHow Pro are you? This makes all the notes constantly cycle through colors.");
             TooltipDictionary.Add(checkBox_DropPedal, "Enables the in-game drop pedal. Changes require restarting Rocksmith.");
-            TooltipDictionary.Add(checkBox_DropPedalCustomOverlayColors, "Shows colour pickers for each Drop Pedal overlay text state. Colour changes are applied when Rocksmith reloads its mod settings.");
+            TooltipDictionary.Add(checkBox_AudioDiagnosticsOverlay, "Draws two lines bottom-left in game: input latency and path, the game's own output latency, a live signal meter and the packet rate.\nGreen = signal present, grey = idle, red = the input stream stalled. Applies on the next launch.");
+            TooltipDictionary.Add(checkBox_MonitorOutput, "Experimental diagnostic: logs what the game writes to its output stream so \"no sound\" can be split into game-side and device-side.\nKnown to hang Rocksmith before the profile screen on some setups. Leave off unless asked to turn it on.");
             TooltipDictionary.Add(checkBox_CustomColors, "Lets you define the string / note colors you want.\nSaves a normal set and a Colorblind mode set.");
             TooltipDictionary.Add(checkBox_RemoveLaneMarkers, "Removes the additional lane marker lines seen in the display.\nWhen used with No Loft, provides a cleaner Luma Key.");
             TooltipDictionary.Add(checkBox_ScreenShotScores, "We will automatically take a steam screenshot whenever you finish a song");
@@ -77,8 +78,6 @@ namespace RSMods
             TooltipDictionary.Add(checkBox_OverrideInputVolume, "Enable this to allow you to turn your guitar or bass up to 11!\nRocksmith sets what volume it wants to listen to your cable at.\nThis mod allows you to bypass that restriction by changing it to whatever you set.");
             TooltipDictionary.Add(listBox_AvailableInputDevices, "This is a list of your available microphones.\nPlease select the one you use in Rocksmith so you can override the maximum volume.");
             TooltipDictionary.Add(nUpDown_OverrideInputVolume, "Set this value from 0-100 to change how loud your guitar is in Rocksmith.\nDefault value in Rocksmith is 17.\nIt is recommended to keep this value below 50.\n0 does not mean no audio, as Rocksmith will bypass the volume if you set it to 0.");
-            TooltipDictionary.Add(comboBox_DropPedalEngine, "Automatic uses ASIO input shifting when available and Cable otherwise. Asio requires RS_ASIO and will not fall back. Cable never installs the ASIO input shifter. Changes require restarting Rocksmith.");
-
             // Misc
             TooltipDictionary.Add(groupBox_Songlist, "Custom names for the 6 \"SONG LISTS\" shown in game.");
             TooltipDictionary.Add(groupBox_Keybindings_MODS, "Set keybindings for the toggle on / off by keypress modifications.\nYou need to press ENTER after setting the key for it to be saved.");
@@ -182,7 +181,7 @@ namespace RSMods
 
             // Rocksmith Settings
             TooltipDictionary.Add(checkBox_Rocksmith_EnableMicrophone, "Check this box to enable singing.");
-            TooltipDictionary.Add(checkBox_Rocksmith_ExclusiveMode, "Check this box to give Rocksmith 2014 exclusive control of PC Audio.\nThis will cause Rocksmith to take over all audio, but will cause latency if turned off.");
+            TooltipDictionary.Add(checkBox_Rocksmith_ExclusiveMode, "Exclusive Mode gives lower playback (output) latency by taking direct control of your audio device.\nIMPORTANT: if you play through the Real Tone Cable (no audio interface / RS_ASIO), leave this UNCHECKED. The Cable's input cannot open in exclusive mode, so Rocksmith fails to detect it (error -9996). With an audio interface such as an M-Track / RS_ASIO, Exclusive Mode is fine.\nChanges take effect after restarting Rocksmith.");
             TooltipDictionary.Add(label_Rocksmith_LatencyBuffer, "This value allows you to adjust the number of audio buffers used in one area of the Rocksmith 2014 audio engine.\nA smaller value will use fewer buffers.\nFewer buffers mean lower latency, but increase the demands on your PC to avoid audio crackling.");
             TooltipDictionary.Add(checkBox_Rocksmith_ForceWDM, "Check this box if you've tried the fine tuning configuration options and still cannot get good audio latency or have audio issues you cannot resolve.\nThis will force the game to use the previous Windows mechanism to control your audio devices.\nIt can impose higher latency than the default system, but is a good fallback.");
             TooltipDictionary.Add(checkBox_Rocksmith_ForceDirextXSink, "Check this box if you've tried all other configuration options and still cannot get good audio.\nThis forces the game to use an old Windows mechanism to control your audio devices.\nIt will almost always impose high latency, but should allow you to run the game.\nUse this as your last option.");

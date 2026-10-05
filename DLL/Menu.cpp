@@ -2,7 +2,10 @@
 #include "Menu.hpp"
 #include "Mods/AudioDevices.hpp"
 #include "Mods/VoiceOverControl.hpp"
+#include "Mods/VolumeControl.hpp"
 #include "Mods/Midi.hpp"
+#include "Overlay/OverlayShell.hpp"
+#include "Overlay/OverlayUi.hpp"
 
 namespace Menu {
 	void GenerateTestingTextures(IDirect3DDevice9* pDevice) {
@@ -31,6 +34,10 @@ namespace Menu {
 	/// Renders the ImGui frame, including the main mod menu.
 	/// </summary>
 	void RenderImGuiMenu() {
+		// Rocksmith hides the OS cursor in-song, so draw a software cursor while a panel is open (only then,
+		// so gameplay is untouched otherwise). This is what makes the overlay clickable over the game.
+		ImGui::GetIO().MouseDrawCursor = Menu::menuEnabled || Menu::audioBridgeMenuEnabled;
+
 		ImGui_ImplDX9_NewFrame();
 		ImGui_ImplWin32_NewFrame();
 		ImGui::NewFrame();
@@ -44,12 +51,18 @@ namespace Menu {
 			ImGui::End();
 		}
 
+		// The Rocksmith Audio Bridge overlay (toggled with \). The toggle key, the WndProc input swallow and the
+		// cursor logic all key off audioBridgeMenuEnabled.
+		if (Menu::audioBridgeMenuEnabled)
+			Overlay::DrawShell(&Menu::audioBridgeMenuEnabled);
+
 		ImGui::EndFrame();
 		ImGui::Render();
 		ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
 
-		ImGui::CaptureKeyboardFromApp(false);
-		ImGui::CaptureMouseFromApp(false);
+		// Do not call CaptureKeyboardFromApp(false)/CaptureMouseFromApp(false) here: they force-clear
+		// io.WantCapture* every frame, and the WndProc relies on WantCaptureMouse / WantCaptureKeyboard to
+		// swallow panel input while ImGui owns it (see dllmain.cpp WndProc).
 	}
 
 	/// <summary>
@@ -76,6 +89,7 @@ namespace Menu {
 		ImGuiIO& io = ImGui::GetIO();
 		ImFont* font = io.Fonts->AddFontFromMemoryCompressedTTF(RobotoFont_data, RobotoFont_size, 20);
 		io.FontDefault = font;
+		Overlay::LoadFonts(io);   // overlay body/caption/heading/icon fonts; must precede the first NewFrame
 
 		// Hook WndProc (Keypress manager)
 		D3DDEVICE_CREATION_PARAMETERS d3dcp;
@@ -85,6 +99,7 @@ namespace Menu {
 
 		ImGui_ImplWin32_Init(D3DHooks::hThisWnd);
 		ImGui_ImplDX9_Init(pDevice);
+		Overlay::CreateTextures(pDevice);   // overlay header logo
 		ImGui::GetIO().ImeWindowHandle = D3DHooks::hThisWnd;
 		ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 

@@ -54,6 +54,15 @@ namespace ObjectUtil {
 
 		for (auto child : children)
 		{
+			// The children snapshot goes stale mid-walk: the game frees objects on song
+			// load from another thread, so a non-null child can dangle by the time we get
+			// here (crashed at the className read below). Guard the child pointer itself,
+			// not just its className.
+			if (!child || MemUtil::IsBadReadPtr(child))
+			{
+				continue;
+			}
+
 			if (!child->className || MemUtil::IsBadReadPtr(child->className))
 			{
 				continue;

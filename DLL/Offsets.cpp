@@ -55,6 +55,8 @@ void Offsets::Initialize() {
 	ptr_AdvancedDisplayCrash = { {0x0091FB73, baseHandle + 0x0051E343} };				// Code | 8a 51 04 57 8b 7e 0c 88 10 2b 01 33 d2 (first opcode)
 	ptr_AdvancedDisplayCrashJmpBck = { {0x0091FB7A, baseHandle + 0x0051E34A} };			// Code | 8a 51 04 57 8b 7e 0c 88 10 2b 01 33 d2 (fourth opcode)
 	ptr_PortAudioInCrash = { {0x00C43AF5, baseHandle + 0x00842C25} };		// Code | 8b 85 c8 fe ff ff 80 b8 df 1b 00 00 00 (two opcodes before this - cmp)
+	func_PortAudioOpenStream = { {0x00E70550, 0} };								// Code | PortAudio Pa_OpenStream entry used by SoundInputPortAudio.
+	func_PortAudioGetClosestFormat = { {0x00E71A70, 0} };						// Code | Bundled PortAudio WASAPI GetClosestFormat entry.
 	ptr_AdditionalAudioDevicesCrash = { { 0x00E7CF70, baseHandle + 0x00A7BFD0 } };   // Code 8b 8d c4 fd ff ff 8b 1c 81
 	ptr_ModdedPtrCrashFix = { {0x0001C640, 0x0001C8A0} };		// Code | 89 46 1c 89 46 2c 89 7e 28 (MOV for ForceSuccess)
 	ptr_IsWindowInFocus = { {0x1251A78, baseHandle + 0x00E52A78} };						// Static Memory | 00 00 00 80 01 00 00 00 04 00 00 00 01 00 00 00 (second variable)

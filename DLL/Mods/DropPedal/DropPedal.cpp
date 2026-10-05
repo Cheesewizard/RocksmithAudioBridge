@@ -161,9 +161,7 @@ namespace
 
 void DropPedal::LoadSettings()
 {
-	DropPedalState::Configure(
-		Settings::ReturnSettingValue("EnableDropPedal"),
-		Settings::ReturnSettingValue("DropPedalEngine"));
+	DropPedalState::Configure(Settings::ReturnSettingValue("EnableDropPedal"));
 	Overlay::LoadSettings();
 }
 
@@ -174,12 +172,7 @@ bool DropPedal::IsConfiguredEnabled()
 
 bool DropPedal::ShouldInstallInputHooks()
 {
-	return DropPedalState::IsConfiguredEnabled() && !DropPedalState::IsCableEngine();
-}
-
-bool DropPedal::RequiresInputShifter()
-{
-	return DropPedalState::IsConfiguredEnabled() && DropPedalState::IsAsioEngine();
+	return DropPedalState::IsConfiguredEnabled();
 }
 
 void DropPedal::ReportInputShifterUnavailable()
@@ -191,10 +184,6 @@ void DropPedal::InstallInputHooks()
 {
 	if (!ShouldInstallInputHooks()) return;
 
-	Audio::AsioHook::SetChannelOverride(GetPlayerIndex(Player::One),
-		Settings::GetModSetting("DropPedalPlayer1AsioChannel"));
-	Audio::AsioHook::SetChannelOverride(GetPlayerIndex(Player::Two),
-		Settings::GetModSetting("DropPedalPlayer2AsioChannel"));
 	Audio::AsioHook::Install();
 	Audio::AsioHook::SetProcessor(GetPlayerIndex(Player::One), &playerOneInputPitchShifter);
 	Audio::AsioHook::SetProcessor(GetPlayerIndex(Player::Two), &playerTwoInputPitchShifter);
@@ -208,6 +197,43 @@ void DropPedal::UpdateInputShifterPitch(Player player)
 
 	const int targetSemitones = IsEnabled() ? GetTargetSemitones(player) : 0;
 	GetInputPitchShifter(player).SetSemitones(targetSemitones);
+}
+
+int DropPedal::GetAppliedInputShiftSemitones()
+{
+	// The semitones the input shifter is CURRENTLY applying to the Player 1 route's
+	// samples: the divergence between the player's physical pitch and the audio every
+	// post-processing consumer observes (the raw pitch verifier must measure in the
+	// shifted frame or it vetoes correct notes). 0 whenever the shifter is inactive or
+	// the pedal is off.
+	if (!ShouldInstallInputHooks() || !IsEnabled()) return 0;
+	if (!DropPedalHooks::IsInputShifterActive()) return 0;
+	return GetTargetSemitones(Player::One);
+}
+
+bool DropPedal::SetInputPitchDetectionEnabled(bool enabled)
+{
+	if (enabled && (!ShouldInstallInputHooks()
+		|| !Audio::AsioHook::IsInputConfigured(GetPlayerIndex(Player::One))
+		|| !Audio::AsioHook::IsInputReady(GetPlayerIndex(Player::One))))
+	{
+		LOG_ERROR("Note by Note requires an active Player 1 input route for live pitch detection." << std::endl);
+		return false;
+	}
+
+	GetInputPitchShifter(Player::One).SetPitchDetectionEnabled(enabled);
+	return true;
+}
+
+bool DropPedal::TryGetDetectedInputMidi(Player player, int& midi)
+{
+	if (!GetInputPitchShifter(player).TryGetDetectedMidi(midi)) return false;
+
+	if (GetPitchMode() != PitchMode::Off)
+	{
+		midi += GetTargetSemitones(player);
+	}
+	return midi >= 0 && midi < 128;
 }
 
 bool DropPedal::IsEnabled()
@@ -380,6 +406,53 @@ int DropPedal::GetShiftSemitones()
 	return DropPedalState::GetTargetSemitones(Player::One);
 }
 
+// The shift that would bring the player's PHYSICAL guitar exactly into the chart's
+// authored tuning: chart reference minus the player's base. This is the only shift at
+// which the retuned input is in tune WITH THE SONG. It is computed live from the chart
+// tuning (tuner or in-song arrangement) and the base, so it follows the song and the
+// pedal dynamically without touching any dialed setting. Returns false when the chart
+// tuning cannot be read (menus, tuner still populating) so callers can fall back rather
+// than force a spurious miss. Used to grade Note by Note against the song rather than
+// against wherever the dialed shift has detuned the input to (dialed == this when the
+// pedal is set correctly; they diverge only when the player is genuinely out of tune).
+bool DropPedal::TryGetChartMatchShiftSemitones(int& shiftSemitones)
+{
+	int stringTunings[6];
+	if (!TryReadChartTuning(stringTunings)) return false;
+
+	for (const int stringTuning : stringTunings)
+	{
+		if (stringTuning < MIN_CHART_TUNING_SEMITONES
+			|| stringTuning > MAX_CHART_TUNING_SEMITONES)
+		{
+			return false;
+		}
+	}
+
+	const int reference = GetChartReference(stringTunings);
+	shiftSemitones = reference - DropPedalState::GetBaseTuningSemitones(Player::One);
+	return true;
+}
+
+bool DropPedal::TryGetPhysicalOpenStringMidi(int stringIndex, int& midi)
+{
+	static constexpr int OPEN_MIDI[] = { 40, 45, 50, 55, 59, 64 };
+	midi = -1;
+	if (stringIndex < 0 || stringIndex >= 6) return false;
+	int stringTunings[6];
+	if (!TryReadChartTuning(stringTunings)) return false;
+	for (const int tuning : stringTunings)
+	{
+		if (tuning < MIN_CHART_TUNING_SEMITONES || tuning > MAX_CHART_TUNING_SEMITONES) return false;
+	}
+	midi = OPEN_MIDI[stringIndex] + stringTunings[stringIndex];
+	if (GetPitchMode() != PitchMode::Off)
+	{
+		midi += DropPedalState::GetBaseTuningSemitones(Player::One) - GetChartReference(stringTunings);
+	}
+	return true;
+}
+
 std::string DropPedal::GetTuningName(Player player)
 {
 	return DropPedalState::GetTuningName(player);
@@ -482,38 +555,21 @@ bool DropPedal::IsInputShifterActive()
 	return DropPedalState::IsConfiguredEnabled() && DropPedalHooks::IsInputShifterActive();
 }
 
+uint32_t DropPedal::GetInputShifterLatencyFrames()
+{
+	if (!IsInputShifterActive() || !IsEnabled()) return 0;
+	// The live tap distance, not the fixed nominal figure: it grows with the shift amount
+	// and the note's period, which is what a player feels.
+	return static_cast<uint32_t>(GetInputPitchShifter(Player::One).GetLiveDelayFrames() + 0.5f);
+}
+
 bool DropPedal::IsPlayerShiftAvailable(Player player)
 {
 	if (player == Player::One) return true;
 
-	if (!IsInputShifterActive())
-	{
-		return DropPedalState::IsConfiguredEnabled()
-			&& DropPedalHooks::IsCableAttributionActive();
-	}
-
 	const size_t routeIndex = GetPlayerIndex(player);
 	return Audio::AsioHook::IsInputConfigured(routeIndex)
 		&& Audio::AsioHook::IsInputReady(routeIndex);
-}
-
-bool DropPedal::HasLivePedalTone(Player player)
-{
-	return DropPedalState::IsConfiguredEnabled()
-		&& DropPedalHooks::HasLivePlayerPedalTone(player);
-}
-
-bool DropPedal::ConsumeInputShifterTransitionFailure()
-{
-	return DropPedalState::IsConfiguredEnabled()
-		&& DropPedalHooks::ConsumeInputShifterTransitionFailure();
-}
-
-unsigned long long DropPedal::GetEngineNoticeTick()
-{
-	return DropPedalState::IsConfiguredEnabled()
-		? DropPedalHooks::GetEngineNoticeTick()
-		: 0;
 }
 
 void DropPedal::Poll()
@@ -521,10 +577,4 @@ void DropPedal::Poll()
 	if (!DropPedalState::IsConfiguredEnabled()) return;
 
 	DropPedalHooks::Poll();
-
-	if (!DropPedalHooks::IsInputShifterActive())
-	{
-		DropPedalInput::PollPendingPitchPush();
-		DropPedalHooks::LogPendingOverrides();
-	}
 }

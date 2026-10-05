@@ -198,7 +198,10 @@ inline std::vector<ThiccMesh> fingerprintMeshes{ { 32, 2, 4, 0, 0, 4, 2, 12, 4 }
 #define NOTE_TAILS (Stride == 12)
 #define POSSIBLE_HEADSTOCKS (Stride == 44 || Stride == 56 || Stride == 60 || Stride == 68 || Stride == 76 || Stride == 84)
 #define POSSIBLE_SKYLINE (Stride == 16)
-#define SHOW_TEXTURE oDrawIndexedPrimitive(pDevice, PrimType, BaseVertexIndex, MinVertexIndex, NumVertices, StartIndex, PrimCount)
+// Suppression is gated here, at the single point every drawing exit of Hook_DIP passes,
+// so a suppressed draw still runs every observation and probe dispatch above it. An early
+// return would starve the Note by Note controller of observations and release its hold.
+#define SHOW_TEXTURE (D3DHooks::ShouldSuppressDrawBySignature(pDevice, Stride, NumVertices, PrimCount) ? (D3D_OK) : oDrawIndexedPrimitive(pDevice, PrimType, BaseVertexIndex, MinVertexIndex, NumVertices, StartIndex, PrimCount))
 #define REMOVE_TEXTURE (D3D_OK)
 
 /*------------------------ CRC Calculation --------------------------------------- */

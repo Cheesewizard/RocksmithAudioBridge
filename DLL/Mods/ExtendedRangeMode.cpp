@@ -28,6 +28,25 @@ uintptr_t GetStringColor(uintptr_t stringnum, int state) {
 	return currentStringColor;
 }
 
+bool ERMode::TryGetActiveStringColor(int stringIndex, RSColor& color)
+{
+	if (stringIndex < 0 || stringIndex >= 6) return false;
+	__try
+	{
+		const auto address = GetStringColor(stringIndex, Enabled);
+		if (address == 0) return false;
+		color = *reinterpret_cast<const RSColor*>(address);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		return false;
+	}
+	return std::isfinite(color.r) && std::isfinite(color.g) && std::isfinite(color.b)
+		&& color.r >= 0.0f && color.r <= 1.0f
+		&& color.g >= 0.0f && color.g <= 1.0f
+		&& color.b >= 0.0f && color.b <= 1.0f;
+}
+
 /// <summary>
 /// Store backup of original string color.
 /// </summary>

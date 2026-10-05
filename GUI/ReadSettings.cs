@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using RSMods.Util;
 
 #pragma warning disable IDE0052
@@ -7,6 +7,20 @@ namespace RSMods
 {
     class ReadSettings
     {
+		public const string NOTE_BY_NOTE_CUSTOM_COLOURS_IDENTIFIER = "NoteByNoteCustomColours = ";
+		public const string NOTE_BY_NOTE_DETECTION_OVERLAY_IDENTIFIER = "NoteByNoteDetectionOverlay = ";
+		public const string NOTE_BY_NOTE_UI_SIZE_IDENTIFIER = "NoteByNoteUiSize = ";
+		public const string NOTE_BY_NOTE_TARGET_SIZE_IDENTIFIER = "NoteByNoteTargetSize = ";
+		public const string NOTE_BY_NOTE_TARGET_POSITION_IDENTIFIER = "NoteByNoteTargetPosition = ";
+		public const string NOTE_BY_NOTE_LINE_SPACING_IDENTIFIER = "NoteByNoteLineSpacing = ";
+		public const string NOTE_BY_NOTE_READOUT_PLACEMENT_IDENTIFIER = "NoteByNoteReadoutPlacement = ";
+		public const string NOTE_BY_NOTE_TARGET_PLACEMENT_IDENTIFIER = "NoteByNoteTargetPlacement = ";
+		public const string NOTE_BY_NOTE_TARGET_STYLE_IDENTIFIER = "NoteByNoteTargetStyle = ";
+		public const string NOTE_BY_NOTE_NEUTRAL_COLOR_IDENTIFIER = "NoteByNoteNeutralColor = ";
+		public const string NOTE_BY_NOTE_CONFIRMED_COLOR_IDENTIFIER = "NoteByNoteConfirmedColor = ";
+		public const string NOTE_BY_NOTE_PARTIAL_COLOR_IDENTIFIER = "NoteByNotePartialColor = ";
+		public const string NOTE_BY_NOTE_REJECTED_COLOR_IDENTIFIER = "NoteByNoteRejectedColor = ";
+
         #region Setup Variables
         private static string
                              // Song Lists (ones that come without modifying the profile).
@@ -20,7 +34,7 @@ namespace RSMods
                              ToggleLoftKey, ShowSongTimerKey, ForceReEnumerationKey, RainbowStringsKey, RainbowNotesKey,
                              RemoveLyricsKey, RRSpeedKey, TuningOffsetKey, ToggleExtendedRangeKey, LoopStartKey, LoopEndKey,
                              RewindKey, DropPedalPitchDownKey, DropPedalPitchUpKey, DropPedalToggleKey,
-                             DropPedalBaseTuningKey,
+                             DropPedalBaseTuningKey, RecordingHotkey,
 
                              // Audio Key Bindings
                              MasterVolumeKey, SongVolumeKey, Player1VolumeKey, Player2VolumeKey, MicrophoneVolumeKey, VoiceOverVolumeKey, SFXVolumeKey, DisplayMixerKey, MutePlayer1Key, MutePlayer2Key,
@@ -33,9 +47,10 @@ namespace RSMods
                              MidiAutoTuning, MidiAutoTuningDevice, MidiInDevice, MidiAutoTuningWhen, MidiSoftwareSemitoneTriggers, MidiSoftwareSemitoneSettings, MidiSoftwareTrueTuningTriggers, MidiSoftwareTrueTuningSettings, ChordsMode,
                              RiffRepeaterAboveHundred, ShowCurrentNoteOnScreen, OnScreenFont, OnScreenFontSize, ProfileToLoad, ShowSongTimerWhen, ShowSelectedVolumeWhen, SecondaryMonitor, RemoveSongPreviews, OverrideInputVolumeEnabled, OverrideInputVolumeDevice,
                              AllowAudioInBackground, BypassTwoRTCMessageBox, LinearRiffRepeater, UseAlternativeOutputSampleRate, AllowLooping, AllowRewind, FixOculusCrash, FixBrokenTones, UseCustomNSPTimer, DisplayCurrentAccuracy, PreventMidSongPause, RemoveFingerprints,
-                             DropPedalEnabled, DropPedalEngine, DropPedalCustomOverlayColors,
+                             DropPedalEnabled, DropPedalCustomOverlayColors,
                              DropPedalOverlayDownColor, DropPedalOverlayUpColor, DropPedalOverlayStatusColor,
                              DropPedalPlayer1AsioChannel, DropPedalPlayer2AsioChannel,
+							 CableForPlayerTwo, MonitorOutput, AudioDiagnosticsOverlay,
 
 
                              // String Colors
@@ -48,7 +63,7 @@ namespace RSMods
 
                              // Mod Settings
                              ExtendedRangeTuning, CheckForNewSongInterval, RiffRepeaterSpeedInterval, TuningPedal, MidiTuningOffset,
-                             VolumeControlInterval, SecondaryMonitorXPosition, SecondaryMonitorYPosition, OverrideInputVolume, AlternativeOutputSampleRate, LoopingLeadUp,
+                             VolumeControlInterval, SecondaryMonitorXPosition, SecondaryMonitorYPosition, OverrideInputVolume, AsioInputGain, NoiseGateThreshold, CompressorStrength, HumFilter, RocksmithGateOverride, RocksmithGateThreshold, AudioBridgeLimiter, AudioBridgeLimiterLevel, AlternativeOutputSampleRate, LoopingLeadUp,
                              RewindBy, RewindLeadup, CustomNSPTimeLimit,
 
                              // Guitar Speak
@@ -103,6 +118,7 @@ namespace RSMods
             DropPedalPitchUpKeyIdentifier       = "DropPedalPitchUpKey = ",
             DropPedalToggleKeyIdentifier        = "DropPedalToggleKey = ",
             DropPedalBaseTuningKeyIdentifier    = "DropPedalBaseTuningKey = ",
+			RecordingHotkeyIdentifier               = "RecordingHotkey = ",
 
             // Audio Keybindings
             MasterVolumeKeyIdentifier           = "MasterVolumeKey = ",
@@ -176,13 +192,16 @@ namespace RSMods
             DisplayCurrentAccuracyIdentifier            = "DisplayCurrentAccuracy = ",
             PreventMidSongPauseIdentifier               = "PreventMidSongPause = ",
             DropPedalEnabledIdentifier                   = "EnableDropPedal = ",
-            DropPedalEngineIdentifier                    = "Engine = ",
             DropPedalCustomOverlayColorsIdentifier       = "CustomOverlayColors = ",
+            DropPedalShowOverlayIdentifier               = "ShowOverlay = ",
             DropPedalOverlayDownColorIdentifier          = "OverlayDownColor = ",
             DropPedalOverlayUpColorIdentifier            = "OverlayUpColor = ",
             DropPedalOverlayStatusColorIdentifier        = "OverlayStatusColor = ",
             DropPedalPlayer1AsioChannelIdentifier        = "Player1AsioChannel = ",
             DropPedalPlayer2AsioChannelIdentifier        = "Player2AsioChannel = ",
+			CableForPlayerTwoIdentifier                  = "CableForPlayerTwo = ",
+			MonitorOutputIdentifier                      = "MonitorOutput = ",
+            AudioDiagnosticsOverlayIdentifier            = "AudioDiagnosticsOverlay = ",
 
                 // String Colors (Normal {N} & Colorblind {CB})
                 // Normal String Colors
@@ -228,6 +247,14 @@ namespace RSMods
             SecondaryMonitorYPositionIdentifier     = "SecondaryMonitorYPosition = ",
             SeparateNoteColorsModeIdentifier        = "SeparateNoteColorsMode = ",
             OverrideInputVolumeIdentifier           = "OverrideInputVolume = ",
+            AsioInputGainIdentifier                 = "AsioInputGain = ",
+            NoiseGateThresholdIdentifier            = "NoiseGateThreshold = ",
+            CompressorStrengthIdentifier            = "CompressorStrength = ",
+            HumFilterIdentifier                     = "HumFilter = ",
+            RocksmithGateOverrideIdentifier         = "RocksmithGateOverride = ",
+            RocksmithGateThresholdIdentifier        = "RocksmithGateThreshold = ",
+            AudioBridgeLimiterIdentifier            = "AudioBridgeLimiter = ",
+            AudioBridgeLimiterLevelIdentifier       = "AudioBridgeLimiterLevel = ",
             AlternativeOutputSampleRateIdentifier   = "AlternativeOutputSampleRate = ",
             LoopingLeadUpIdentifier                 = "LoopingLeadUp = ",
             RewindByIdentifier                      = "RewindBy = ",
@@ -298,6 +325,14 @@ namespace RSMods
             return setting;
         }
 
+        private static string NormalizeIniLine(string line)
+        {
+            int equals = line.IndexOf('=');
+            if (equals <= 0 || line.StartsWith("[") || line.StartsWith(";"))
+                return line;
+            return line.Substring(0, equals).TrimEnd() + " = " + line.Substring(equals + 1).TrimStart();
+        }
+
         private static bool IdentifierIsFound(string currentLine, string settingToFind, string identifierToGrab) => currentLine.Contains(settingToFind) && settingToFind == identifierToGrab;
 
         private static string DefaultSettingValue(string identifierToGrab)
@@ -309,11 +344,11 @@ namespace RSMods
             if (identifierToGrab == DropPedalToggleKeyIdentifier)
                 return "VK_F7";
             if (identifierToGrab == DropPedalBaseTuningKeyIdentifier)
-                return "VK_F9";
+                return "VK_OEM_2";   // '/', beside the pitch keys , and . (no F8-F12 defaults)
             if (identifierToGrab == DropPedalEnabledIdentifier)
-                return "off";
-            if (identifierToGrab == DropPedalEngineIdentifier)
-                return "automatic";
+                return "on";
+            if (identifierToGrab == DropPedalShowOverlayIdentifier)
+                return "on";
             if (identifierToGrab == DropPedalCustomOverlayColorsIdentifier)
                 return "off";
             if (identifierToGrab == DropPedalOverlayDownColorIdentifier)
@@ -326,9 +361,69 @@ namespace RSMods
                 return "-1";
             if (identifierToGrab == DropPedalPlayer2AsioChannelIdentifier)
                 return "-1";
-
+			if (identifierToGrab == RecordingHotkeyIdentifier)
+				return "VK_F6";
+			if (identifierToGrab == CableForPlayerTwoIdentifier)
+				return "off";
+            if (identifierToGrab == MonitorOutputIdentifier)
+                return "off";
+            if (identifierToGrab == AudioDiagnosticsOverlayIdentifier)
+                return "on";
+			if (identifierToGrab == NOTE_BY_NOTE_CUSTOM_COLOURS_IDENTIFIER) return "off";
+            if (identifierToGrab == NOTE_BY_NOTE_DETECTION_OVERLAY_IDENTIFIER) return "on";
+			if (identifierToGrab == NOTE_BY_NOTE_UI_SIZE_IDENTIFIER) return "100";
+			if (identifierToGrab == NOTE_BY_NOTE_TARGET_SIZE_IDENTIFIER) return "150";
+			if (identifierToGrab == NOTE_BY_NOTE_TARGET_POSITION_IDENTIFIER) return "Left";
+			if (identifierToGrab == NOTE_BY_NOTE_LINE_SPACING_IDENTIFIER) return "100";
+			if (identifierToGrab == NOTE_BY_NOTE_READOUT_PLACEMENT_IDENTIFIER) return "Default";
+			if (identifierToGrab == NOTE_BY_NOTE_TARGET_PLACEMENT_IDENTIFIER) return "Default";
+			if (identifierToGrab == NOTE_BY_NOTE_TARGET_STYLE_IDENTIFIER) return "Detailed";
+            if (identifierToGrab == NOTE_BY_NOTE_NEUTRAL_COLOR_IDENTIFIER) return "FFFFFF";
+            if (identifierToGrab == NOTE_BY_NOTE_CONFIRMED_COLOR_IDENTIFIER) return "55DD77";
+            if (identifierToGrab == NOTE_BY_NOTE_PARTIAL_COLOR_IDENTIFIER) return "FFAA44";
+            if (identifierToGrab == NOTE_BY_NOTE_REJECTED_COLOR_IDENTIFIER) return "FF5555";
             return string.Empty;
         }
+
+        // RSMods.ini values the audio bridge process owns and writes one line at a time (its
+        // WriteBridgeSetting). The main window's full-file save must not clobber them, so it re-reads
+        // exactly this list on activation (MainForm.SyncBridgeOwnedSettingsFromDisk). A new bridge-owned
+        // setting is added HERE and nowhere else; the bridge asserts every write is on this list.
+        public static readonly string[] BridgeOwnedIdentifiers =
+        {
+            CableForPlayerTwoIdentifier,
+            AsioInputGainIdentifier,
+            NoiseGateThresholdIdentifier,
+            CompressorStrengthIdentifier,
+			HumFilterIdentifier,
+			RocksmithGateOverrideIdentifier,
+			RocksmithGateThresholdIdentifier,
+            AudioBridgeLimiterIdentifier,
+            AudioBridgeLimiterLevelIdentifier,
+            RecordingHotkeyIdentifier,
+			MonitorOutputIdentifier,
+			AudioDiagnosticsOverlayIdentifier,
+			NOTE_BY_NOTE_DETECTION_OVERLAY_IDENTIFIER,
+			// Also written by the in-game overlay (Note by Note page, HUD layout editor, Drop Pedal page). Without them
+			// here, a save from this window after the game changed them would revert them to this window's old copy.
+			NOTE_BY_NOTE_CUSTOM_COLOURS_IDENTIFIER,
+			NOTE_BY_NOTE_UI_SIZE_IDENTIFIER,
+			NOTE_BY_NOTE_TARGET_SIZE_IDENTIFIER,
+			NOTE_BY_NOTE_TARGET_POSITION_IDENTIFIER,
+			NOTE_BY_NOTE_LINE_SPACING_IDENTIFIER,
+			NOTE_BY_NOTE_READOUT_PLACEMENT_IDENTIFIER,
+			NOTE_BY_NOTE_TARGET_PLACEMENT_IDENTIFIER,
+			NOTE_BY_NOTE_TARGET_STYLE_IDENTIFIER,
+			NOTE_BY_NOTE_NEUTRAL_COLOR_IDENTIFIER,
+			NOTE_BY_NOTE_CONFIRMED_COLOR_IDENTIFIER,
+			NOTE_BY_NOTE_PARTIAL_COLOR_IDENTIFIER,
+			NOTE_BY_NOTE_REJECTED_COLOR_IDENTIFIER,
+			DropPedalShowOverlayIdentifier,
+			DropPedalCustomOverlayColorsIdentifier,
+			DropPedalOverlayDownColorIdentifier,
+			DropPedalOverlayUpColorIdentifier,
+			DropPedalOverlayStatusColorIdentifier,
+		};
 
         private static void VerifySettingsINI()
         {
@@ -341,8 +436,11 @@ namespace RSMods
         public static string ProcessSettings(string identifierToGrab)
         {
             VerifySettingsINI();
-            foreach (string currentLine in File.ReadLines(Path.Combine(GenUtil.GetRSDirectory(), "RSMods.ini")))
+            foreach (string rawLine in File.ReadLines(Path.Combine(GenUtil.GetRSDirectory(), "RSMods.ini")))
             {
+                // The in-game overlay saves with WritePrivateProfileString, which writes "Key=Value" (or keeps "Key =Value"),
+                // while every identifier here is "Key = ". Normalise so those edits are found instead of reverting to defaults.
+                string currentLine = NormalizeIniLine(rawLine);
                 #region Song Lists
                 // Song Lists (the ones that come with the game by default).
 
@@ -424,6 +522,8 @@ namespace RSMods
                     return FillSettingVariable(DropPedalToggleKeyIdentifier, SettingType.VKEY, currentLine, out DropPedalToggleKey);
                 if (IdentifierIsFound(currentLine, DropPedalBaseTuningKeyIdentifier, identifierToGrab))
                     return FillSettingVariable(DropPedalBaseTuningKeyIdentifier, SettingType.VKEY, currentLine, out DropPedalBaseTuningKey);
+				if (IdentifierIsFound(currentLine, RecordingHotkeyIdentifier, identifierToGrab))
+					return FillSettingVariable(RecordingHotkeyIdentifier, SettingType.VKEY, currentLine, out RecordingHotkey);
                 #endregion
                 #region Audio Keybindings
                 // Audio Keybindings
@@ -569,23 +669,50 @@ namespace RSMods
                     return FillSettingVariable(PreventMidSongPauseIdentifier, SettingType.ON_OFF, currentLine, out PreventMidSongPause);
                 if (IdentifierIsFound(currentLine, RemoveFingerprintsIdentifier, identifierToGrab))
                     return FillSettingVariable(RemoveFingerprintsIdentifier, SettingType.ON_OFF, currentLine, out RemoveFingerprints);
+				if (IdentifierIsFound(currentLine, NOTE_BY_NOTE_CUSTOM_COLOURS_IDENTIFIER, identifierToGrab))
+					return FillSettingVariable(NOTE_BY_NOTE_CUSTOM_COLOURS_IDENTIFIER, SettingType.ON_OFF, currentLine, out var noteByNoteCustomColours);
+                if (IdentifierIsFound(currentLine, NOTE_BY_NOTE_DETECTION_OVERLAY_IDENTIFIER, identifierToGrab))
+                    return FillSettingVariable(NOTE_BY_NOTE_DETECTION_OVERLAY_IDENTIFIER, SettingType.ON_OFF, currentLine, out var noteByNoteDetectionOverlay);
+				if (IdentifierIsFound(currentLine, NOTE_BY_NOTE_UI_SIZE_IDENTIFIER, identifierToGrab))
+					return FillSettingVariable(NOTE_BY_NOTE_UI_SIZE_IDENTIFIER, SettingType.STRING, currentLine, out var noteByNoteUiSize);
+				if (IdentifierIsFound(currentLine, NOTE_BY_NOTE_TARGET_SIZE_IDENTIFIER, identifierToGrab))
+					return FillSettingVariable(NOTE_BY_NOTE_TARGET_SIZE_IDENTIFIER, SettingType.STRING, currentLine, out var noteByNoteTargetSize);
+				if (IdentifierIsFound(currentLine, NOTE_BY_NOTE_TARGET_POSITION_IDENTIFIER, identifierToGrab))
+					return FillSettingVariable(NOTE_BY_NOTE_TARGET_POSITION_IDENTIFIER, SettingType.STRING, currentLine, out var noteByNoteTargetPosition);
+				if (IdentifierIsFound(currentLine, NOTE_BY_NOTE_LINE_SPACING_IDENTIFIER, identifierToGrab))
+					return FillSettingVariable(NOTE_BY_NOTE_LINE_SPACING_IDENTIFIER, SettingType.STRING, currentLine, out var noteByNoteLineSpacing);
+				if (IdentifierIsFound(currentLine, NOTE_BY_NOTE_READOUT_PLACEMENT_IDENTIFIER, identifierToGrab))
+					return FillSettingVariable(NOTE_BY_NOTE_READOUT_PLACEMENT_IDENTIFIER, SettingType.STRING, currentLine, out var noteByNoteReadoutPlacement);
+				if (IdentifierIsFound(currentLine, NOTE_BY_NOTE_TARGET_PLACEMENT_IDENTIFIER, identifierToGrab))
+					return FillSettingVariable(NOTE_BY_NOTE_TARGET_PLACEMENT_IDENTIFIER, SettingType.STRING, currentLine, out var noteByNoteTargetPlacement);
+				if (IdentifierIsFound(currentLine, NOTE_BY_NOTE_TARGET_STYLE_IDENTIFIER, identifierToGrab))
+					return FillSettingVariable(NOTE_BY_NOTE_TARGET_STYLE_IDENTIFIER, SettingType.STRING, currentLine, out var noteByNoteTargetStyle);
+                if (IdentifierIsFound(currentLine, NOTE_BY_NOTE_NEUTRAL_COLOR_IDENTIFIER, identifierToGrab))
+                    return FillSettingVariable(NOTE_BY_NOTE_NEUTRAL_COLOR_IDENTIFIER, SettingType.STRING, currentLine, out var noteByNoteNeutralColor);
+                if (IdentifierIsFound(currentLine, NOTE_BY_NOTE_CONFIRMED_COLOR_IDENTIFIER, identifierToGrab))
+                    return FillSettingVariable(NOTE_BY_NOTE_CONFIRMED_COLOR_IDENTIFIER, SettingType.STRING, currentLine, out var noteByNoteConfirmedColor);
+                if (IdentifierIsFound(currentLine, NOTE_BY_NOTE_PARTIAL_COLOR_IDENTIFIER, identifierToGrab))
+                    return FillSettingVariable(NOTE_BY_NOTE_PARTIAL_COLOR_IDENTIFIER, SettingType.STRING, currentLine, out var noteByNotePartialColor);
+                if (IdentifierIsFound(currentLine, NOTE_BY_NOTE_REJECTED_COLOR_IDENTIFIER, identifierToGrab))
+                    return FillSettingVariable(NOTE_BY_NOTE_REJECTED_COLOR_IDENTIFIER, SettingType.STRING, currentLine, out var noteByNoteRejectedColor);
                 if (IdentifierIsFound(currentLine, DropPedalEnabledIdentifier, identifierToGrab))
                     return FillSettingVariable(DropPedalEnabledIdentifier, SettingType.ON_OFF, currentLine, out DropPedalEnabled);
-                if (IdentifierIsFound(currentLine, DropPedalEngineIdentifier, identifierToGrab))
-                    return FillSettingVariable(DropPedalEngineIdentifier, SettingType.STRING, currentLine, out DropPedalEngine);
+				if (IdentifierIsFound(currentLine, CableForPlayerTwoIdentifier, identifierToGrab))
+					return FillSettingVariable(CableForPlayerTwoIdentifier, SettingType.ON_OFF, currentLine, out CableForPlayerTwo);
+                if (IdentifierIsFound(currentLine, MonitorOutputIdentifier, identifierToGrab))
+                    return FillSettingVariable(MonitorOutputIdentifier, SettingType.ON_OFF, currentLine, out MonitorOutput);
+                if (IdentifierIsFound(currentLine, AudioDiagnosticsOverlayIdentifier, identifierToGrab))
+                    return FillSettingVariable(AudioDiagnosticsOverlayIdentifier, SettingType.ON_OFF, currentLine, out AudioDiagnosticsOverlay);
                 if (IdentifierIsFound(currentLine, DropPedalCustomOverlayColorsIdentifier, identifierToGrab))
                     return FillSettingVariable(DropPedalCustomOverlayColorsIdentifier, SettingType.ON_OFF, currentLine, out DropPedalCustomOverlayColors);
+                if (IdentifierIsFound(currentLine, DropPedalShowOverlayIdentifier, identifierToGrab))
+                    return FillSettingVariable(DropPedalShowOverlayIdentifier, SettingType.ON_OFF, currentLine, out var dropPedalShowOverlay);
                 if (IdentifierIsFound(currentLine, DropPedalOverlayDownColorIdentifier, identifierToGrab))
                     return FillSettingVariable(DropPedalOverlayDownColorIdentifier, SettingType.STRING, currentLine, out DropPedalOverlayDownColor);
                 if (IdentifierIsFound(currentLine, DropPedalOverlayUpColorIdentifier, identifierToGrab))
                     return FillSettingVariable(DropPedalOverlayUpColorIdentifier, SettingType.STRING, currentLine, out DropPedalOverlayUpColor);
                 if (IdentifierIsFound(currentLine, DropPedalOverlayStatusColorIdentifier, identifierToGrab))
                     return FillSettingVariable(DropPedalOverlayStatusColorIdentifier, SettingType.STRING, currentLine, out DropPedalOverlayStatusColor);
-                if (IdentifierIsFound(currentLine, DropPedalPlayer1AsioChannelIdentifier, identifierToGrab))
-                    return FillSettingVariable(DropPedalPlayer1AsioChannelIdentifier, SettingType.STRING, currentLine, out DropPedalPlayer1AsioChannel);
-                if (IdentifierIsFound(currentLine, DropPedalPlayer2AsioChannelIdentifier, identifierToGrab))
-                    return FillSettingVariable(DropPedalPlayer2AsioChannelIdentifier, SettingType.STRING, currentLine, out DropPedalPlayer2AsioChannel);
-
                 #endregion
                 #region String Colors
                 // String Colors (Normal {N} & Colorblind {CB})
@@ -672,6 +799,22 @@ namespace RSMods
                     return FillSettingVariable(SeparateNoteColorsModeIdentifier, SettingType.STRING, currentLine, out SeparateNoteColorsMode);
                 if (IdentifierIsFound(currentLine, OverrideInputVolumeIdentifier, identifierToGrab))
                     return FillSettingVariable(OverrideInputVolumeIdentifier, SettingType.STRING, currentLine, out OverrideInputVolume);
+                if (IdentifierIsFound(currentLine, AsioInputGainIdentifier, identifierToGrab))
+                    return FillSettingVariable(AsioInputGainIdentifier, SettingType.STRING, currentLine, out AsioInputGain);
+                if (IdentifierIsFound(currentLine, NoiseGateThresholdIdentifier, identifierToGrab))
+                    return FillSettingVariable(NoiseGateThresholdIdentifier, SettingType.STRING, currentLine, out NoiseGateThreshold);
+                if (IdentifierIsFound(currentLine, CompressorStrengthIdentifier, identifierToGrab))
+                    return FillSettingVariable(CompressorStrengthIdentifier, SettingType.STRING, currentLine, out CompressorStrength);
+                if (IdentifierIsFound(currentLine, HumFilterIdentifier, identifierToGrab))
+                    return FillSettingVariable(HumFilterIdentifier, SettingType.STRING, currentLine, out HumFilter);
+                if (IdentifierIsFound(currentLine, RocksmithGateOverrideIdentifier, identifierToGrab))
+                    return FillSettingVariable(RocksmithGateOverrideIdentifier, SettingType.STRING, currentLine, out RocksmithGateOverride);
+                if (IdentifierIsFound(currentLine, RocksmithGateThresholdIdentifier, identifierToGrab))
+                    return FillSettingVariable(RocksmithGateThresholdIdentifier, SettingType.STRING, currentLine, out RocksmithGateThreshold);
+                if (IdentifierIsFound(currentLine, AudioBridgeLimiterIdentifier, identifierToGrab))
+                    return FillSettingVariable(AudioBridgeLimiterIdentifier, SettingType.STRING, currentLine, out AudioBridgeLimiter);
+                if (IdentifierIsFound(currentLine, AudioBridgeLimiterLevelIdentifier, identifierToGrab))
+                    return FillSettingVariable(AudioBridgeLimiterLevelIdentifier, SettingType.STRING, currentLine, out AudioBridgeLimiterLevel);
                 if (IdentifierIsFound(currentLine, AlternativeOutputSampleRateIdentifier, identifierToGrab))
                     return FillSettingVariable(AlternativeOutputSampleRateIdentifier, SettingType.STRING, currentLine, out AlternativeOutputSampleRate);
                 if (IdentifierIsFound(currentLine, LoopingLeadUpIdentifier, identifierToGrab))

@@ -478,10 +478,10 @@ namespace
 		const std::filesystem::path& errorPath,
 		const volatile LONG* cancellationRequested)
 	{
-		const auto helperPath = rocksmithDirectory / L"RSMods" / L"RSMods.exe";
+		const auto helperPath = rocksmithDirectory / L"RSMods.exe";
 		if (!std::filesystem::exists(helperPath))
 		{
-			throw std::runtime_error("RSMods\\RSMods.exe is required to prepare Speaker Mode audio");
+			throw std::runtime_error("RSMods.exe is required to prepare Speaker Mode audio");
 		}
 
 		std::wstring commandLine = QuoteArgument(helperPath.wstring())
@@ -532,6 +532,12 @@ namespace
 		if (waitResult == WAIT_OBJECT_0)
 		{
 			GetExitCodeProcess(processInfo.hProcess, &exitCode);
+		}
+		else
+		{
+			// Timed out: stop it, or a hung extractor keeps running (and outlives the game; it is in no job object).
+			TerminateProcess(processInfo.hProcess, ERROR_TIMEOUT);
+			WaitForSingleObject(processInfo.hProcess, 5000);
 		}
 		CloseHandle(processInfo.hProcess);
 
@@ -600,8 +606,6 @@ namespace Audio::SongShift
 		__declspec(align(8)) volatile LONG64 renderStartedTick = 0;
 		__declspec(align(8)) volatile LONG64 openingReadyTick = 0;
 		__declspec(align(8)) volatile LONG64 preparationCompletedTick = 0;
-		__declspec(align(8)) volatile LONG64 startupWaitCount = 0;
-		__declspec(align(8)) volatile LONG64 lastStartupWaitMilliseconds = 0;
 		__declspec(align(8)) volatile LONG64 underflowWaitCount = 0;
 		volatile LONG lastPlaybackFrame = 0;
 		__declspec(align(8)) volatile LONG64 lastRequiredFrame = 0;
@@ -991,57 +995,6 @@ bool Audio::SongShift::PreRenderedPitchCache::IsReady(const PreparedPitchCache* 
 		0) == CACHE_READY;
 }
 
-bool Audio::SongShift::PreRenderedPitchCache::WaitUntilPlayable(
-	PreparedPitchCache* cache,
-	uint32_t timeoutMilliseconds)
-{
-	if (cache == nullptr) return false;
-	const DWORD startedTick = GetTickCount();
-	const auto recordWait = [cache, startedTick]()
-	{
-		InterlockedExchange64(
-			&cache->lastStartupWaitMilliseconds,
-			static_cast<LONG64>(GetTickCount() - startedTick));
-		InterlockedIncrement64(&cache->startupWaitCount);
-	};
-	for (;;)
-	{
-		if (InterlockedCompareExchange(&cache->isEvicting, 0, 0) != 0)
-		{
-			recordWait();
-			return false;
-		}
-		const LONG state = InterlockedCompareExchange(&cache->state, 0, 0);
-		if (state == CACHE_FAILED || state == CACHE_CANCELLED || state == CACHE_EVICTED)
-		{
-			recordWait();
-			return false;
-		}
-		if (InterlockedCompareExchange(&cache->metadataReady, 0, 0) != 0)
-		{
-			const uint64_t requiredFrames = std::min<uint64_t>(
-				cache->totalFrames,
-				static_cast<uint64_t>(cache->sampleRate) * PLAYABLE_SECONDS);
-			const uint64_t readyFrames = static_cast<uint64_t>(InterlockedCompareExchange64(
-				&cache->contiguousFramesReady,
-				0,
-				0));
-			if (readyFrames >= requiredFrames)
-			{
-				recordWait();
-				return true;
-			}
-		}
-
-		if (GetTickCount() - startedTick >= timeoutMilliseconds)
-		{
-			recordWait();
-			return false;
-		}
-		WaitForSingleObject(cache->completedEvent, 5);
-	}
-}
-
 const char* Audio::SongShift::PreRenderedPitchCache::GetError(const PreparedPitchCache* cache)
 {
 	if (cache == nullptr) return "prepared-audio request is missing";
@@ -1109,8 +1062,6 @@ bool Audio::SongShift::PreRenderedPitchCache::GetProbeSnapshot(
 	snapshot.renderStartedTick = readValue(&cache->renderStartedTick);
 	snapshot.openingReadyTick = readValue(&cache->openingReadyTick);
 	snapshot.preparationCompletedTick = readValue(&cache->preparationCompletedTick);
-	snapshot.startupWaitCount = readValue(&cache->startupWaitCount);
-	snapshot.lastStartupWaitMilliseconds = readValue(&cache->lastStartupWaitMilliseconds);
 	snapshot.underflowWaitCount = readValue(&cache->underflowWaitCount);
 	snapshot.lastPlaybackFrame = static_cast<uint64_t>(InterlockedCompareExchange(
 		const_cast<volatile LONG*>(&cache->lastPlaybackFrame),

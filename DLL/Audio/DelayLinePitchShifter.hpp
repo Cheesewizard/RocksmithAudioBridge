@@ -38,13 +38,26 @@ namespace Audio
 		explicit DelayLinePitchShifter(int semitones);
 
 		void SetSemitones(int semitones);
+		void SetPitchDetectionEnabled(bool enabled);
+		bool TryGetDetectedMidi(int& midi) const;
 
 		void Prepare(const CaptureFormat& format) override;
-		void Process(float* samples, uint32_t frameCount) override;
+		bool Process(float* samples, uint32_t frameCount) override;
 		uint32_t GetLatencyFrames() const override;
+		// The delay the shifter is adding right now (smoothed), in frames; 0 when passing through.
+		float GetLiveDelayFrames() const { return liveDelayFrames.load(std::memory_order_relaxed); }
 
 	private:
 		std::atomic<float> ratio;
+		// Smoothed distance between the read tap and the write point, in frames: the delay
+		// the shifter is adding RIGHT NOW. Drifts with the shift amount and the note's
+		// period and splices back by whole periods, so it is averaged over ~0.5 s for the
+		// overlay. 0 while passing audio through.
+		std::atomic<float> liveDelayFrames{ 0.0f };
+		std::atomic<bool> isPitchDetectionEnabled{ false };
+		std::atomic<int> detectedMidi{ -1 };
+		std::atomic<uint32_t> missedPitchDetections{ 0 };
+		uint32_t sampleRate = 48000;
 
 		// Splicer state
 		std::vector<float> ring;

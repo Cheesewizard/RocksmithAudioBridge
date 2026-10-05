@@ -153,6 +153,13 @@ namespace GameState {
 		"RiffRepeater_Pause",
 	};
 
+	const std::vector<std::string> riffRepeaterMenus = {
+		"LearnASong_RiffRepeater",
+		"RiffRepeater",
+		"RiffRepeater_AdvancedSettings",
+		"RiffRepeater_Pause",
+	};
+
 	const std::vector<std::string> scoreAttackModes = {
 		"ScoreAttack_Game",
 		"ScoreAttack_Pause",
@@ -197,6 +204,7 @@ namespace GameState {
 	};
 
 	namespace Menus {
+		bool IsOnMainMenu();
 		bool IsInMultiplayerTunerMenus();
 		bool IsInScoreMenus();
 		bool IsInTuningMenus();
@@ -206,6 +214,7 @@ namespace GameState {
 		bool IsInLearnASongModes();
 		bool IsInLearnASongPauseModes();
 		bool IsInModesWithAllowedFastRiffRepeater();
+		bool IsInRiffRepeaterMenus();
 		bool IsInOnlineModes();
 		bool IsInLASPlayingModes();
 		bool IsOnScoreScreens();

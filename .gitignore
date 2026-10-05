@@ -1,4 +1,9 @@
 # Project-specific files
+# Keep the persistent-input contract harness visible despite local scratch-test exclusions.
+!/Tests/PersistentInput/
+!/Tests/PersistentInput/persistent_tests.cpp
+!/Tests/PersistentInput/run.cmd
+!/Tests/PersistentInput/README.md
 xinput1_3.dll
 Tests/ShifterHarness/*.wav
 
@@ -23,6 +28,8 @@ RSMods/RSMods.vcxproj.user
 [Dd]ebug/
 [Dd]ebugPublic/
 [Rr]elease/
+Release Public/
+Release Developer/
 [Rr]eleases/
 [Rr]elease with Wwise Logging/
 x64/
@@ -284,3 +291,30 @@ __pycache__/
 
 Installer/Resources/
 *.user
+
+# Developer-only material, kept out of the release repository.
+/Research/
+/DLL/Research/*
+!/DLL/Research/ResearchBridge.hpp
+!/DLL/Research/ResearchProtocol.hpp
+!/DLL/Research/NoteByNoteProbe/
+/DLL/Research/NoteByNoteProbe/*
+!/DLL/Research/NoteByNoteProbe/NoteByNoteResearchProbe.cpp
+/RSModsPlus/ManagedMlHarness.cs
+/RSModsPlus/ExportCqtBasis.py
+/RSModsPlus/TestAudioParity.py
+/RSModsPlus/TestManagedStream.py
+/Tests
+/docs
+/tools
+/DLL/AsioProxy/test
+/DLL/Audio/test
+/DLL/Installer/
+/private-debugging/
+/DeploymentBackups/
+/PreReleaseDeploy_*/
+/tmp/
+artifacts/
+BuildArchive/
+build/
+*.stackdump

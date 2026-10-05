@@ -1,10 +1,25 @@
 #include "stdafx.h"
 #include "Keybindings.hpp"
 #include "Mods/DropPedal/DropPedalInput.hpp"
+#include "Audio/TakeRecorder.hpp"
+#include "Audio/SharedOutput.hpp"
 
 namespace Keybindings {
 	std::map<std::string, ModCommand, std::less<>> keyUpCommands;
 	std::map<std::string, ModCommand, std::less<>> keyDownCommands;
+
+	// Takes are recorded in game by Audio::Takes (audio in process, video by a hidden RSMods.exe).
+	// Hotkey path: the remembered format (AudioRouting.ini CaptureMode).
+	void ToggleAudioBridgeRecording()
+	{
+		Audio::Takes::Toggle(Audio::Takes::PreferVideo());
+	}
+
+	// Overlay path: explicit format. Wet and dry WAVs are always paired.
+	void ToggleAudioBridgeRecording(bool video)
+	{
+		Audio::Takes::Toggle(video);
+	}
 
 	void HandleTuningOffset()
 	{
@@ -161,10 +176,46 @@ namespace Keybindings {
 		}
 	}
 
+	namespace
+	{
+		std::atomic<bool> capturingKey{ false };
+		std::atomic<unsigned int> capturedKey{ 0 };
+	}
+
+	void BeginKeyCapture() { capturedKey = 0; capturingKey = true; }
+	void CancelKeyCapture() { capturingKey = false; }
+	bool IsCapturingKey() { return capturingKey.load(); }
+
+	void CaptureKey(WPARAM keyPressed)
+	{
+		// Modifiers alone are not bindable (the hotkey system matches one key); keep waiting.
+		if (keyPressed == VK_SHIFT || keyPressed == VK_CONTROL || keyPressed == VK_MENU
+			|| keyPressed == VK_LSHIFT || keyPressed == VK_RSHIFT || keyPressed == VK_LCONTROL
+			|| keyPressed == VK_RCONTROL || keyPressed == VK_LMENU || keyPressed == VK_RMENU
+			|| keyPressed == VK_LWIN || keyPressed == VK_RWIN) return;
+		capturingKey = false;
+		if (keyPressed == VK_ESCAPE || keyPressed == VK_OEM_5) return;   // cancel
+		capturedKey = static_cast<unsigned int>(keyPressed);
+	}
+
+	bool TakeCapturedKey(unsigned int& vk)
+	{
+		vk = capturedKey.exchange(0);
+		return vk != 0;
+	}
+
 	void HandleKeyUp(WPARAM keyPressed)
 	{
 		if (!GameState::GameLoaded) return; // Game must not be on the startup videos or it will crash
 		DispatchCommand(keyPressed, keyUpCommands);
+		if (keyPressed == Settings::GetKeyBind("RecordingHotkey"))
+			ToggleAudioBridgeRecording();
+
+		// Toggle the in-game Audio Bridge overlay with backslash. Not a letter, so it never types into the
+		// song-list search and never collides with Rocksmith's Ctrl menus; B stays free for typing. Available
+		// in Release, unlike the debug menu below.
+		if (keyPressed == VK_OEM_5) // backslash '\'
+			Menu::audioBridgeMenuEnabled = !Menu::audioBridgeMenuEnabled;
 
 		// Control + A. Force us to read the Settings from the INI again, to renew our cached values.
 		if (keyPressed == 0x41 && (GetAsyncKeyState(VK_CONTROL) & 0x8000)) {

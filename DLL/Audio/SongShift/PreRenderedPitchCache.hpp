@@ -27,8 +27,6 @@ namespace Audio::SongShift
 		uint64_t renderStartedTick = 0;
 		uint64_t openingReadyTick = 0;
 		uint64_t preparationCompletedTick = 0;
-		uint64_t startupWaitCount = 0;
-		uint64_t lastStartupWaitMilliseconds = 0;
 		uint64_t underflowWaitCount = 0;
 		uint64_t lastPlaybackFrame = 0;
 		uint64_t lastRequiredFrame = 0;
@@ -42,7 +40,6 @@ namespace Audio::SongShift
 		void Retire(PreparedPitchCache* cache);
 		uint64_t Maintain();
 		bool IsReady(const PreparedPitchCache* cache);
-		bool WaitUntilPlayable(PreparedPitchCache* cache, uint32_t timeoutMilliseconds);
 		const char* GetError(const PreparedPitchCache* cache);
 		int GetSemitones(const PreparedPitchCache* cache);
 		bool GetProbeSnapshot(
