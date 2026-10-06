@@ -150,7 +150,7 @@ sits just below it.
 
 | Action | Key |
 |---|---|
-| Skip the note you're stuck on | `Right Arrow` |
+| Emergency skip, if you ever get stuck on a note | `Right Arrow` |
 
 **Overlay page:** Note by Note (settings only: readout, target style and size,
 colours, and dragging the on-screen readout into place).
