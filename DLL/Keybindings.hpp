@@ -36,6 +36,7 @@ namespace Keybindings {
     void DispatchCommand(WPARAM keyPressed, const std::map<std::string, ModCommand, std::less<>>& commands);
 
     void HandleKeyUp(WPARAM keyPressed);
+    void HandleOverlayKey(UINT msg, LPARAM lParam);   // the overlay toggle key's WM_KEYDOWN / WM_KEYUP
     void HandleKeyDown(WPARAM keyPressed);
 
     void InitializeCommands();

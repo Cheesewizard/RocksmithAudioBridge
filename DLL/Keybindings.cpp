@@ -204,18 +204,41 @@ namespace Keybindings {
 		return vk != 0;
 	}
 
+	// Toggle the in-game Audio Bridge overlay with backslash. Not a letter, so it never types into the song-list
+	// search and never collides with Rocksmith's Ctrl menus. Toggles on release (a held key repeats its
+	// key-down), and only for a release that pairs with a press this window saw, at most once per 250 ms. A
+	// lone release (the press went to another window before focus moved here) or a bouncing switch
+	// (release, press, release within a few ms) used to toggle a second time, so the overlay shut right after
+	// opening, or reopened right after closing.
+	void HandleOverlayKey(UINT msg, LPARAM lParam)
+	{
+		static bool pressSeen = false;
+		static ULONGLONG lastToggle = 0;
+		const ULONGLONG now = GetTickCount64();
+		if (msg == WM_KEYDOWN) {
+			if ((lParam & (1 << 30)) == 0) pressSeen = true;   // first key-down, not an auto-repeat
+			return;
+		}
+		if (msg != WM_KEYUP) return;
+		if (!pressSeen) {
+			LOG_INFO("(OVERLAY KEY) release without a press in this window; ignored." << std::endl);
+			return;
+		}
+		pressSeen = false;
+		if (lastToggle != 0 && now - lastToggle < 250) {
+			LOG_INFO("(OVERLAY KEY) second toggle " << (now - lastToggle) << " ms after the last one; ignored." << std::endl);
+			return;
+		}
+		lastToggle = now;
+		Menu::audioBridgeMenuEnabled = !Menu::audioBridgeMenuEnabled;
+	}
+
 	void HandleKeyUp(WPARAM keyPressed)
 	{
 		if (!GameState::GameLoaded) return; // Game must not be on the startup videos or it will crash
 		DispatchCommand(keyPressed, keyUpCommands);
 		if (keyPressed == Settings::GetKeyBind("RecordingHotkey"))
 			ToggleAudioBridgeRecording();
-
-		// Toggle the in-game Audio Bridge overlay with backslash. Not a letter, so it never types into the
-		// song-list search and never collides with Rocksmith's Ctrl menus; B stays free for typing. Available
-		// in Release, unlike the debug menu below.
-		if (keyPressed == VK_OEM_5) // backslash '\'
-			Menu::audioBridgeMenuEnabled = !Menu::audioBridgeMenuEnabled;
 
 		// Control + A. Force us to read the Settings from the INI again, to renew our cached values.
 		if (keyPressed == 0x41 && (GetAsyncKeyState(VK_CONTROL) & 0x8000)) {

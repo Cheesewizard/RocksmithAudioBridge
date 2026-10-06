@@ -138,6 +138,7 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM keyPressed, LPARAM lParam) {
 	// The overlay toggle is owned by RSModsPlus. Consume it before ImGui's general keyboard capture so
 	// keyboard navigation inside the focused panel cannot prevent the same key from closing the panel.
 	if (GameState::GameLoaded && keyPressed == VK_OEM_5 && (msg == WM_KEYDOWN || msg == WM_KEYUP)) {
+		Keybindings::HandleOverlayKey(msg, lParam);
 		if (msg == WM_KEYUP) Keybindings::HandleKeyUp(keyPressed);
 		return true;
 	}
