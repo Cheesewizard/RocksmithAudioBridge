@@ -3,17 +3,28 @@
 #include "VstHostControl.hpp"
 
 #include <shellapi.h>
+#include <algorithm>
+#include <filesystem>
 
 namespace VstHostLink
 {
 	namespace
 	{
+		constexpr wchar_t kSettingsKey[] = L"Software\\RSMods\\VstHost";
+		constexpr wchar_t kHostMutex[] = L"Local\\RocksmithAudioBridge.VstHost";   // held by the running host (Main.cpp)
+		constexpr ULONGLONG kSwitchTimeoutMs = 15000;
+
 		HANDLE g_mapping = nullptr;
 		VstHostControl::Shared* g_shared = nullptr;
 		bool g_openFailed = false;
 		ULONGLONG g_lastBeat = 0;
 		LONG g_lastHostBeat = 0;
 		ULONGLONG g_hostBeatSeenAt = 0;
+
+		std::vector<Plugin> g_plugins;
+		bool g_scanned = false;
+		std::wstring g_pendingLaunch;     // plugin to start once the running host has exited
+		ULONGLONG g_pendingSince = 0;
 
 		VstHostControl::Shared* Shared()
 		{
@@ -41,6 +52,80 @@ namespace VstHostLink
 			if (beat != g_lastHostBeat) { g_lastHostBeat = beat; g_hostBeatSeenAt = now; }
 			return shared->hostPid != 0 && now - g_hostBeatSeenAt < static_cast<ULONGLONG>(VstHostControl::kAliveMs);
 		}
+
+		// The host process is gone only once it releases its single-instance mutex (it clears hostPid earlier,
+		// while it is still saving and unloading).
+		bool HostProcessGone()
+		{
+			HANDLE mutex = OpenMutexW(SYNCHRONIZE, FALSE, kHostMutex);
+			if (!mutex) return true;
+			CloseHandle(mutex);
+			return false;
+		}
+
+		void Launch(const std::wstring& plugin)
+		{
+			if (VstHostControl::Shared* shared = Shared()) InterlockedExchange(&shared->quitRequested, 0);
+			const std::wstring args = plugin.empty() ? std::wstring() : L"\"" + plugin + L"\"";
+			ShellExecuteW(nullptr, L"open", HostPath().c_str(), args.empty() ? nullptr : args.c_str(), nullptr, SW_SHOWNORMAL);
+		}
+
+		std::wstring ReadLastPlugin()
+		{
+			wchar_t value[MAX_PATH * 2]{};
+			DWORD size = sizeof(value);
+			if (RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, L"LastPlugin", RRF_RT_REG_SZ, nullptr, value, &size) != ERROR_SUCCESS) return {};
+			return value;
+		}
+
+		// 64-bit only: the host is a 64-bit program. A single-file .vst3 is a DLL (PE machine field); a bundle
+		// folder carries a Contents\x86_64-win build.
+		bool Is64Bit(const std::filesystem::path& path)
+		{
+			std::error_code error;
+			if (std::filesystem::is_directory(path, error))
+				return std::filesystem::exists(path / L"Contents" / L"x86_64-win", error);
+			HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+			if (file == INVALID_HANDLE_VALUE) return false;
+			IMAGE_DOS_HEADER dos{};
+			IMAGE_FILE_HEADER header{};
+			DWORD signature = 0, read = 0;
+			bool is64 = false;
+			if (ReadFile(file, &dos, sizeof(dos), &read, nullptr) && read == sizeof(dos) && dos.e_magic == IMAGE_DOS_SIGNATURE
+				&& SetFilePointer(file, dos.e_lfanew, nullptr, FILE_BEGIN) != INVALID_SET_FILE_POINTER
+				&& ReadFile(file, &signature, sizeof(signature), &read, nullptr) && signature == IMAGE_NT_SIGNATURE
+				&& ReadFile(file, &header, sizeof(header), &read, nullptr) && read == sizeof(header))
+				is64 = header.Machine == IMAGE_FILE_MACHINE_AMD64;
+			CloseHandle(file);
+			return is64;
+		}
+
+		void Scan()
+		{
+			g_plugins.clear();
+			// This is a 32-bit process, where %CommonProgramFiles% points at the x86 folder; plugins live in the
+			// 64-bit one, which CommonProgramW6432 names.
+			wchar_t common[MAX_PATH]{};
+			if (!GetEnvironmentVariableW(L"CommonProgramW6432", common, MAX_PATH)) wcscpy_s(common, L"C:\\Program Files\\Common Files");
+			const std::filesystem::path root = std::filesystem::path(common) / L"VST3";
+			std::error_code error;
+			std::filesystem::recursive_directory_iterator it(root, std::filesystem::directory_options::skip_permission_denied, error), end;
+			for (; !error && it != end; it.increment(error))
+			{
+				const std::filesystem::path& path = it->path();
+				if (_wcsicmp(path.extension().c_str(), L".vst3") != 0) continue;
+				if (it->is_directory(error)) it.disable_recursion_pending();   // a bundle: do not look inside
+				if (!Is64Bit(path)) continue;
+				Plugin plugin;
+				plugin.path = path.wstring();
+				const std::wstring stem = path.stem().wstring();
+				plugin.name = std::string(stem.begin(), stem.end());
+				g_plugins.push_back(plugin);
+			}
+			std::sort(g_plugins.begin(), g_plugins.end(), [](const Plugin& a, const Plugin& b) { return _stricmp(a.name.c_str(), b.name.c_str()) < 0; });
+			g_scanned = true;
+			LOG_INFO("(VST HOST) found " << g_plugins.size() << " 64-bit VST3 plugin(s) in " << root.string() << std::endl);
+		}
 	}
 
 	void OnFrame(bool overlayVisible)
@@ -54,12 +139,20 @@ namespace VstHostLink
 			g_lastBeat = now;
 			InterlockedIncrement(&shared->overlayBeat);
 		}
+		// A plugin switch: start the new host once the old one has saved its settings and exited.
+		if (!g_pendingLaunch.empty() && (HostProcessGone() || now - g_pendingSince > kSwitchTimeoutMs))
+		{
+			Launch(g_pendingLaunch);
+			g_pendingLaunch.clear();
+		}
 	}
 
 	Snapshot GetSnapshot()
 	{
 		Snapshot snapshot;
 		snapshot.hostInstalled = GetFileAttributesW(HostPath().c_str()) != INVALID_FILE_ATTRIBUTES;
+		snapshot.switching = !g_pendingLaunch.empty();
+		snapshot.lastPlugin = ReadLastPlugin();
 		VstHostControl::Shared* shared = Shared();
 		if (!shared) return snapshot;
 		snapshot.hostRunning = HostAlive(shared);
@@ -74,21 +167,35 @@ namespace VstHostLink
 		return snapshot;
 	}
 
+	const std::vector<Plugin>& Plugins()
+	{
+		if (!g_scanned) Scan();
+		return g_plugins;
+	}
+
+	void Rescan() { Scan(); }
+
 	void SetPopout(bool wanted)
 	{
 		if (VstHostControl::Shared* shared = Shared()) InterlockedExchange(&shared->popoutWanted, wanted ? 1 : 0);
 	}
 
-	void StartHost()
+	void StartHost() { Launch({}); }
+
+	void LoadPlugin(const std::wstring& path)
 	{
-		const std::wstring path = HostPath();
-		if (VstHostControl::Shared* shared = Shared()) InterlockedExchange(&shared->quitRequested, 0);
-		// Opens behind the game only if it has to ask for a plugin; normally it reopens the last one silently.
-		ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+		VstHostControl::Shared* shared = Shared();
+		if (!shared || HostProcessGone()) { Launch(path); return; }
+		// Close the running host (it saves the current plugin's settings), then start it with the new plugin.
+		InterlockedExchange(&shared->quitRequested, 1);
+		g_pendingLaunch = path;
+		g_pendingSince = GetTickCount64();
+		LOG_INFO("(VST HOST) switching plugin; closing the running host first" << std::endl);
 	}
 
 	void StopHost()
 	{
+		g_pendingLaunch.clear();
 		if (VstHostControl::Shared* shared = Shared()) InterlockedExchange(&shared->quitRequested, 1);
 	}
 }
