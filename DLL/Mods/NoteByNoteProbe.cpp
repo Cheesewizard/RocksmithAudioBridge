@@ -371,6 +371,19 @@ void NoteByNoteProbe::Initialize()
 
 
 
+void NoteByNoteProbe::ForceRestoreAutomatic()
+{
+	{
+		std::lock_guard<std::mutex> lock(controllerMutex);
+		isAutomaticEnabled = true;
+		automaticEnabledSnapshot.store(true, std::memory_order_relaxed);
+		automaticTargetText = "Waiting for Rocksmith's native section epoch";
+		NoteByNoteHighwayRenderer::SetNeckPlacementMode(3);   // same side effect as the normal enable
+	}
+	// Re-arm for the current section, outside the controller lock like the normal enable path.
+	NoteByNoteNativeScoring::RequestReArm();
+}
+
 bool NoteByNoteProbe::IsAutomaticEnabled()
 {
 	std::lock_guard<std::mutex> lock(controllerMutex);
