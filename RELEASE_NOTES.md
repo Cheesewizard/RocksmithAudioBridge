@@ -3,7 +3,7 @@
 ## Release
 - **Version:** `v4.0.0`
 - **Build date:** `2026-10-06`
-- **Scope:** `Pre-release`
+- **Scope:** `Release`
 
 > Note by Note is a **beta** feature toggled from the menu, and USB cable compatibility is **experimental**.
 
@@ -80,22 +80,21 @@ Severity / impact should be set per entry. Issue numbers reference github.com/Ch
 
 - **[High]**
 	- No audio when playing notes in dense passages.
-	- #63 Speaker Mode emits a piercing high-pitched tone on song load under CPU load (buffer underrun; headphone safety risk).
+	- #63 Speaker Mode emits a piercing high-pitched tone on song load under CPU load (buffer underrun; headphone safety risk; fix in b6283cfe, needs a retest under CPU load).
 
 - **[Medium]**
 	- Fretboard visual glitches: incorrect note fingers and frozen animations. Currently offset by a custom-UI readout of the target notes shown separately from the fingerboard.
 	- #82 Drop Pedal does not account for mixed ASIO and Real Tone Cable multiplayer inputs.
-	- #65 Riff Repeater timeline does not show the orange progress/current-section overlay on the gray timeline unless the section is highlighted (only purple is shown otherwise).
-	- #58 Note by Note: ringing chords satisfy repeat-strum sections without a re-pick.
+	- #65 Riff Repeater timeline does not show the orange section colour (only purple). Not yet compared against v3.2.1, so it may not come from this mod.
+	- #58 Note by Note: ringing chords satisfy repeat-strum sections without a re-pick (Strum Ledger in 404b75dc should cover this, needs a live retest).
+	- #42 Note by Note: a bend can take a while to be confirmed (Right Arrow skips it).
 	- #57 Auto-tuning sets the Drop Pedal / Speaker Mode offset too late (must apply at song-list scroll, before load).
 
 - **[Low]** (mostly Note by Note visual polish; only affect the beta feature when enabled)
-	- Gray notes on loop restart that clear once the first note is played.
 	- #90 Fretboard note cues do not show detector feedback colours (no visual detector feedback on the cues).
 	- #60 Top strings flicker / wrong string animation during a held plain note.
 	- #47 After a loop turnover the restarted pass renders all notes gray.
 	- #44 Bend visuals wrong during the hold (floating marker, plain-note repaint).
-	- #42 Bends can starve waiting for confirmation.
 	- #38 Bend on high E fret 15 triggers the open-E success animation.
 	- #37 One-frame flash on note markers still occurs.
 
