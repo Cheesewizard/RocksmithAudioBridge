@@ -80,13 +80,12 @@ Severity / impact should be set per entry. Issue numbers reference github.com/Ch
 
 - **[High]**
 	- No audio when playing notes in dense passages.
-	- #63 Speaker Mode emits a piercing high-pitched tone on song load under CPU load (buffer underrun; headphone safety risk; fix in b6283cfe, needs a retest under CPU load).
+	- #63 Speaker Mode emits a piercing high-pitched tone on song load under CPU load (buffer underrun; headphone safety risk). Less frequent since b6283cfe but still heard occasionally.
 
 - **[Medium]**
 	- Fretboard visual glitches: incorrect note fingers and frozen animations. Currently offset by a custom-UI readout of the target notes shown separately from the fingerboard.
 	- #82 Drop Pedal does not account for mixed ASIO and Real Tone Cable multiplayer inputs.
 	- #65 Riff Repeater timeline does not show the orange section colour (only purple). Not yet compared against v3.2.1, so it may not come from this mod.
-	- #58 Note by Note: ringing chords satisfy repeat-strum sections without a re-pick (Strum Ledger in 404b75dc should cover this, needs a live retest).
 	- #42 Note by Note: a bend can take a while to be confirmed (Right Arrow skips it).
 	- #57 Auto-tuning sets the Drop Pedal / Speaker Mode offset too late (must apply at song-list scroll, before load).
 
