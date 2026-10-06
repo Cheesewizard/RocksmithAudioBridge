@@ -2,12 +2,7 @@
 
 ![Rocksmith Audio Bridge](.github/images/rocksmith-audio-bridge-banner.jpg)
 
-<a href="https://buymeacoffee.com/cheesewizard">
-  <img src=".github/images/buy-me-a-beer-alt-amplifier-v2.png" alt="Buy me a beer" width="200">
-</a>
-
-I build this mod in my own time and I'm currently looking for work. If it has
-helped you, please consider [supporting its development](#support). Thank you!
+<br>
 
 An extension of [RSMods](https://github.com/Lovrom8/RSMods) for Rocksmith 2014
 Remastered. Play any song without retuning, run your own amp sim, record your
@@ -17,6 +12,21 @@ overlay.
 
 Formerly RSModsPlus, renamed because the old name was easily mistaken for
 Rocksmith+.
+
+---
+
+<p align="center">
+  <a href="https://buymeacoffee.com/cheesewizard">
+    <img src=".github/images/buy-me-a-beer-alt-amplifier-v2.png" alt="Buy me a beer" width="200">
+  </a>
+</p>
+
+<p align="center">
+  I build this mod in my own time and I'm currently looking for work.<br>
+  If it has helped you, please consider <a href="#support">supporting its development</a>. Thank you!
+</p>
+
+---
 
 https://github.com/user-attachments/assets/c8951c94-e760-4830-a8f5-6b383dbb05da
 
