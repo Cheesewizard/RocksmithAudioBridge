@@ -250,9 +250,6 @@
   <data name="RSMods" type="System.Resources.ResXFileRef, System.Windows.Forms">
     <value>..\Resources\RSModsGUI\RSMods.exe;System.Byte[], mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </data>
-  <data name="RSMods1" type="System.Resources.ResXFileRef, System.Windows.Forms">
-    <value>..\Resources\RSModsGUI\RSMods.pdb;System.Byte[], mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
-  </data>
   <data name="RSMods_exe" type="System.Resources.ResXFileRef, System.Windows.Forms">
     <value>..\Resources\RSModsGUI\RSMods.exe.config;System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089;Windows-1252</value>
   </data>
@@ -338,10 +335,22 @@
     <value>..\Resources\RSModsGUI\X360.dll;System.Byte[], mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </data>
   <data name="xinput1_3" type="System.Resources.ResXFileRef, System.Windows.Forms">
-    <value>..\Resources\xinput1_3.dll;System.Byte[], mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+    <value>..\Resources\Master\xinput1_3.dll;System.Byte[], mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </data>
-  <data name="xinput1_3_pdb" type="System.Resources.ResXFileRef, System.Windows.Forms">
-    <value>..\Resources\xinput1_3.pdb;System.Byte[], mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  <data name="RocksmithAudioBridge" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>..\Resources\Release\RocksmithAudioBridgeAsio.dll;System.Byte[], mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </data>
+  <data name="RocksmithAudioBridgeGuest64" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>..\Resources\Release\RocksmithAudioBridgeAsio64.dll;System.Byte[], mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </data>
+  <data name="RocksmithAudioBridgeLibrary" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>..\Resources\RSModsGUI\RocksmithAudioBridge.dll;System.Byte[], mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </data>
+  <data name="ProjectLicense" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>..\..\LICENSE;System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089;utf-8</value>
+  </data>
+  <data name="ProjectNotice" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>..\..\NOTICE;System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089;utf-8</value>
   </data>
   <data name="zlib_net" type="System.Resources.ResXFileRef, System.Windows.Forms">
     <value>..\Resources\RSModsGUI\zlib.net.dll;System.Byte[], mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>

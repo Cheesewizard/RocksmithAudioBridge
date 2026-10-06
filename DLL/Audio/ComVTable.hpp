@@ -17,15 +17,8 @@ namespace Audio::ComVTable
 		if (!comObject) return nullptr;
 
 		void** slot = &GetVTable(comObject)[slotIndex];
-
-		DWORD previousProtection = 0;
-		if (!VirtualProtect(slot, sizeof(void*), PAGE_EXECUTE_READWRITE, &previousProtection))
-			return nullptr;
-
 		void* original = *slot;
-		*slot = replacement;
-
-		VirtualProtect(slot, sizeof(void*), previousProtection, &previousProtection);
+		if (!MemUtil::PatchAdr(slot, &replacement, sizeof(replacement))) return nullptr;
 		return original;
 	}
 }

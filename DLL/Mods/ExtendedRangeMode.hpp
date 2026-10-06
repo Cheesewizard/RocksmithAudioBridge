@@ -3,6 +3,7 @@
 #include "../RSColor.h"
 
 namespace ERMode {
+	bool TryGetActiveStringColor(int stringIndex, RSColor& color);
 	void Toggle7StringMode();
 	void DoRainbow();
 	void ToggleRainbowMode();

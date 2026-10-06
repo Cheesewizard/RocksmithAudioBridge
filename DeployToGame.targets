@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Deploys a project's outputs into the Rocksmith folder after EVERY build, so the game DLL, the proxy
+  driver and the GUI can never drift out of sync with each other (what is built is what runs). Each project lists what it ships as @(GameDeployFile) items with a Destination.
+
+  A running game or bridge keeps its files locked, but Windows allows a mapped executable to be renamed,
+  so the live copy is parked as "<file>.previous" and the fresh build lands in its place. The running
+  process keeps using the parked copy until it restarts; nothing is killed here.
+
+  Skip with -p:DeployToGame=false. Point elsewhere with -p:RocksmithInstallDir=... . Never runs for the
+  "Master" configuration (that is the installer payload, not a dev deploy).
+
+  Only the checkout named in <game>\RSModsDeployOwner.txt deploys (Directory.Build.props sets
+  DeployToGame=false for any other). -p:ClaimGameDeploy=true makes this checkout the owner.
+-->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <RocksmithInstallDir Condition="'$(RocksmithInstallDir)'==''">C:\Program Files (x86)\Steam\steamapps\common\Rocksmith2014</RocksmithInstallDir>
+    <DeployToGame Condition="'$(DeployToGame)'==''">true</DeployToGame>
+  </PropertyGroup>
+
+  <Target Name="DeployOwnerSkipped" AfterTargets="Build" Condition="'$(RSModsDeployBlocked)'=='true'">
+    <Warning Text="DeployToGame SKIPPED for $(MSBuildProjectName): the game folder belongs to $(RSModsDeployOwner) (RSModsDeployOwner.txt); this checkout is $(RSModsThisCheckout). Build with -p:ClaimGameDeploy=true to take it over, or delete the file." />
+  </Target>
+
+  <Target Name="DeployToGame" AfterTargets="Build"
+          Condition="'$(DeployToGame)'=='true' And Exists('$(RocksmithInstallDir)') And '$(Configuration)'!='Master'">
+    <WriteLinesToFile Condition="'$(ClaimGameDeploy)'=='true'" File="$(RocksmithInstallDir)\RSModsDeployOwner.txt"
+                      Lines="$(RSModsThisCheckout)" Overwrite="true" />
+    <Error Condition="'@(GameDeployFile)'==''" Text="DeployToGame: this project declares no GameDeployFile items." />
+    <Error Condition="!Exists('%(GameDeployFile.Identity)')" Text="DeployToGame: build output is missing: %(GameDeployFile.Identity)" />
+    <!-- Park whatever is live. Failures here only mean nothing was there or a stale .previous is itself
+         still in use; the Copy below is the step that must succeed. -->
+    <Delete Files="%(GameDeployFile.Destination).previous" ContinueOnError="true" />
+    <Move SourceFiles="%(GameDeployFile.Destination)" DestinationFiles="%(GameDeployFile.Destination).previous"
+          Condition="Exists('%(GameDeployFile.Destination)')" ContinueOnError="true" />
+    <Copy SourceFiles="@(GameDeployFile)" DestinationFiles="%(GameDeployFile.Destination)" />
+    <Message Importance="high" Text="DeployToGame: %(GameDeployFile.Filename)%(GameDeployFile.Extension) -> %(GameDeployFile.Destination)" />
+  </Target>
+</Project>

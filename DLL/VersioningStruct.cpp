@@ -23,6 +23,13 @@ namespace {
 
 template class VersioningStruct<unsigned int>;
 
+bool IsExactGameBuild(VersionType type)
+{
+	static const DWORD checksum = GetChecksum();
+	const auto it = ourVersionChecksums.find(checksum);
+	return it != ourVersionChecksums.cend() && it->second == type;
+}
+
 template <typename T> T& VersioningStruct<T>::Get()
 {
 	return myVersions.at(static_cast<int>(GetVersion()));

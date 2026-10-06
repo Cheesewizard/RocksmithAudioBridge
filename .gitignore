@@ -23,6 +23,8 @@ RSMods/RSMods.vcxproj.user
 [Dd]ebug/
 [Dd]ebugPublic/
 [Rr]elease/
+Release Public/
+Release Developer/
 [Rr]eleases/
 [Rr]elease with Wwise Logging/
 x64/
@@ -284,3 +286,26 @@ __pycache__/
 
 Installer/Resources/
 *.user
+
+# Developer-only material, kept out of the release repository.
+/Research/
+/DLL/Research/*
+!/DLL/Research/ResearchBridge.hpp
+!/DLL/Research/ResearchProtocol.hpp
+!/DLL/Research/NoteByNoteProbe/
+/DLL/Research/NoteByNoteProbe/*
+!/DLL/Research/NoteByNoteProbe/NoteByNoteResearchProbe.cpp
+/Tests
+/docs
+/tools
+/DLL/AsioProxy/test
+/DLL/Audio/test
+/DLL/Installer/
+/private-debugging/
+/DeploymentBackups/
+/PreReleaseDeploy_*/
+/tmp/
+artifacts/
+BuildArchive/
+build/
+*.stackdump

@@ -69,6 +69,7 @@ namespace RSMods
 			Directory.CreateDirectory(outputDirectory);
 			var temporaryPrefix = Path.Combine(outputDirectory, Guid.NewGuid().ToString("N"));
 			var wemPath = temporaryPrefix + ".wem";
+			var cleanedWemPath = temporaryPrefix + ".clean.wem";
 			var oggPath = temporaryPrefix + ".ogg";
 			var repairedOggPath = temporaryPrefix + ".fixed.ogg";
 			var temporaryWavePath = temporaryPrefix + ".wav";
@@ -84,10 +85,18 @@ namespace RSMods
 				}
 				wwiseFrameCount = ReadWwiseFrameCount(wemPath);
 
-				var toolsDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tools");
+				// ww2ogg rejects any RIFF chunk it does not recognize ("Parse error: unknown chunk
+				// type"). DLC Builder on Wwise 2022/2023 adds newer metadata chunks (e.g. "akd "),
+				// which the shipped decoder does not know, so Speaker Mode fails on those songs even
+				// though Rocksmith plays them. Rewrite the WEM keeping only the chunks ww2ogg reads
+				// (its complete recognized set), dropping the rest. No behavioural change for legacy
+				// WEMs, which carry only known chunks.
+				WriteWw2oggCompatibleWem(wemPath, cleanedWemPath);
+
+				var toolsDirectory = Path.Combine(RuntimeBootstrap.DirectoryPath, "tools");
 				RunTool(
 					Path.Combine(toolsDirectory, "ww2ogg.exe"),
-					$"\"{wemPath}\" -o \"{oggPath}\" --pcb \"{Path.Combine(toolsDirectory, "packed_codebooks_aoTuV_603.bin")}\"");
+					$"\"{cleanedWemPath}\" -o \"{oggPath}\" --pcb \"{Path.Combine(toolsDirectory, "packed_codebooks_aoTuV_603.bin")}\"");
 				RunTool(
 					Path.Combine(toolsDirectory, "revorb.exe"),
 					$"\"{oggPath}\" \"{repairedOggPath}\"");
@@ -101,6 +110,7 @@ namespace RSMods
 			finally
 			{
 				DeleteIfPresent(wemPath);
+				DeleteIfPresent(cleanedWemPath);
 				DeleteIfPresent(oggPath);
 				DeleteIfPresent(repairedOggPath);
 				DeleteIfPresent(temporaryWavePath);
@@ -150,6 +160,75 @@ namespace RSMods
 			}
 
 			throw new InvalidDataException("Speaker Mode WEM has no format chunk.");
+		}
+
+		// Rewrites a WEM keeping only the RIFF chunks the shipped ww2ogg recognizes, dropping any
+		// newer Wwise metadata chunks that would abort its parse. Chunk bytes are copied verbatim
+		// (contents unchanged); only the top-level chunk set and the RIFF size are rebuilt, which is
+		// all ww2ogg walks. A legacy WEM (only known chunks) is reproduced unchanged apart from a
+		// recomputed RIFF size.
+		private static void WriteWw2oggCompatibleWem(string sourceWemPath, string destinationWemPath)
+		{
+			var known = new HashSet<string>(StringComparer.Ordinal)
+			{
+				"fmt ", "cue ", "LIST", "smpl", "vorb", "data"
+			};
+
+			byte[] bytes = File.ReadAllBytes(sourceWemPath);
+			if (bytes.Length < 12
+				|| System.Text.Encoding.ASCII.GetString(bytes, 0, 4) != "RIFF"
+				|| System.Text.Encoding.ASCII.GetString(bytes, 8, 4) != "WAVE")
+			{
+				throw new InvalidDataException("Speaker Mode WEM is not a RIFF/WAVE container.");
+			}
+
+			var kept = new List<byte[]>();
+			long position = 12;
+			while (position + 8 <= bytes.Length)
+			{
+				string chunkId = System.Text.Encoding.ASCII.GetString(bytes, (int)position, 4);
+				uint chunkSize = BitConverter.ToUInt32(bytes, (int)position + 4);
+				long dataStart = position + 8;
+				if (chunkSize > bytes.Length - dataStart)
+				{
+					// A truncated trailing chunk: clamp so a malformed tail cannot walk off the end.
+					chunkSize = (uint)(bytes.Length - dataStart);
+				}
+
+				long advance = 8 + chunkSize + (chunkSize & 1); // chunks are word-aligned
+				if (known.Contains(chunkId))
+				{
+					int total = (int)Math.Min(advance, bytes.Length - position);
+					var chunk = new byte[total];
+					Array.Copy(bytes, (int)position, chunk, 0, total);
+					kept.Add(chunk);
+				}
+
+				position += advance;
+			}
+
+			if (!kept.Any(chunk => System.Text.Encoding.ASCII.GetString(chunk, 0, 4) == "data"))
+			{
+				throw new InvalidDataException("Speaker Mode WEM has no audio data chunk after cleaning.");
+			}
+
+			long body = 4; // "WAVE"
+			foreach (var chunk in kept)
+			{
+				body += chunk.Length;
+			}
+
+			using (var output = File.Create(destinationWemPath))
+			using (var writer = new BinaryWriter(output))
+			{
+				writer.Write(System.Text.Encoding.ASCII.GetBytes("RIFF"));
+				writer.Write((uint)body);
+				writer.Write(System.Text.Encoding.ASCII.GetBytes("WAVE"));
+				foreach (var chunk in kept)
+				{
+					writer.Write(chunk);
+				}
+			}
 		}
 
 		private static void TrimWaveToFrames(string wavePath, uint frameCount)

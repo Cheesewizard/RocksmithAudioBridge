@@ -1,5 +1,6 @@
-using System;
+﻿using System;
 using System.IO;
+using System.Text;
 using System.Windows.Forms;
 using System.Diagnostics;
 using System.Collections.Generic;
@@ -75,21 +76,37 @@ namespace RSMods
                     { ReadSettings.DropPedalPitchDownKeyIdentifier, CreateDefaultOnOldINI(ReadSettings.DropPedalPitchDownKeyIdentifier, "VK_OEM_COMMA") },
                     { ReadSettings.DropPedalPitchUpKeyIdentifier, CreateDefaultOnOldINI(ReadSettings.DropPedalPitchUpKeyIdentifier, "VK_OEM_PERIOD") },
                     { ReadSettings.DropPedalToggleKeyIdentifier, CreateDefaultOnOldINI(ReadSettings.DropPedalToggleKeyIdentifier, "VK_F7") },
-                    { ReadSettings.DropPedalBaseTuningKeyIdentifier, CreateDefaultOnOldINI(ReadSettings.DropPedalBaseTuningKeyIdentifier, "VK_F9") }
+					{ ReadSettings.DropPedalBaseTuningKeyIdentifier, CreateDefaultOnOldINI(ReadSettings.DropPedalBaseTuningKeyIdentifier, "VK_F9") },
+					{ ReadSettings.RecordingHotkeyIdentifier, CreateDefaultOnOldINI(ReadSettings.RecordingHotkeyIdentifier, "VK_F6") }
+                }
+            );
+            saveSettingsOrDefaults.Add(
+                "[Note by Note]", new Dictionary<string, string>
+                {
+					{ ReadSettings.NOTE_BY_NOTE_CUSTOM_COLOURS_IDENTIFIER, CreateDefaultOnOldINI(ReadSettings.NOTE_BY_NOTE_CUSTOM_COLOURS_IDENTIFIER, "off") },
+                    { ReadSettings.NOTE_BY_NOTE_DETECTION_OVERLAY_IDENTIFIER, CreateDefaultOnOldINI(ReadSettings.NOTE_BY_NOTE_DETECTION_OVERLAY_IDENTIFIER, "on") },
+					{ ReadSettings.NOTE_BY_NOTE_UI_SIZE_IDENTIFIER, CreateDefaultOnOldINI(ReadSettings.NOTE_BY_NOTE_UI_SIZE_IDENTIFIER, "100") },
+					{ ReadSettings.NOTE_BY_NOTE_TARGET_SIZE_IDENTIFIER, CreateDefaultOnOldINI(ReadSettings.NOTE_BY_NOTE_TARGET_SIZE_IDENTIFIER, "150") },
+					{ ReadSettings.NOTE_BY_NOTE_TARGET_POSITION_IDENTIFIER, CreateDefaultOnOldINI(ReadSettings.NOTE_BY_NOTE_TARGET_POSITION_IDENTIFIER, "Left") },
+					{ ReadSettings.NOTE_BY_NOTE_LINE_SPACING_IDENTIFIER, CreateDefaultOnOldINI(ReadSettings.NOTE_BY_NOTE_LINE_SPACING_IDENTIFIER, "100") },
+					{ ReadSettings.NOTE_BY_NOTE_READOUT_PLACEMENT_IDENTIFIER, CreateDefaultOnOldINI(ReadSettings.NOTE_BY_NOTE_READOUT_PLACEMENT_IDENTIFIER, "Default") },
+					{ ReadSettings.NOTE_BY_NOTE_TARGET_PLACEMENT_IDENTIFIER, CreateDefaultOnOldINI(ReadSettings.NOTE_BY_NOTE_TARGET_PLACEMENT_IDENTIFIER, "Default") },
+					{ ReadSettings.NOTE_BY_NOTE_TARGET_STYLE_IDENTIFIER, CreateDefaultOnOldINI(ReadSettings.NOTE_BY_NOTE_TARGET_STYLE_IDENTIFIER, "Detailed") },
+                    { ReadSettings.NOTE_BY_NOTE_NEUTRAL_COLOR_IDENTIFIER, CreateDefaultOnOldINI(ReadSettings.NOTE_BY_NOTE_NEUTRAL_COLOR_IDENTIFIER, "FFFFFF") },
+                    { ReadSettings.NOTE_BY_NOTE_CONFIRMED_COLOR_IDENTIFIER, CreateDefaultOnOldINI(ReadSettings.NOTE_BY_NOTE_CONFIRMED_COLOR_IDENTIFIER, "55DD77") },
+                    { ReadSettings.NOTE_BY_NOTE_PARTIAL_COLOR_IDENTIFIER, CreateDefaultOnOldINI(ReadSettings.NOTE_BY_NOTE_PARTIAL_COLOR_IDENTIFIER, "FFAA44") },
+                    { ReadSettings.NOTE_BY_NOTE_REJECTED_COLOR_IDENTIFIER, CreateDefaultOnOldINI(ReadSettings.NOTE_BY_NOTE_REJECTED_COLOR_IDENTIFIER, "FF5555") }
                 }
             );
             saveSettingsOrDefaults.Add(
                 "[Drop Pedal]", new Dictionary<string, string>
                 {
-                    { ReadSettings.DropPedalEnabledIdentifier, CreateDefaultOnOldINI(ReadSettings.DropPedalEnabledIdentifier, "off") },
-                    { ReadSettings.DropPedalEngineIdentifier, CreateDefaultOnOldINI(ReadSettings.DropPedalEngineIdentifier, "automatic") },
+                    { ReadSettings.DropPedalEnabledIdentifier, CreateDefaultOnOldINI(ReadSettings.DropPedalEnabledIdentifier, "on") },
+                    { ReadSettings.DropPedalShowOverlayIdentifier, CreateDefaultOnOldINI(ReadSettings.DropPedalShowOverlayIdentifier, "on") },
                     { ReadSettings.DropPedalCustomOverlayColorsIdentifier, CreateDefaultOnOldINI(ReadSettings.DropPedalCustomOverlayColorsIdentifier, "off") },
                     { ReadSettings.DropPedalOverlayDownColorIdentifier, CreateDefaultOnOldINI(ReadSettings.DropPedalOverlayDownColorIdentifier, "6BE06B") },
                     { ReadSettings.DropPedalOverlayUpColorIdentifier, CreateDefaultOnOldINI(ReadSettings.DropPedalOverlayUpColorIdentifier, "FFC24D") },
-                    { ReadSettings.DropPedalOverlayStatusColorIdentifier, CreateDefaultOnOldINI(ReadSettings.DropPedalOverlayStatusColorIdentifier, "FFFFFF") },
-                    // No UI control; hand-edited values are preserved across saves. -1 = automatic.
-                    { ReadSettings.DropPedalPlayer1AsioChannelIdentifier, CreateDefaultOnOldINI(ReadSettings.DropPedalPlayer1AsioChannelIdentifier, "-1") },
-                    { ReadSettings.DropPedalPlayer2AsioChannelIdentifier, CreateDefaultOnOldINI(ReadSettings.DropPedalPlayer2AsioChannelIdentifier, "-1") }
+                    { ReadSettings.DropPedalOverlayStatusColorIdentifier, CreateDefaultOnOldINI(ReadSettings.DropPedalOverlayStatusColorIdentifier, "FFFFFF") }
                 }
             );
             saveSettingsOrDefaults.Add(
@@ -214,12 +231,23 @@ namespace RSMods
                     { ReadSettings.SecondaryMonitorYPositionIdentifier, CreateDefaultOnOldINI(ReadSettings.SecondaryMonitorYPositionIdentifier, "0") }, // Where should we place Rocksmith on their secondary monitor. Y
                     { ReadSettings.SeparateNoteColorsModeIdentifier, CreateDefaultOnOldINI(ReadSettings.SeparateNoteColorsModeIdentifier, "0") }, // Should we display different colors on the notes, than on the strings? 0 = No | 1 = Default Colors | 2 = Custom
                     { ReadSettings.OverrideInputVolumeIdentifier, CreateDefaultOnOldINI(ReadSettings.OverrideInputVolumeIdentifier, "17")}, // What volume should we use when the user wants to override the default input volume?
+                    { ReadSettings.AsioInputGainIdentifier, CreateDefaultOnOldINI(ReadSettings.AsioInputGainIdentifier, "0")}, // Guitar input make-up gain in tenths of a dB (0 = off); lifts a quiet RS_ASIO/interface input to Real Tone Cable level so the game's amp gate stops muting sustains and bends.
+                    { ReadSettings.NoiseGateThresholdIdentifier, CreateDefaultOnOldINI(ReadSettings.NoiseGateThresholdIdentifier, "0")}, // Guitar input suppressor open threshold in tenths of a dB (0 = off, else negative); rejects idle floor and brief spikes before the game's tone amplifies them, then closes smoothly after sustained notes.
+                    { ReadSettings.CompressorStrengthIdentifier, CreateDefaultOnOldINI(ReadSettings.CompressorStrengthIdentifier, "0")}, // Guitar input compressor strength 0-100 (0 = off); flattens the natural string-beat wobble before the game amp so a quiet interface input doesn't warble the way a hot cable doesn't.
+                    { ReadSettings.HumFilterIdentifier, CreateDefaultOnOldINI(ReadSettings.HumFilterIdentifier, "0")}, // Mains-hum notch base frequency in Hz (0 = off, typically 50/60 but any 20..120 the DLL honors); notches out the ground-loop hum comb a grounded interface injects and a single-USB Real Tone Cable does not.
+                    { ReadSettings.RocksmithGateOverrideIdentifier, CreateDefaultOnOldINI(ReadSettings.RocksmithGateOverrideIdentifier, "0")}, // Take over the game's own amp noise gate (1 = on, 0 = off); when on, forces P1_NoiseFloor so Rocksmith stops chopping a note as it decays on a noisy interface input.
+                    { ReadSettings.RocksmithGateThresholdIdentifier, CreateDefaultOnOldINI(ReadSettings.RocksmithGateThresholdIdentifier, "-593")}, // Forced P1_NoiseFloor in tenths of a dB while the override is on (-593 = the game's calibrated default; lower opens the gate for longer sustain).
+                    { ReadSettings.AudioBridgeLimiterIdentifier, CreateDefaultOnOldINI(ReadSettings.AudioBridgeLimiterIdentifier, "0")}, // Output level trim (0 = off, 1 = on): scales the game output down to a set level via the Rocksmith Audio Bridge proxy, as a clean static gain (no clipping or compression).
+                    { ReadSettings.AudioBridgeLimiterLevelIdentifier, CreateDefaultOnOldINI(ReadSettings.AudioBridgeLimiterLevelIdentifier, "-60")}, // Limiter ceiling in tenths of a dBFS (-60 = -6.0 dBFS): a look-ahead brickwall limiter holds the output at or below this.
                     { ReadSettings.AlternativeOutputSampleRateIdentifier, CreateDefaultOnOldINI(ReadSettings.AlternativeOutputSampleRateIdentifier, "48000") }, // Alternative frequency to use when looking for Audio Output devices.
                     { ReadSettings.LoopingLeadUpIdentifier, CreateDefaultOnOldINI(ReadSettings.LoopingLeadUpIdentifier, "0") }, // Amount of lead-up time we should give for loops.
                     { ReadSettings.RewindByIdentifier, CreateDefaultOnOldINI(ReadSettings.RewindByIdentifier, "5000") }, // Amount of time (in ms) to go back when the user presses the rewind key.
                     { ReadSettings.RewindLeadupIdentifier, CreateDefaultOnOldINI(ReadSettings.RewindLeadupIdentifier, "2000") }, // Amount of time (in ms) to move the grey note timer back after rewinding.
                     { ReadSettings.CustomNSPTimeLimitIdentifier, CreateDefaultOnOldINI(ReadSettings.CustomNSPTimeLimitIdentifier, "10000") }, // Amount of time (in ms) to have Non-stop play wait until the next song.
                     { ReadSettings.OnScreenFontSizeIdentifier, CreateDefaultOnOldINI(ReadSettings.OnScreenFontSizeIdentifier, "24") },
+					{ ReadSettings.CableForPlayerTwoIdentifier, CreateDefaultOnOldINI(ReadSettings.CableForPlayerTwoIdentifier, "off") }, // Insert the Rocksmith Audio Bridge Cable device after RS_ASIO inputs for multiplayer.
+                    { ReadSettings.MonitorOutputIdentifier, CreateDefaultOnOldINI(ReadSettings.MonitorOutputIdentifier, "off") }, // Diagnostic output-stream monitor (Rocksmith Audio Bridge tab, experimental).
+                    { ReadSettings.AudioDiagnosticsOverlayIdentifier, CreateDefaultOnOldINI(ReadSettings.AudioDiagnosticsOverlayIdentifier, "on") }, // In-game audio latency / signal overlay (Rocksmith Audio Bridge tab).
                 }
             );
             saveSettingsOrDefaults.Add(
@@ -269,7 +297,27 @@ namespace RSMods
         #region Write Settings
         public static void WriteINI(Dictionary<string, Dictionary<string, string>> DictionaryToWrite)
         {
-            using (StreamWriter sw = File.CreateText(Path.Combine(GenUtil.GetRSDirectory(), "RSMods.ini")))
+            string path = Path.Combine(GenUtil.GetRSDirectory(), "RSMods.ini");
+            // Sections this dictionary does not own (the audio bridge's [Audio Bridge] and [Audio Bridge Output Buffer <device>],
+            // written by the game and the bridge window with WritePrivateProfileString) are carried over unchanged, or this
+            // whole-file rewrite would wipe them. They are copied as raw bytes (Latin-1 maps every byte to itself) because
+            // WritePrivateProfileStringW stores them in the ANSI codepage, which a UTF-8 round trip would mangle.
+            Encoding raw = Encoding.GetEncoding(28591);
+            var kept = new StringBuilder();
+            if (File.Exists(path))
+            {
+                bool keep = false;
+                foreach (string line in File.ReadAllLines(path, raw))
+                {
+                    string trimmed = line.Trim();
+                    if (trimmed.StartsWith("[") && trimmed.EndsWith("]"))
+                        keep = !DictionaryToWrite.ContainsKey(trimmed);
+                    if (keep)
+                        kept.Append(line).Append("\r\n");
+                }
+            }
+
+            using (StreamWriter sw = File.CreateText(path))
             {
                 foreach (string section in DictionaryToWrite.Keys)
                 {
@@ -280,6 +328,8 @@ namespace RSMods
                     }
                 }
             }
+            if (kept.Length > 0)
+                File.AppendAllText(path, kept.ToString(), raw);
         }
         #endregion
         #region Is RS Void

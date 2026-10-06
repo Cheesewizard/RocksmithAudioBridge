@@ -3,6 +3,7 @@
 #include "stdafx.h"
 #include "Mods/GuitarSpeak.hpp"
 #include "Mods/RiffRepeater.hpp"
+#include "Mods/NoteByNoteProbe.hpp"
 #include "Mods/Midi.hpp"
 #include <atlbase.h>
 #include <algorithm>
@@ -13,6 +14,10 @@
 namespace GameOverlay {
 	Resolution GetWindowSize();
 	void DX9DrawText(const std::string& textToDraw, int textColorHex, int topLeftX, int topLeftY, int bottomRightX, int bottomRightY, LPDIRECT3DDEVICE9 pDevice, Resolution setFontSize = { NULL, NULL }, DWORD format = DT_LEFT | DT_NOCLIP);
+	// Wide-string draw for text carrying glyphs outside the ANSI codepage (e.g. the musical
+	// note U+266A in the Note by Note badge): DrawTextA would render the multibyte bytes as
+	// tofu. Same font cache as DX9DrawText; `weight` lets a badge request FW_BOLD.
+	void DX9DrawTextW(const std::wstring& textToDraw, int textColorHex, int topLeftX, int topLeftY, int bottomRightX, int bottomRightY, LPDIRECT3DDEVICE9 pDevice, int fontHeight, DWORD format = DT_LEFT | DT_NOCLIP, int weight = FW_NORMAL);
 
 	inline HRESULT CustomDX9Font = NULL;
 	inline ID3DXFont* DX9FontEncapsulation = NULL;
@@ -25,9 +30,24 @@ namespace GameOverlay {
 	inline IDirect3DDevice9* pDevice;
 	void SetPDevice(IDirect3DDevice9* pDevice, Resolution windowSize);
 	void DisplayMixer();
+	void DisplayProductVersion();
 	void DisplaySongTimer();
 	void DisplayCurrentNote();
 	void DisplayRiffRepeaterOverHundredPercentSpeed();
+	void DisplayNoteByNoteStatus();
+	void DisplayNoteByNoteBendMeter();
+	// Note-by-Note target plus string/fret ML companion overlay. The target
+	// is gameplay UI; the model's per-string diagnostic rows are gated by "ml_fret" and the
+	// detection-overlay setting. Draws in every build config and never gates a gameplay decision.
+	void DisplayMlStringFretOverlay();
+	// Audio diagnostics (RSModsPlus): input path + latency, the game's own output latency,
+	// a live signal bar and packet rate. Gated by OverlayToggles "audio_diag" and the
+	// RSMods.ini AudioDiagnosticsOverlay switch; draws in menus and songs.
+	void DisplayAudioDiagnostics();
+	void DisplayRecordingIndicator();
+	// True when DisplayAudioDiagnostics will draw this frame. The NBN "Input: x dB" line
+	// shares the same top-left rows and is suppressed while the signal bar is visible.
+	bool IsAudioDiagnosticsVisible();
 	void DisplayCurrentTuningForAutoTune();
 	void DisplayLoopStartEndTimes(float loopStart, float loopEnd);
 	void DisplaySongAccuracy();

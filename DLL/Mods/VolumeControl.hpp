@@ -1,6 +1,9 @@
 #pragma once
 
 namespace VolumeControl {
+	bool GetPlaybackVolume(unsigned int channel, float& volume);
+	bool SetPlaybackVolume(unsigned int channel, float volume);
+	bool SetPlaybackVolumeWithTransition(unsigned int channel, float volume, unsigned int transitionMilliseconds);
 	void IncreaseVolume(int amountToIncrease, std::string mixerToIncrease);
 	void DecreaseVolume(int amountToDecrease, std::string mixerToDecrease);
 	void MutePlayer(bool player2 = false);
@@ -18,8 +21,6 @@ namespace VolumeControl {
 
 inline float player1VolumeBeforeMute = 100.f;
 inline float player2VolumeBeforeMute = 100.f;
-
-
 inline std::vector<std::string> mixerNames = {
 	{"Master_Volume"}, // Master Volume
 	{"Mixer_Music"}, // Song Volume

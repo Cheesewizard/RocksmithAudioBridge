@@ -60,11 +60,11 @@ namespace CrowdControl::Effects {
 
 			lea ecx, Offsets::ptr_wavyNotesJmpBck
 			call VersioningStruct<uintptr_t>::GetValue
-			mov Offsets::runtimeVersionStructValue, eax
+			mov Offsets::runtimeVersionStructValueWavyNotes, eax
 
 			popad
 
-			jmp [Offsets::runtimeVersionStructValue]
+			jmp [Offsets::runtimeVersionStructValueWavyNotes]
 		}
 	}
 

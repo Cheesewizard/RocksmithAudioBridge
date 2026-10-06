@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DEPLOY OWNER LOCK. MSBuild imports this file into every project of the solution before the
+  project's own properties, so it can switch deploying off for all of them at once (DeployToGame.targets,
+  DLL.vcxproj's post-build copy of xinput1_3.dll, NoteByNoteProbe.vcxproj's probe copy).
+
+  Several checkouts (a main folder and its worktrees) can build the same projects into the one game folder,
+  and whichever finishes last wins, silently. The game folder may carry RSModsDeployOwner.txt holding the
+  root folder of the ONE checkout allowed to deploy; every other checkout builds normally but does not copy
+  into the game (a warning names the owner). No file = any checkout deploys.
+  Take ownership deliberately with -p:ClaimGameDeploy=true (DeployToGame.targets rewrites the file), or
+  delete the file.
+-->
+<Project>
+  <PropertyGroup>
+    <RSModsGameDir Condition="'$(RocksmithInstallDir)'!=''">$(RocksmithInstallDir)</RSModsGameDir>
+    <RSModsGameDir Condition="'$(RSModsGameDir)'==''">C:\Program Files (x86)\Steam\steamapps\common\Rocksmith2014</RSModsGameDir>
+    <RSModsDeployOwnerFile>$(RSModsGameDir)\RSModsDeployOwner.txt</RSModsDeployOwnerFile>
+    <RSModsThisCheckout>$(MSBuildThisFileDirectory.TrimEnd('\'))</RSModsThisCheckout>
+    <RSModsDeployOwner Condition="Exists('$(RSModsDeployOwnerFile)')">$([System.IO.File]::ReadAllText('$(RSModsDeployOwnerFile)').Trim().TrimEnd('\'))</RSModsDeployOwner>
+    <RSModsDeployBlocked Condition="'$(ClaimGameDeploy)'!='true' And '$(RSModsDeployOwner)'!='' And '$(RSModsDeployOwner.ToLowerInvariant())'!='$(RSModsThisCheckout.ToLowerInvariant())'">true</RSModsDeployBlocked>
+    <DeployToGame Condition="'$(RSModsDeployBlocked)'=='true'">false</DeployToGame>
+  </PropertyGroup>
+</Project>

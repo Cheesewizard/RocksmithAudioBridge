@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Keeps build machine paths out of shipped binaries. MSBuild imports this after every project in the tree.
+  - C++: the linker records only the PDB file name in the debug directory (/PDBALTPATH:%_PDB%) instead of
+    the full output path.
+  - C#: source and PDB paths are remapped to a neutral root, so the debug directory and any
+    CallerFilePath strings carry no local folder names.
+  PDBs are still produced next to each binary for local debugging and crash analysis; they are not shipped.
+-->
+<Project>
+  <ItemDefinitionGroup>
+    <Link>
+      <AdditionalOptions>%(AdditionalOptions) /PDBALTPATH:%25_PDB%25</AdditionalOptions>
+    </Link>
+  </ItemDefinitionGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectExtension)'=='.csproj'">
+    <Deterministic>true</Deterministic>
+    <PathMap>$(MSBuildThisFileDirectory)=\src\</PathMap>
+  </PropertyGroup>
+</Project>

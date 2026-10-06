@@ -222,6 +222,21 @@
     <ClCompile Include="Mods\RiffRepeater.cpp">
       <Filter>Mods</Filter>
     </ClCompile>
+	<ClCompile Include="Mods\NoteByNoteProbe.cpp">
+		<Filter>Mods</Filter>
+	</ClCompile>
+    <ClCompile Include="Mods\NoteByNoteHookHost.cpp">
+		<Filter>Mods</Filter>
+	</ClCompile>
+    <ClCompile Include="Mods\NoteByNoteMenu.cpp">
+      <Filter>Mods</Filter>
+    </ClCompile>
+    <ClCompile Include="Mods\NoteByNoteHudLabel.cpp">
+      <Filter>Mods</Filter>
+    </ClCompile>
+    <ClCompile Include="Research\ResearchBridge.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Mods\AudioDevices.cpp">
       <Filter>Mods</Filter>
     </ClCompile>
@@ -258,6 +273,9 @@
     <ClCompile Include="D3D/D3DHooks.cpp">
       <Filter>D3D</Filter>
     </ClCompile>
+    <ClCompile Include="D3D/NoteByNoteHighwayRenderer.cpp">
+      <Filter>D3D</Filter>
+    </ClCompile>
     <ClCompile Include="CC\Effects\WavyNotesEffect.cpp">
       <Filter>CrowdControl\Effects</Filter>
     </ClCompile>
@@ -289,6 +307,12 @@
       <Filter>Mods</Filter>
     </ClCompile>
     <ClCompile Include="Menu.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Overlay\OverlayShell.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Overlay\OverlayUi.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="QualityOfLife.cpp">
@@ -323,6 +347,27 @@
     </ClCompile>
     <ClCompile Include="Audio\AsioHook.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Audio\CableInput.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Audio\MlServiceLauncher.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Audio\AsioProxyRegistration.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Audio\SharedOutput.cpp">
+      <Filter>Audio</Filter>
+    </ClCompile>
+    <ClCompile Include="Audio\OutputDevices.cpp">
+      <Filter>Audio</Filter>
+    </ClCompile>
+    <ClCompile Include="Audio\TakeRecorder.cpp">
+      <Filter>Audio</Filter>
+    </ClCompile>
+    <ClCompile Include="Audio\GameAudioRecorder.cpp">
+      <Filter>Audio</Filter>
     </ClCompile>
     <ClCompile Include="Audio\DelayLinePitchShifter.cpp">
       <Filter>Source Files</Filter>
@@ -417,6 +462,9 @@
       <Filter>D3D</Filter>
     </ClInclude>
     <ClInclude Include="D3D/D3DHooks.hpp">
+      <Filter>D3D</Filter>
+    </ClInclude>
+    <ClInclude Include="D3D/NoteByNoteHighwayRenderer.hpp">
       <Filter>D3D</Filter>
     </ClInclude>
     <ClInclude Include="D3D/D3D.hpp">
@@ -530,6 +578,24 @@
     <ClInclude Include="Mods\RiffRepeater.hpp">
       <Filter>Mods\Headers</Filter>
     </ClInclude>
+	<ClInclude Include="Mods\NoteByNoteProbe.hpp">
+		<Filter>Mods\Headers</Filter>
+	</ClInclude>
+    <ClInclude Include="Mods\NoteByNoteNativeScoring.hpp">
+		<Filter>Mods\Headers</Filter>
+	</ClInclude>
+    <ClInclude Include="Mods\NoteByNoteMenu.hpp">
+      <Filter>Mods\Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="Mods\NoteByNoteHudLabel.hpp">
+      <Filter>Mods\Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="Research\ResearchBridge.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Research\ResearchProtocol.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Mods\AudioDevices.hpp">
       <Filter>Mods\Headers</Filter>
     </ClInclude>
@@ -605,6 +671,9 @@
     <ClInclude Include="D3DOverlay.hpp">
       <Filter>D3D</Filter>
     </ClInclude>
+    <ClInclude Include="ProductVersion.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Mods\Loft.hpp">
       <Filter>Mods\Headers</Filter>
     </ClInclude>
@@ -633,6 +702,18 @@
       <Filter>Main Headers</Filter>
     </ClInclude>
     <ClInclude Include="Menu.hpp">
+      <Filter>Main Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="Overlay\OverlayShell.hpp">
+      <Filter>Main Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="Overlay\OverlayUi.hpp">
+      <Filter>Main Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="Overlay\AudioBridgeLogo.h">
+      <Filter>Main Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="Overlay\HudLayout.hpp">
       <Filter>Main Headers</Filter>
     </ClInclude>
     <ClInclude Include="QualityOfLife.hpp">
@@ -682,6 +763,39 @@
     </ClInclude>
     <ClInclude Include="Audio\AsioHook.hpp">
       <Filter>Main Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\CaptureProcessingGate.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\CableInput.hpp">
+      <Filter>Main Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\MlServiceLauncher.hpp">
+      <Filter>Main Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\AsioProxyRegistration.hpp">
+      <Filter>Main Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\MlServiceControl.hpp">
+      <Filter>Main Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\SharedOutput.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\OutputDevices.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\TakeRecorder.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\GameAudioRecorder.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\AudioPacketQueue.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\AudioControl.hpp">
+      <Filter>Audio</Filter>
     </ClInclude>
     <ClInclude Include="Audio\DelayLinePitchShifter.hpp">
       <Filter>Main Headers</Filter>

@@ -271,18 +271,7 @@
             this.button_AutoLoadProfile_ClearSelection = new System.Windows.Forms.Button();
             this.listBox_AutoLoadProfiles = new System.Windows.Forms.ListBox();
             this.tabPage_ModSettings_AutoTuning = new System.Windows.Forms.TabPage();
-            this.groupBox_DropPedal = new System.Windows.Forms.GroupBox();
             this.checkBox_DropPedal = new System.Windows.Forms.CheckBox();
-            this.label_DropPedalEngine = new System.Windows.Forms.Label();
-            this.comboBox_DropPedalEngine = new System.Windows.Forms.ComboBox();
-            this.checkBox_DropPedalCustomOverlayColors = new System.Windows.Forms.CheckBox();
-            this.groupBox_DropPedalOverlayColors = new System.Windows.Forms.GroupBox();
-            this.textBox_DropPedalOverlayStatusColor = new System.Windows.Forms.TextBox();
-            this.button_DropPedalOverlayStatusColor = new System.Windows.Forms.Button();
-            this.textBox_DropPedalOverlayUpColor = new System.Windows.Forms.TextBox();
-            this.button_DropPedalOverlayUpColor = new System.Windows.Forms.Button();
-            this.textBox_DropPedalOverlayDownColor = new System.Windows.Forms.TextBox();
-            this.button_DropPedalOverlayDownColor = new System.Windows.Forms.Button();
             this.label_DropPedalPitchDownKey = new System.Windows.Forms.Label();
             this.label_DropPedalPitchUpKey = new System.Windows.Forms.Label();
             this.label_DropPedalToggleKey = new System.Windows.Forms.Label();
@@ -344,6 +333,14 @@
             this.nUpDown_VolumeInterval = new System.Windows.Forms.NumericUpDown();
             this.tab_SetAndForget = new System.Windows.Forms.TabPage();
             this.tab_RSASIO = new System.Windows.Forms.TabPage();
+            this.tab_RSModsPlus = new System.Windows.Forms.TabPage();
+            this.groupBox_RSModsPlus_CableInput = new RSMods.Controls.FeatureSection();
+            this.label_RSModsPlus_CableInputInfo = new System.Windows.Forms.Label();
+            this.checkBox_MonitorOutput = new System.Windows.Forms.CheckBox();
+            this.checkBox_AudioDiagnosticsOverlay = new System.Windows.Forms.CheckBox();
+            this.groupBox_RSModsPlus_AudioStatus = new RSMods.Controls.FeatureSection();
+            this.button_RSModsPlus_RefreshStatus = new System.Windows.Forms.Button();
+            this.textBox_RSModsPlus_AudioStatus = new System.Windows.Forms.TextBox();
             this.groupBox_ASIO_InputMic = new System.Windows.Forms.GroupBox();
             this.checkBox_ASIO_InputMic_EnableRefHack = new System.Windows.Forms.CheckBox();
             this.button_ASIO_InputMic_ClearSelection = new System.Windows.Forms.Button();
@@ -515,7 +512,6 @@
             this.groupBox_ImportJsonTones = new System.Windows.Forms.GroupBox();
             this.checkBox_ImportTonesBulk = new System.Windows.Forms.CheckBox();
             this.button_ImportTone2014 = new System.Windows.Forms.Button();
-            this.button_Profiles_AddDropPedalToTones = new System.Windows.Forms.Button();
             this.button_ImportToneManifest = new System.Windows.Forms.Button();
             this.dgv_Profiles_Songlists = new System.Windows.Forms.DataGridView();
             this.Artist = new System.Windows.Forms.DataGridViewTextBoxColumn();
@@ -614,8 +610,6 @@
             this.groupBox_SampleRateOutput.SuspendLayout();
             this.groupBox_AutoLoadProfiles.SuspendLayout();
             this.tabPage_ModSettings_AutoTuning.SuspendLayout();
-            this.groupBox_DropPedal.SuspendLayout();
-            this.groupBox_DropPedalOverlayColors.SuspendLayout();
             this.groupBox_MidiInDevice.SuspendLayout();
             this.groupBox_MidiAutoTuningWhen.SuspendLayout();
             this.groupBox_MidiAutoTuningOffset.SuspendLayout();
@@ -639,6 +633,9 @@
             ((System.ComponentModel.ISupportInitialize)(this.nUpDown_VolumeInterval)).BeginInit();
             this.tab_SetAndForget.SuspendLayout();
             this.tab_RSASIO.SuspendLayout();
+            this.tab_RSModsPlus.SuspendLayout();
+            this.groupBox_RSModsPlus_CableInput.SuspendLayout();
+            this.groupBox_RSModsPlus_AudioStatus.SuspendLayout();
             this.groupBox_ASIO_InputMic.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.nUpDown_ASIO_InputMic_MaxVolume)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.nUpDown_ASIO_InputMic_Channel)).BeginInit();
@@ -2990,6 +2987,7 @@
             this.TabController.Controls.Add(this.tab_ModToggles);
             this.TabController.Controls.Add(this.tab_SetAndForget);
             this.TabController.Controls.Add(this.tab_RSASIO);
+            this.TabController.Controls.Add(this.tab_RSModsPlus);
             this.TabController.Controls.Add(this.tab_Rocksmith);
             this.TabController.Controls.Add(this.tab_Twitch);
             this.TabController.Controls.Add(this.tab_SoundPacks);
@@ -3692,7 +3690,6 @@
             // tabPage_ModSettings_AutoTuning
             // 
             this.tabPage_ModSettings_AutoTuning.BackColor = System.Drawing.Color.Azure;
-            this.tabPage_ModSettings_AutoTuning.Controls.Add(this.groupBox_DropPedal);
             this.tabPage_ModSettings_AutoTuning.Controls.Add(this.groupBox_MidiInDevice);
             this.tabPage_ModSettings_AutoTuning.Controls.Add(this.groupBox_MidiAutoTuningWhen);
             this.tabPage_ModSettings_AutoTuning.Controls.Add(this.groupBox_MidiAutoTuningOffset);
@@ -3702,20 +3699,6 @@
             this.tabPage_ModSettings_AutoTuning.Size = new System.Drawing.Size(777, 443);
             this.tabPage_ModSettings_AutoTuning.TabIndex = 4;
             this.tabPage_ModSettings_AutoTuning.Text = "Tuning";
-            //
-            // groupBox_DropPedal
-            //
-            this.groupBox_DropPedal.Controls.Add(this.groupBox_DropPedalOverlayColors);
-            this.groupBox_DropPedal.Controls.Add(this.checkBox_DropPedalCustomOverlayColors);
-            this.groupBox_DropPedal.Controls.Add(this.checkBox_DropPedal);
-            this.groupBox_DropPedal.Controls.Add(this.label_DropPedalEngine);
-            this.groupBox_DropPedal.Controls.Add(this.comboBox_DropPedalEngine);
-            this.groupBox_DropPedal.Location = new System.Drawing.Point(536, 16);
-            this.groupBox_DropPedal.Name = "groupBox_DropPedal";
-            this.groupBox_DropPedal.Size = new System.Drawing.Size(223, 101);
-            this.groupBox_DropPedal.TabIndex = 5;
-            this.groupBox_DropPedal.TabStop = false;
-            this.groupBox_DropPedal.Text = "Drop Pedal";
             //
             // checkBox_DropPedal
             //
@@ -3730,117 +3713,6 @@
             this.checkBox_DropPedal.MouseLeave += new System.EventHandler(this.ToolTips_Hide);
             this.checkBox_DropPedal.MouseHover += new System.EventHandler(this.ToolTips_Show);
             //
-            // label_DropPedalEngine
-            //
-            this.label_DropPedalEngine.AutoSize = true;
-            this.label_DropPedalEngine.Location = new System.Drawing.Point(11, 51);
-            this.label_DropPedalEngine.Name = "label_DropPedalEngine";
-            this.label_DropPedalEngine.Size = new System.Drawing.Size(43, 13);
-            this.label_DropPedalEngine.TabIndex = 1;
-            this.label_DropPedalEngine.Text = "Engine:";
-            //
-            // comboBox_DropPedalEngine
-            //
-            this.comboBox_DropPedalEngine.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
-            this.comboBox_DropPedalEngine.FormattingEnabled = true;
-            this.comboBox_DropPedalEngine.Items.AddRange(new object[] {
-            "Automatic",
-            "Asio",
-            "Cable"});
-            this.comboBox_DropPedalEngine.Location = new System.Drawing.Point(68, 48);
-            this.comboBox_DropPedalEngine.Name = "comboBox_DropPedalEngine";
-            this.comboBox_DropPedalEngine.Size = new System.Drawing.Size(121, 21);
-            this.comboBox_DropPedalEngine.TabIndex = 2;
-            this.comboBox_DropPedalEngine.SelectedIndexChanged += new System.EventHandler(this.Save_DropPedalEngine);
-            this.comboBox_DropPedalEngine.MouseLeave += new System.EventHandler(this.ToolTips_Hide);
-            this.comboBox_DropPedalEngine.MouseHover += new System.EventHandler(this.ToolTips_Show);
-            //
-            // checkBox_DropPedalCustomOverlayColors
-            //
-            this.checkBox_DropPedalCustomOverlayColors.AutoSize = true;
-            this.checkBox_DropPedalCustomOverlayColors.Location = new System.Drawing.Point(11, 77);
-            this.checkBox_DropPedalCustomOverlayColors.Name = "checkBox_DropPedalCustomOverlayColors";
-            this.checkBox_DropPedalCustomOverlayColors.Size = new System.Drawing.Size(137, 17);
-            this.checkBox_DropPedalCustomOverlayColors.TabIndex = 3;
-            this.checkBox_DropPedalCustomOverlayColors.Text = "Custom overlay colours";
-            this.checkBox_DropPedalCustomOverlayColors.UseVisualStyleBackColor = true;
-            this.checkBox_DropPedalCustomOverlayColors.CheckedChanged += new System.EventHandler(this.Save_DropPedalCustomOverlayColors);
-            this.checkBox_DropPedalCustomOverlayColors.MouseLeave += new System.EventHandler(this.ToolTips_Hide);
-            this.checkBox_DropPedalCustomOverlayColors.MouseHover += new System.EventHandler(this.ToolTips_Show);
-            //
-            // groupBox_DropPedalOverlayColors
-            //
-            this.groupBox_DropPedalOverlayColors.Controls.Add(this.textBox_DropPedalOverlayStatusColor);
-            this.groupBox_DropPedalOverlayColors.Controls.Add(this.button_DropPedalOverlayStatusColor);
-            this.groupBox_DropPedalOverlayColors.Controls.Add(this.textBox_DropPedalOverlayUpColor);
-            this.groupBox_DropPedalOverlayColors.Controls.Add(this.button_DropPedalOverlayUpColor);
-            this.groupBox_DropPedalOverlayColors.Controls.Add(this.textBox_DropPedalOverlayDownColor);
-            this.groupBox_DropPedalOverlayColors.Controls.Add(this.button_DropPedalOverlayDownColor);
-            this.groupBox_DropPedalOverlayColors.Location = new System.Drawing.Point(11, 98);
-            this.groupBox_DropPedalOverlayColors.Name = "groupBox_DropPedalOverlayColors";
-            this.groupBox_DropPedalOverlayColors.Size = new System.Drawing.Size(201, 91);
-            this.groupBox_DropPedalOverlayColors.TabIndex = 4;
-            this.groupBox_DropPedalOverlayColors.TabStop = false;
-            this.groupBox_DropPedalOverlayColors.Text = "Text colours";
-            this.groupBox_DropPedalOverlayColors.Visible = false;
-            //
-            // textBox_DropPedalOverlayStatusColor
-            //
-            this.textBox_DropPedalOverlayStatusColor.Enabled = false;
-            this.textBox_DropPedalOverlayStatusColor.Location = new System.Drawing.Point(116, 63);
-            this.textBox_DropPedalOverlayStatusColor.Name = "textBox_DropPedalOverlayStatusColor";
-            this.textBox_DropPedalOverlayStatusColor.ReadOnly = true;
-            this.textBox_DropPedalOverlayStatusColor.Size = new System.Drawing.Size(77, 20);
-            this.textBox_DropPedalOverlayStatusColor.TabIndex = 5;
-            //
-            // button_DropPedalOverlayStatusColor
-            //
-            this.button_DropPedalOverlayStatusColor.Location = new System.Drawing.Point(8, 63);
-            this.button_DropPedalOverlayStatusColor.Name = "button_DropPedalOverlayStatusColor";
-            this.button_DropPedalOverlayStatusColor.Size = new System.Drawing.Size(102, 20);
-            this.button_DropPedalOverlayStatusColor.TabIndex = 4;
-            this.button_DropPedalOverlayStatusColor.Text = "Status";
-            this.button_DropPedalOverlayStatusColor.UseVisualStyleBackColor = true;
-            this.button_DropPedalOverlayStatusColor.Click += new System.EventHandler(this.DropPedalColors_ChangeColor);
-            //
-            // textBox_DropPedalOverlayUpColor
-            //
-            this.textBox_DropPedalOverlayUpColor.Enabled = false;
-            this.textBox_DropPedalOverlayUpColor.Location = new System.Drawing.Point(116, 40);
-            this.textBox_DropPedalOverlayUpColor.Name = "textBox_DropPedalOverlayUpColor";
-            this.textBox_DropPedalOverlayUpColor.ReadOnly = true;
-            this.textBox_DropPedalOverlayUpColor.Size = new System.Drawing.Size(77, 20);
-            this.textBox_DropPedalOverlayUpColor.TabIndex = 3;
-            //
-            // button_DropPedalOverlayUpColor
-            //
-            this.button_DropPedalOverlayUpColor.Location = new System.Drawing.Point(8, 40);
-            this.button_DropPedalOverlayUpColor.Name = "button_DropPedalOverlayUpColor";
-            this.button_DropPedalOverlayUpColor.Size = new System.Drawing.Size(102, 20);
-            this.button_DropPedalOverlayUpColor.TabIndex = 2;
-            this.button_DropPedalOverlayUpColor.Text = "Up shift";
-            this.button_DropPedalOverlayUpColor.UseVisualStyleBackColor = true;
-            this.button_DropPedalOverlayUpColor.Click += new System.EventHandler(this.DropPedalColors_ChangeColor);
-            //
-            // textBox_DropPedalOverlayDownColor
-            //
-            this.textBox_DropPedalOverlayDownColor.Enabled = false;
-            this.textBox_DropPedalOverlayDownColor.Location = new System.Drawing.Point(116, 17);
-            this.textBox_DropPedalOverlayDownColor.Name = "textBox_DropPedalOverlayDownColor";
-            this.textBox_DropPedalOverlayDownColor.ReadOnly = true;
-            this.textBox_DropPedalOverlayDownColor.Size = new System.Drawing.Size(77, 20);
-            this.textBox_DropPedalOverlayDownColor.TabIndex = 1;
-            //
-            // button_DropPedalOverlayDownColor
-            //
-            this.button_DropPedalOverlayDownColor.Location = new System.Drawing.Point(8, 17);
-            this.button_DropPedalOverlayDownColor.Name = "button_DropPedalOverlayDownColor";
-            this.button_DropPedalOverlayDownColor.Size = new System.Drawing.Size(102, 20);
-            this.button_DropPedalOverlayDownColor.TabIndex = 0;
-            this.button_DropPedalOverlayDownColor.Text = "Down shift";
-            this.button_DropPedalOverlayDownColor.UseVisualStyleBackColor = true;
-            this.button_DropPedalOverlayDownColor.Click += new System.EventHandler(this.DropPedalColors_ChangeColor);
-            // 
             // groupBox_MidiInDevice
             // 
             this.groupBox_MidiInDevice.Controls.Add(this.checkBox_EnabledMidiIn);
@@ -5267,6 +5139,96 @@
             this.radio_ASIO_BufferSize_Driver.UseVisualStyleBackColor = true;
             this.radio_ASIO_BufferSize_Driver.CheckedChanged += new System.EventHandler(this.ASIO_BufferSize_Driver);
             this.radio_ASIO_BufferSize_Driver.MouseHover += new System.EventHandler(this.ToolTips_Show);
+            //
+            // tab_RSModsPlus
+            //
+            this.tab_RSModsPlus.BackColor = System.Drawing.Color.Azure;
+            this.tab_RSModsPlus.Controls.Add(this.groupBox_RSModsPlus_AudioStatus);
+            this.tab_RSModsPlus.Controls.Add(this.groupBox_RSModsPlus_CableInput);
+            this.tab_RSModsPlus.Location = new System.Drawing.Point(4, 22);
+            this.tab_RSModsPlus.Name = "tab_RSModsPlus";
+            this.tab_RSModsPlus.Size = new System.Drawing.Size(1150, 513);
+            this.tab_RSModsPlus.TabIndex = 10;
+            this.tab_RSModsPlus.Text = "Rocksmith Audio Bridge";
+            //
+            // groupBox_RSModsPlus_CableInput
+            //
+            this.groupBox_RSModsPlus_CableInput.Controls.Add(this.checkBox_MonitorOutput);
+            this.groupBox_RSModsPlus_CableInput.Controls.Add(this.checkBox_AudioDiagnosticsOverlay);
+            this.groupBox_RSModsPlus_CableInput.Controls.Add(this.label_RSModsPlus_CableInputInfo);
+            this.groupBox_RSModsPlus_CableInput.Location = new System.Drawing.Point(16, 16);
+            this.groupBox_RSModsPlus_CableInput.Name = "groupBox_RSModsPlus_CableInput";
+            this.groupBox_RSModsPlus_CableInput.Size = new System.Drawing.Size(1110, 150);
+            this.groupBox_RSModsPlus_CableInput.TabIndex = 0;
+            this.groupBox_RSModsPlus_CableInput.TabStop = false;
+            this.groupBox_RSModsPlus_CableInput.Text = "Real Tone Cable: modern input";
+            //
+            // label_RSModsPlus_CableInputInfo
+            //
+            this.label_RSModsPlus_CableInputInfo.Location = new System.Drawing.Point(16, 24);
+            this.label_RSModsPlus_CableInputInfo.Name = "label_RSModsPlus_CableInputInfo";
+            this.label_RSModsPlus_CableInputInfo.Size = new System.Drawing.Size(1080, 60);
+            this.label_RSModsPlus_CableInputInfo.TabIndex = 1;
+            this.label_RSModsPlus_CableInputInfo.Text = "Open the audio bridge to pick your input and output, switch between the Real Tone Cable and RS_ASIO, monitor your guitar and record takes.\r\nThe options below control the in-game diagnostics overlay and output logging only.";
+            //
+            // checkBox_AudioDiagnosticsOverlay
+            //
+            this.checkBox_AudioDiagnosticsOverlay.AutoSize = true;
+            this.checkBox_AudioDiagnosticsOverlay.Location = new System.Drawing.Point(16, 104);
+            this.checkBox_AudioDiagnosticsOverlay.Name = "checkBox_AudioDiagnosticsOverlay";
+            this.checkBox_AudioDiagnosticsOverlay.Size = new System.Drawing.Size(380, 17);
+            this.checkBox_AudioDiagnosticsOverlay.TabIndex = 3;
+            this.checkBox_AudioDiagnosticsOverlay.Text = "Show the audio diagnostics overlay in game (latency, signal level, stream health)";
+            this.checkBox_AudioDiagnosticsOverlay.UseVisualStyleBackColor = true;
+            this.checkBox_AudioDiagnosticsOverlay.CheckedChanged += new System.EventHandler(this.Save_AudioDiagnosticsOverlay);
+            this.checkBox_AudioDiagnosticsOverlay.MouseLeave += new System.EventHandler(this.ToolTips_Hide);
+            this.checkBox_AudioDiagnosticsOverlay.MouseHover += new System.EventHandler(this.ToolTips_Show);
+            //
+            // checkBox_MonitorOutput
+            //
+            this.checkBox_MonitorOutput.AutoSize = true;
+            this.checkBox_MonitorOutput.Location = new System.Drawing.Point(16, 126);
+            this.checkBox_MonitorOutput.Name = "checkBox_MonitorOutput";
+            this.checkBox_MonitorOutput.Size = new System.Drawing.Size(420, 17);
+            this.checkBox_MonitorOutput.TabIndex = 2;
+            this.checkBox_MonitorOutput.Text = "Advanced: log the game's output stream for diagnosis (experimental, can hang the boot)";
+            this.checkBox_MonitorOutput.UseVisualStyleBackColor = true;
+            this.checkBox_MonitorOutput.CheckedChanged += new System.EventHandler(this.Save_MonitorOutput);
+            this.checkBox_MonitorOutput.MouseLeave += new System.EventHandler(this.ToolTips_Hide);
+            this.checkBox_MonitorOutput.MouseHover += new System.EventHandler(this.ToolTips_Show);
+            //
+            // groupBox_RSModsPlus_AudioStatus
+            //
+            this.groupBox_RSModsPlus_AudioStatus.Controls.Add(this.textBox_RSModsPlus_AudioStatus);
+            this.groupBox_RSModsPlus_AudioStatus.Controls.Add(this.button_RSModsPlus_RefreshStatus);
+            this.groupBox_RSModsPlus_AudioStatus.Location = new System.Drawing.Point(16, 180);
+            this.groupBox_RSModsPlus_AudioStatus.Name = "groupBox_RSModsPlus_AudioStatus";
+            this.groupBox_RSModsPlus_AudioStatus.Size = new System.Drawing.Size(1110, 316);
+            this.groupBox_RSModsPlus_AudioStatus.TabIndex = 1;
+            this.groupBox_RSModsPlus_AudioStatus.TabStop = false;
+            this.groupBox_RSModsPlus_AudioStatus.Text = "Audio status (reads the game's logs, works while Rocksmith is running)";
+            //
+            // button_RSModsPlus_RefreshStatus
+            //
+            this.button_RSModsPlus_RefreshStatus.Location = new System.Drawing.Point(16, 22);
+            this.button_RSModsPlus_RefreshStatus.Name = "button_RSModsPlus_RefreshStatus";
+            this.button_RSModsPlus_RefreshStatus.Size = new System.Drawing.Size(100, 24);
+            this.button_RSModsPlus_RefreshStatus.TabIndex = 0;
+            this.button_RSModsPlus_RefreshStatus.Text = "Refresh";
+            this.button_RSModsPlus_RefreshStatus.UseVisualStyleBackColor = true;
+            this.button_RSModsPlus_RefreshStatus.Click += new System.EventHandler(this.RSModsPlus_RefreshAudioStatus);
+            //
+            // textBox_RSModsPlus_AudioStatus
+            //
+            this.textBox_RSModsPlus_AudioStatus.Font = new System.Drawing.Font("Consolas", 8.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.textBox_RSModsPlus_AudioStatus.Location = new System.Drawing.Point(16, 54);
+            this.textBox_RSModsPlus_AudioStatus.Multiline = true;
+            this.textBox_RSModsPlus_AudioStatus.Name = "textBox_RSModsPlus_AudioStatus";
+            this.textBox_RSModsPlus_AudioStatus.ReadOnly = true;
+            this.textBox_RSModsPlus_AudioStatus.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
+            this.textBox_RSModsPlus_AudioStatus.Size = new System.Drawing.Size(1078, 246);
+            this.textBox_RSModsPlus_AudioStatus.TabIndex = 1;
+            this.textBox_RSModsPlus_AudioStatus.WordWrap = false;
             // 
             // tab_Rocksmith
             // 
@@ -5380,7 +5342,7 @@
             this.checkBox_Rocksmith_ExclusiveMode.Name = "checkBox_Rocksmith_ExclusiveMode";
             this.checkBox_Rocksmith_ExclusiveMode.Size = new System.Drawing.Size(101, 17);
             this.checkBox_Rocksmith_ExclusiveMode.TabIndex = 10;
-            this.checkBox_Rocksmith_ExclusiveMode.Text = "Exclusive Mode";
+            this.checkBox_Rocksmith_ExclusiveMode.Text = "Shared Mode (higher latency)";
             this.checkBox_Rocksmith_ExclusiveMode.UseVisualStyleBackColor = true;
             this.checkBox_Rocksmith_ExclusiveMode.CheckedChanged += new System.EventHandler(this.Rocksmith_ExclusiveMode);
             this.checkBox_Rocksmith_ExclusiveMode.MouseHover += new System.EventHandler(this.ToolTips_Show);
@@ -6578,7 +6540,6 @@
             // tab_Profiles
             // 
             this.tab_Profiles.BackColor = System.Drawing.Color.Azure;
-            this.tab_Profiles.Controls.Add(this.button_Profiles_AddDropPedalToTones);
             this.tab_Profiles.Controls.Add(this.groupBox_ImportJsonTones);
             this.tab_Profiles.Controls.Add(this.dgv_Profiles_Songlists);
             this.tab_Profiles.Controls.Add(this.groupBox_Profile_MoreSongLists);
@@ -6627,17 +6588,6 @@
             this.button_ImportTone2014.Text = "Import XML";
             this.button_ImportTone2014.UseVisualStyleBackColor = true;
             this.button_ImportTone2014.Click += new System.EventHandler(this.Profiles_ImportTone2014);
-            // 
-            // button_Profiles_AddDropPedalToTones
-            // 
-            this.button_Profiles_AddDropPedalToTones.Location = new System.Drawing.Point(360, 470);
-            this.button_Profiles_AddDropPedalToTones.Name = "button_Profiles_AddDropPedalToTones";
-            this.button_Profiles_AddDropPedalToTones.Size = new System.Drawing.Size(332, 23);
-            this.button_Profiles_AddDropPedalToTones.TabIndex = 14;
-            this.button_Profiles_AddDropPedalToTones.Text = "Add drop pedal to all custom tones";
-            this.button_Profiles_AddDropPedalToTones.UseVisualStyleBackColor = true;
-            this.button_Profiles_AddDropPedalToTones.Visible = false;
-            this.button_Profiles_AddDropPedalToTones.Click += new System.EventHandler(this.Profiles_AddDropPedalToTones);
             // 
             // button_ImportToneManifest
             // 
@@ -7197,10 +7147,6 @@
             this.groupBox_SampleRateOutput.ResumeLayout(false);
             this.groupBox_AutoLoadProfiles.ResumeLayout(false);
             this.tabPage_ModSettings_AutoTuning.ResumeLayout(false);
-            this.groupBox_DropPedal.ResumeLayout(false);
-            this.groupBox_DropPedal.PerformLayout();
-            this.groupBox_DropPedalOverlayColors.ResumeLayout(false);
-            this.groupBox_DropPedalOverlayColors.PerformLayout();
             this.groupBox_MidiInDevice.ResumeLayout(false);
             this.groupBox_MidiInDevice.PerformLayout();
             this.groupBox_MidiAutoTuningWhen.ResumeLayout(false);
@@ -7232,6 +7178,11 @@
             this.tab_SetAndForget.ResumeLayout(false);
             this.tab_RSASIO.ResumeLayout(false);
             this.tab_RSASIO.PerformLayout();
+            this.tab_RSModsPlus.ResumeLayout(false);
+            this.groupBox_RSModsPlus_CableInput.ResumeLayout(false);
+            this.groupBox_RSModsPlus_CableInput.PerformLayout();
+            this.groupBox_RSModsPlus_AudioStatus.ResumeLayout(false);
+            this.groupBox_RSModsPlus_AudioStatus.PerformLayout();
             this.groupBox_ASIO_InputMic.ResumeLayout(false);
             this.groupBox_ASIO_InputMic.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)(this.nUpDown_ASIO_InputMic_MaxVolume)).EndInit();
@@ -7501,6 +7452,14 @@
         private System.Windows.Forms.GroupBox groupBox_ControlVolumeIncrement;
         private System.Windows.Forms.NumericUpDown nUpDown_VolumeInterval;
         private System.Windows.Forms.TabPage tab_RSASIO;
+        private System.Windows.Forms.TabPage tab_RSModsPlus;
+        private System.Windows.Forms.GroupBox groupBox_RSModsPlus_CableInput;
+        private System.Windows.Forms.Label label_RSModsPlus_CableInputInfo;
+        private System.Windows.Forms.CheckBox checkBox_MonitorOutput;
+        private System.Windows.Forms.CheckBox checkBox_AudioDiagnosticsOverlay;
+        private System.Windows.Forms.GroupBox groupBox_RSModsPlus_AudioStatus;
+        private System.Windows.Forms.Button button_RSModsPlus_RefreshStatus;
+        private System.Windows.Forms.TextBox textBox_RSModsPlus_AudioStatus;
         private System.Windows.Forms.ListBox listBox_AvailableASIODevices_Input0;
         private System.Windows.Forms.GroupBox groupBox_ASIO_BufferSize;
         private System.Windows.Forms.RadioButton radio_ASIO_BufferSize_Custom;
@@ -7664,18 +7623,7 @@
         private System.Windows.Forms.CheckBox checkBox_ModsLog;
         private System.IO.FileSystemWatcher fileSystemWatcher1;
         private System.Windows.Forms.TabPage tabPage_ModSettings_AutoTuning;
-        private System.Windows.Forms.GroupBox groupBox_DropPedal;
         private System.Windows.Forms.CheckBox checkBox_DropPedal;
-        private System.Windows.Forms.Label label_DropPedalEngine;
-        private System.Windows.Forms.ComboBox comboBox_DropPedalEngine;
-        private System.Windows.Forms.CheckBox checkBox_DropPedalCustomOverlayColors;
-        private System.Windows.Forms.GroupBox groupBox_DropPedalOverlayColors;
-        private System.Windows.Forms.TextBox textBox_DropPedalOverlayStatusColor;
-        private System.Windows.Forms.Button button_DropPedalOverlayStatusColor;
-        private System.Windows.Forms.TextBox textBox_DropPedalOverlayUpColor;
-        private System.Windows.Forms.Button button_DropPedalOverlayUpColor;
-        private System.Windows.Forms.TextBox textBox_DropPedalOverlayDownColor;
-        private System.Windows.Forms.Button button_DropPedalOverlayDownColor;
         private System.Windows.Forms.Label label_DropPedalPitchDownKey;
         private System.Windows.Forms.Label label_DropPedalPitchUpKey;
         private System.Windows.Forms.Label label_DropPedalToggleKey;
@@ -7815,7 +7763,6 @@
         private System.Windows.Forms.GroupBox groupBox_ImportJsonTones;
         private System.Windows.Forms.Button button_ImportToneManifest;
         private System.Windows.Forms.Button button_ImportTone2014;
-        private System.Windows.Forms.Button button_Profiles_AddDropPedalToTones;
         private System.Windows.Forms.CheckBox checkBox_ImportTonesBulk;
         private System.Windows.Forms.CheckBox checkBox_FixBrokenTones;
         private System.Windows.Forms.CheckBox checkBox_CustomNSPTimer;

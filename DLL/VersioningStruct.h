@@ -31,6 +31,10 @@ private:
 	std::vector<T> myVersions;
 };
 
+// True only when the running exe's checksum is exactly this build's. GetVersion falls back to September 2022 for an
+// unknown exe (after a message box), so code patching fixed addresses of one build must ask this instead.
+bool IsExactGameBuild(VersionType type);
+
 template <typename T> VersioningStruct<T>::VersioningStruct()
 	: myVersions(std::vector<T>(static_cast<int>(VersionType::Count), 0))
 {

@@ -1,0 +1,41 @@
+Rocksmith Audio Bridge (RSModsPlus)
+Copyright (c) 2026 Cheesewizard. Licensed under the MIT License (see LICENSE)
+for the code Cheesewizard wrote.
+
+Upstream RSMods
+---------------
+This project is a fork of RSMods (https://github.com/Lovrom8/RSMods) by Lovrom8 (Lovro),
+ffio1 and contributors. RSMods is published without a licence. Its code remains
+the property of its authors and is not covered by the MIT License above.
+
+Rocksmith Audio Bridge is an independent extension of RSMods, maintained
+separately. Please report problems at
+https://github.com/Cheesewizard/RocksmithAudioBridge/issues, not to the RSMods authors.
+
+Third-party components
+----------------------
+Signalsmith Stretch       MIT License, (c) Geraint Luff / Signalsmith Audio Ltd.
+                          DLL/Audio/ThirdParty/SignalsmithStretch/LICENSE.txt
+SoX Resampler (soxr)      GNU LGPL 2.1, (c) robs@users.sourceforge.net.
+                          Shipped as a separate soxr.dll with its licence text
+                          (ThirdParty/soxr in the runtime bundle).
+ONNX Runtime              MIT License, (c) Microsoft Corporation. Licence and
+                          third-party notices ship in ThirdParty/onnxruntime.
+Dear ImGui (v1.85)        MIT License, (c) Omar Cornut. DLL/Lib/ImGUI
+Roboto font               Apache License 2.0, (c) Google. Embedded in
+                          DLL/Lib/ImGUI/RobotoFont.cpp.
+JSON for Modern C++       MIT License, (c) Niels Lohmann. DLL/Lib/Json/json.hpp
+SimpleIni                 MIT License, (c) Brodie Thiesfield. DLL/Lib/Ini/SimpleIni.h
+RtMidi                    MIT-style licence, (c) Gary P. Scavone. DLL/Lib/Midi
+NAudio                    MIT License, (c) Mark Heath and contributors.
+TwitchLib                 MIT License, (c) TwitchLib contributors.
+Microsoft Detours         DLL/Lib/Detours (header dated 1995-2001), inherited
+                          from upstream RSMods.
+
+The settings application also bundles libraries inherited unchanged from
+upstream RSMods (GUI/Lib: Rocksmith Custom Song Toolkit libraries, 7-Zip,
+SevenZipSharp, BouncyCastle, SharpZipLib, Newtonsoft.Json, NLog, Ookii.Dialogs,
+Pfim, ddc and others). Each remains under its own licence.
+
+No part of aubio is included. Note by Note's onset detector
+(DLL/Audio/HfcOnsetDetector.hpp) is an independent implementation.
