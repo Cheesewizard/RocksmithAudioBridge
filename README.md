@@ -1,7 +1,3 @@
-
-
-https://github.com/user-attachments/assets/1b51d057-285e-4ded-a113-5c25af1f3346
-
 # Rocksmith Audio Bridge
 
 ![Rocksmith Audio Bridge](.github/images/rocksmith-audio-bridge-banner.jpg)
@@ -31,6 +27,10 @@ Rocksmith+ and its expanded into a suite of features now.
 </p>
 
 ---
+
+## Demo
+
+https://github.com/user-attachments/assets/1b51d057-285e-4ded-a113-5c25af1f3346
 
 https://github.com/user-attachments/assets/09487e67-f613-4fee-9253-9ced7625a1f3
 
