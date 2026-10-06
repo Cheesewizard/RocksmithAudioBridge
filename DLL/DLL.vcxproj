@@ -24,6 +24,7 @@
     <ClCompile Include="Audio\TakeRecorder.cpp" />
     <ClCompile Include="Audio\OutputTap.cpp" />
     <ClCompile Include="Audio\ExternalAmp.cpp" />
+    <ClCompile Include="Audio\VstHostLink.cpp" />
     <ClCompile Include="Audio\GameAudioRecorder.cpp" />
     <ClCompile Include="Audio\DelayLinePitchShifter.cpp" />
     <ClCompile Include="Audio\SongShift\WwiseMusicHook.cpp">
@@ -330,6 +331,8 @@
     <ClInclude Include="Audio\TakeRecorder.hpp" />
     <ClInclude Include="Audio\OutputTap.hpp" />
     <ClInclude Include="Audio\ExternalAmp.hpp" />
+    <ClInclude Include="Audio\VstHostLink.hpp" />
+    <ClInclude Include="Audio\VstHostControl.hpp" />
     <ClInclude Include="Audio\GameAudioRecorder.hpp" />
     <ClInclude Include="Audio\DrySignalRecording.hpp" />
     <ClInclude Include="Audio\HumRemover.hpp" />

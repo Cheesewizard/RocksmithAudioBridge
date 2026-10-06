@@ -5,6 +5,7 @@
 #include "Mods/VolumeControl.hpp"
 #include "Mods/Midi.hpp"
 #include "Overlay/OverlayShell.hpp"
+#include "Audio/VstHostLink.hpp"
 #include "Overlay/OverlayUi.hpp"
 
 namespace Menu {
@@ -55,6 +56,7 @@ namespace Menu {
 		// cursor logic all key off audioBridgeMenuEnabled.
 		if (Menu::audioBridgeMenuEnabled)
 			Overlay::DrawShell(&Menu::audioBridgeMenuEnabled);
+		VstHostLink::OnFrame(Menu::audioBridgeMenuEnabled);   // the VST host's amp popout shows only with the overlay
 
 		ImGui::EndFrame();
 		ImGui::Render();

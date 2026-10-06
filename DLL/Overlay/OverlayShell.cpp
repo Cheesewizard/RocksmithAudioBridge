@@ -9,6 +9,7 @@
 #include "../Audio/TakeRecorder.hpp"
 #include "../Audio/MlServiceLauncher.hpp"
 #include "../Audio/ExternalAmp.hpp"
+#include "../Audio/VstHostLink.hpp"
 #include "../Research/ResearchBridge.hpp"
 #include "../Mods/DropPedal/DropPedal.hpp"
 #include "../Mods/NoteByNoteMenu.hpp"
@@ -738,6 +739,28 @@ namespace Overlay
 				: "On: the game's amp stays muted, waiting for an amp sim.";
 			if (ToggleRow("Use external amp", state, &enabled, "Saved. Note detection always uses your clean signal, whichever amp you hear."))
 				ExternalAmp::SetEnabled(enabled);
+			EndCard();
+
+			// VST host (VstHost/): the amp plugin runs in its own 64-bit program; its window can pop out over the game
+			// while this overlay is open.
+			const VstHostLink::Snapshot vst = VstHostLink::GetSnapshot();
+			BeginCard("VST plugin");
+			if (vst.hostRunning) {
+				InfoRow("Plugin", vst.pluginName.empty() ? "Loading..." : vst.pluginName, Color::Good);
+				if (Button(vst.popoutWanted ? "Hide amp" : "Pop out amp", !vst.popoutWanted,
+					"Shows the plugin's own window over the game whenever this overlay is open. Drag its top bar to move it; the spot is remembered."))
+					VstHostLink::SetPopout(!vst.popoutWanted);
+				ImGui::SameLine();
+				if (Button("Close VST host", false, "Saves the plugin's settings and closes it. The game's amp comes back if fallback is on."))
+					VstHostLink::StopHost();
+			}
+			else if (vst.hostInstalled) {
+				Caption("Play through a VST3 amp sim (AmpliTube 5, Helix Native...) without opening its own app. Starts with the last plugin you used.");
+				if (Button("Start VST host", true)) VstHostLink::StartHost();
+			}
+			else {
+				Caption("The VST host is not installed in the game folder.");
+			}
 			EndCard();
 
 			BeginCard("Connection");
