@@ -10,6 +10,7 @@
 #include "../Audio/MlServiceLauncher.hpp"
 #include "../Audio/ExternalAmp.hpp"
 #include "../Audio/VstHostLink.hpp"
+#include "../Extensions.hpp"
 #include "../Research/ResearchBridge.hpp"
 #include "../Mods/DropPedal/DropPedal.hpp"
 #include "../Mods/NoteByNoteMenu.hpp"
@@ -1327,16 +1328,30 @@ namespace Overlay
 			EndCard();
 		}
 
-		// Three build types: Debug and Release are probe builds (they build and deploy the Note by
-		// Note probe) and name themselves in the header, in amber, so a test build is never mistaken for the release.
-		// Master ("Master" configuration, RSMODS_PUBLIC_RELEASE) is what users get: no probe, no Debug page, no label.
-		// The upstream RSMods "with Wwise Logging" configurations count as Debug / Release.
+		// Master (RSMODS_PUBLIC_RELEASE) is what users get: no Debug page, no label. Debug and Release builds have the
+		// Debug page and name themselves in the header, in amber, so a test build is never mistaken for the release;
+		// the label also lists any build extensions compiled in (Extensions.hpp).
+#if defined(RSMODS_PUBLIC_RELEASE)
 		constexpr bool kDebugPage = false;
-		constexpr const char* kBuildLabel = "";
+		const std::string& BuildLabel() { static const std::string label; return label; }
+#else
+		constexpr bool kDebugPage = true;
+		const std::string& BuildLabel()
+		{
+#if defined(_DEBUG)
+			static const std::string base = "Debug build";
+#else
+			static const std::string base = "Release build";
+#endif
+			static const std::string label = Extensions::Any() ? base + " + " + Extensions::Names() : base;
+			return label;
+		}
+#endif
 
 		void DebugPage()
 		{
 			PageHeader("Debug", "Development tools. Not in public releases.");
+			Extensions::DrawOverlayDebugPage();
 
 			// ML service status + restart. The launcher runs in this process, so this reads its state directly.
 			// Status is re-read twice a second; opening the result mappings every frame is wasteful.
@@ -1394,11 +1409,11 @@ namespace Overlay
 			ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Color::Muted));
 			ImGui::TextUnformatted("In-game controls");
 			ImGui::PopStyleColor();
-			if (kBuildLabel[0] != '\0') {
+			if (!BuildLabel().empty()) {
 				// Non-public builds say what they are, in amber so a test build is never mistaken for the release.
 				ImGui::SameLine(0.0f, 10.0f);
 				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Color::Warn));
-				ImGui::TextUnformatted(kBuildLabel);
+				ImGui::TextUnformatted(BuildLabel().c_str());
 				ImGui::PopStyleColor();
 			}
 			ImGui::PopFont();

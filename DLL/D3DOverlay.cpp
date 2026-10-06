@@ -10,6 +10,7 @@
 #include "Audio/CableInput.hpp"
 #include "OverlayToggles.hpp"
 #include "PitchNames.hpp"
+#include "Extensions.hpp"
 #include "Mods/ExtendedRangeMode.hpp"
 #include "ProductVersion.hpp"
 #include "Overlay/HudLayout.hpp"
@@ -262,6 +263,20 @@ void GameOverlay::DisplayRiffRepeaterOverHundredPercentSpeed()
 
 void GameOverlay::DisplayNoteByNoteStatus()
 {
+	// Status lines from build extensions (Extensions.hpp), drawn whatever Note by Note is doing. Amber, so
+	// they never read as a game or Note by Note state.
+	{
+		std::vector<std::string> lines;
+		Extensions::CollectHudLines(lines);
+		int top = static_cast<int>(WindowSize.height / 6.5f);
+		const int lineHeight = static_cast<int>(WindowSize.height / 36.0f);
+		for (const std::string& line : lines)
+		{
+			DX9DrawText(line, 0xFFFFC033, static_cast<int>(WindowSize.width / 96.0f), top, static_cast<int>(WindowSize.width),
+				top + lineHeight * 2, pDevice, { NULL, NULL }, DT_LEFT | DT_NOCLIP);
+			top += lineHeight;
+		}
+	}
 
 	// Shipped in every configuration (it was Debug-only): the frozen-chord fix hides finger rings
 	// stranded off the neck, and this is what puts that member's number back.

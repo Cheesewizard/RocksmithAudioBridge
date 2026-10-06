@@ -13,6 +13,7 @@
 #include "Audio/ExternalAmp.hpp"
 #include "ProductVersion.hpp"
 #include "OverlayInputCapture.hpp"
+#include "Extensions.hpp"
 
 #include <io.h>
 #include <share.h>
@@ -195,6 +196,7 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM keyPressed, LPARAM lParam) {
 			if ((keyPressed == VK_RIGHT || keyPressed == VK_LEFT) && GameState::Menus::IsInLASPlayingModes()
 				&& NoteByNoteProbe::IsAutomaticEnabled())
 				NoteByNoteHostServices::QueueNoteNavigation(keyPressed == VK_RIGHT ? 1 : -1);
+			if (Extensions::KeyUp(static_cast<uint32_t>(keyPressed))) return 0;
 			Keybindings::HandleKeyUp(keyPressed);
 			break;
 		case WM_KEYDOWN:

@@ -10,6 +10,7 @@
 #include "OverlayToggles.hpp"
 #include "Audio/SongShift/WwiseMusicHook.hpp"
 #include "Audio/CableInput.hpp"
+#include "Extensions.hpp"
 
 namespace ModManager {
 	bool IsHookGroupSkipped(const char* group) {
@@ -286,7 +287,7 @@ namespace ModManager {
 			Audio::AsioHook::Install();
 			inputConditionerHookActive = true;
 		}
-
+		Extensions::AudioHooksInstalled();
 
 		if (!skipAudio) AudioDevices::SetupMicrophones();
 		if (!IsHookGroupSkipped("bugfix")) ApplyBugPrevention();
@@ -415,7 +416,7 @@ namespace ModManager {
 
 		// Liveness report for the modern cable input (packets flowing / stalled / resumed).
 		Audio::CableInput::Poll();
-
+		Extensions::Tick();
 
 		if (DropPedal::ShouldInstallInputHooks())
 		{

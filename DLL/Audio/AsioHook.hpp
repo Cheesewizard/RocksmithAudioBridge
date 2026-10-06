@@ -60,6 +60,11 @@ namespace Audio::AsioHook
 	// Ownership stays with the caller. Active endpoints are assigned in RS_ASIO.ini order.
 	void SetProcessor(size_t routeIndex, IInputProcessor* inputProcessor);
 
+	// A source stage that runs BEFORE the route's processor, overwriting the captured input
+	// when armed. Lets a synthetic input feed the real processor chain (e.g. the Drop
+	// Pedal shifter). Ownership stays with the caller; a disarmed source is inert.
+	void SetInputSource(size_t routeIndex, IInputProcessor* inputSource);
+	void SetInputSourceActive(size_t routeIndex, bool active);
 
 	// Make-up gain (dB) applied to the real guitar input before the game's amp and note gate.
 	// Compensates for RS_ASIO/interface inputs arriving quieter than a hot Real Tone Cable, which

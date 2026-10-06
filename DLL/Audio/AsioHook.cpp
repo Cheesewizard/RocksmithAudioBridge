@@ -148,6 +148,12 @@ namespace Audio::AsioHook
 		std::array<std::vector<float>, INPUT_ROUTE_COUNT> conversionBuffers;
 		std::array<std::atomic<uint64_t>, INPUT_ROUTE_COUNT> routeLastBufferTick;
 		std::array<std::atomic<IInputProcessor*>, INPUT_ROUTE_COUNT> activeProcessors;
+		// Optional source stage that runs BEFORE the route's processor: it overwrites the
+		// captured input, so a synthetic input can feed the real processor chain (the
+		// Drop Pedal shifter) exactly as a physical cable would. Only active while armed, so a
+		// disarmed source leaves the real input untouched and the route behaves as if absent.
+		std::array<std::atomic<IInputProcessor*>, INPUT_ROUTE_COUNT> inputSources;
+		std::array<std::atomic<bool>, INPUT_ROUTE_COUNT> inputSourceArmed;
 		std::array<std::atomic<IAudioCaptureClient*>, INPUT_ROUTE_COUNT> routeCaptureClients;
 		std::array<Microsoft::WRL::ComPtr<PersistentInput::ICaptureState>, INPUT_ROUTE_COUNT> bridgeStates;
 		std::array<std::atomic<UINT64>, INPUT_ROUTE_COUNT> bridgeGenerations;
@@ -1178,7 +1184,11 @@ namespace Audio::AsioHook
 					}
 				}
 
+				IInputProcessor* source = inputSources[0].load(std::memory_order_relaxed);
+				const bool sourceActive = source != nullptr
+					&& inputSourceArmed[0].load(std::memory_order_acquire);
 				IInputProcessor* processor = activeProcessors[0].load(std::memory_order_relaxed);
+				if (sourceActive) source->Process(converted, static_cast<uint32_t>(frames));
 				if (processor) processor->Process(converted, static_cast<uint32_t>(frames));
 				RawPitchVerifier::Observe(0, converted, static_cast<uint32_t>(frames), static_cast<uint32_t>(sampleRate));
 				MlAudioExporter::Observe(0, converted, static_cast<uint32_t>(frames), static_cast<uint32_t>(sampleRate));
@@ -1340,15 +1350,28 @@ namespace Audio::AsioHook
 				return result;
 
 			IInputProcessor* processor = activeProcessors[routeIndex].load(std::memory_order_relaxed);
+			IInputProcessor* source = inputSources[routeIndex].load(std::memory_order_relaxed);
+			const bool sourceActive = source != nullptr
+				&& inputSourceArmed[routeIndex].load(std::memory_order_acquire);
 
-			// A silent buffer has no samples for a processor to transform. Route 0 remains
-			// observable so its timeline and diagnostics stay continuous.
+			// A silent-flagged buffer carries no input samples. A processor has nothing to
+			// transform, so it is skipped, but an armed source GENERATES the samples, so it
+			// must run even on a silent buffer, and the flag is cleared afterward so the game
+			// reads the synth as real input. Otherwise a synthetic source could never feed
+			// detection while the real cable is quiet:
+			// silent -> skip -> no synth -> stays silent, a deadlock.
+			//
+			// The raw pitch verifier (tier 0) OBSERVES route 0 in every case, including the
+			// no-source/no-processor path (a real cable under Speaker Mode installs neither)
+			// and silent buffers (fed as zeros so the ring's
+			// timeline stays continuous). Observation is read-only: the write-back to the
+			// game's buffer still happens only when a source or processor changed samples.
 			const bool silent = flags && (*flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0;
-			const bool runsProcessor = processor != nullptr && !silent;
+			const bool runsProcessor = processor != nullptr && (!silent || sourceActive);
 			const bool observesRoute = routeIndex == 0;
 			// Route 1 is Player 2 on the second ASIO input; it only feeds the Player 2 SIGNAL row.
 			const bool metersPlayerTwo = routeIndex == 1;
-			if (!runsProcessor && !observesRoute && !metersPlayerTwo) return result;
+			if (!sourceActive && !runsProcessor && !observesRoute && !metersPlayerTwo) return result;
 
 			float* converted = conversionBuffers[routeIndex].data();
 			if (silent)
@@ -1394,10 +1417,13 @@ namespace Audio::AsioHook
 				}
 			}
 
-			bool modifiesBuffer = false;
+			// The armed source replaces the captured input first, then the processor (e.g. the
+			// Drop Pedal shifter) transforms whatever is now in the buffer - real cable or synth.
+			bool modifiesBuffer = sourceActive && source->Process(converted, *frameCount);
 			if (processor)
 			{
-				modifiesBuffer = processor->Process(converted, *frameCount);
+				const bool changed = processor->Process(converted, *frameCount);
+				if (!silent || sourceActive) modifiesBuffer = changed || modifiesBuffer;
 			}
 			if (observesRoute)
 			{
@@ -1830,7 +1856,10 @@ namespace Audio::AsioHook
 		{
 			if (!configuredInputs[routeIndex]) continue;
 			if (!routeFormats[routeIndex].IsUsable()) return;
-			if (!activeProcessors[routeIndex].load(std::memory_order_relaxed)) return;
+			// A route is drivable if it has a processor or an installed source,
+			// so a source-only route (Drop Pedal off) still brings processing up.
+			if (!activeProcessors[routeIndex].load(std::memory_order_relaxed)
+				&& !inputSources[routeIndex].load(std::memory_order_relaxed)) return;
 		}
 
 		autoEnabledOnce.store(true, std::memory_order_relaxed);
@@ -1840,10 +1869,13 @@ namespace Audio::AsioHook
 
 			conversionBuffers[routeIndex].assign(MAX_BUFFER_FRAMES, 0.0f);
 			IInputProcessor* processor = activeProcessors[routeIndex].load(std::memory_order_relaxed);
+			IInputProcessor* source = inputSources[routeIndex].load(std::memory_order_relaxed);
+			if (source) source->Prepare(routeFormats[routeIndex]);
 			if (processor) processor->Prepare(routeFormats[routeIndex]);
 			inputReady[routeIndex].store(true, std::memory_order_release);
 			LOG_INFO("[AsioHook] Player " << routeIndex + 1 << " input prepared ("
-				<< (processor ? "processor" : "no processor") << ")." << std::endl);
+				<< (processor ? "processor" : "no processor")
+				<< (source ? " + source" : "") << ")." << std::endl);
 		}
 
 		UpdateProcessingEnabled(true);
@@ -1864,6 +1896,26 @@ namespace Audio::AsioHook
 		activeProcessors[routeIndex].store(inputProcessor, std::memory_order_relaxed);
 	}
 
+	void SetInputSource(size_t routeIndex, IInputProcessor* inputSource)
+	{
+		if (routeIndex >= INPUT_ROUTE_COUNT)
+		{
+			LOG_ERROR("[AsioHook] Refusing to set input source for invalid route " << routeIndex << "." << std::endl);
+			return;
+		}
+		std::lock_guard<std::mutex> guard(registrationMutex);
+		if (inputSources[routeIndex].load(std::memory_order_relaxed) == inputSource) return;
+		processingGate.CloseAndWait();
+		inputReady[routeIndex].store(false, std::memory_order_release);
+		autoEnabledOnce.store(false, std::memory_order_relaxed);
+		inputSources[routeIndex].store(inputSource, std::memory_order_relaxed);
+	}
+
+	void SetInputSourceActive(size_t routeIndex, bool active)
+	{
+		if (routeIndex >= INPUT_ROUTE_COUNT) return;
+		inputSourceArmed[routeIndex].store(active, std::memory_order_release);
+	}
 
 	void SetInputGainDb(float decibels)
 	{
@@ -1998,7 +2050,8 @@ namespace Audio::AsioHook
 				for (size_t routeIndex = 0; routeIndex < INPUT_ROUTE_COUNT; ++routeIndex)
 				{
 					if (!configuredInputs[routeIndex]) continue;
-					if (!activeProcessors[routeIndex].load(std::memory_order_relaxed)
+					if ((!activeProcessors[routeIndex].load(std::memory_order_relaxed)
+							&& !inputSources[routeIndex].load(std::memory_order_relaxed))
 						|| (!routeCaptureClients[routeIndex].load(std::memory_order_acquire)
 							&& !(routeIndex == 0 && proxyInputSeen.load(std::memory_order_acquire)))
 						|| !routeFormats[routeIndex].IsUsable()
