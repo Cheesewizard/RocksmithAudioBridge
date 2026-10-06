@@ -61,6 +61,12 @@ namespace ModManager {
     void CheckIfGameHasLoaded();
     void ApplyAudioDeviceConfiguration();
     void HandleMicrophoneVolumeOverride();
+    void HandleAsioInputGain();
+    void HandleNoiseGate();
+    void HandleCompressor();
+    void HandleHumFilter();
+    void HandleRocksmithGate();
+    void HandleAudioBridgeLimiter();
     void HandleAudioBackgroundToggle();
     void HandleTwoRTCBypassToggle();
 }

@@ -15,14 +15,12 @@ namespace Audio
 		// capture format changes. Implementations do their allocating here.
 		virtual void Prepare(const CaptureFormat& format) = 0;
 
-		// frameCount frames of interleaved samples, channelCount per frame, edited in place.
-		virtual void Process(float* samples, uint32_t frameCount) = 0;
+		// Mono working samples. Return true only when samples were changed, so the
+		// capture hook can preserve the original packet exactly during bypass.
+		virtual bool Process(float* samples, uint32_t frameCount) = 0;
 
-		// Constant delay this implementation adds, in frames.
-		//
-		// Rocksmith calibrates input latency once. An implementation whose delay changed
-		// when it engaged would shift every note's timing mid-session, so implementations
-		// hold a fixed delay even while passing audio through untouched.
+		// Reported processing delay in frames; zero when bypassed. This is not
+		// an end-to-end hardware latency measurement.
 		virtual uint32_t GetLatencyFrames() const = 0;
 	};
 }

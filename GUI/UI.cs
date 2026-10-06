@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Windows.Forms;
 using System.IO;
 using System.Linq;
@@ -57,7 +57,7 @@ namespace RSMods
         TabPage ProfileEditsTab;
         int ProfileEditsTabIndex;
 
-        string github_UpdateResponse;
+        string github_UpdateResponse = "null";   // "null" = no update information (the check is disabled below)
 
         bool AllowSaving = false;
 
@@ -157,11 +157,10 @@ namespace RSMods
             // Get list of all backups so we can revert to one if needed
             Startup_ListAllBackups();
 
-            // Check For Updates
-            CheckForUpdates_CallGithubAPI();
-
-            // Should we show the Update button?
-            Startup_ShowUpdateButton();
+            // No update check. The inherited one compares upstream RSMods (Lovrom8/RSMods) releases with this
+            // build's AssemblyVersion, which is deliberately the upstream base version, so it would offer
+            // upstream's installer over the Audio Bridge. Re-enable only against RSModsPlus's own releases.
+            button_UpdateRSMods.Visible = false;
 
             // Is Audio.psarc unpacked?
             Startup_CheckStatusAudioPsarc();
@@ -176,10 +175,31 @@ namespace RSMods
 
         private void Startup_ReadIniOrCreateDefault() => WriteSettings.LoadSettingsFromINI();
 
-        private void Startup_InitWinForms()
+		private void Startup_InitWinForms()
+		{
+			InitializeComponent();
+			InitializeRsModsPlusPages();
+			AddProductVersionLabel();
+			Text = $"{ProductInfo.DISPLAY_NAME} (based on RSMods {Assembly.GetExecutingAssembly().GetName().Version})"; // Product version, plus the upstream RSMods version it is based on.
+		}
+
+        private void AddProductVersionLabel()
         {
-            InitializeComponent();
-            Text = $"{Text}-{Assembly.GetExecutingAssembly().GetName().Version}"; // Show version number in the title of the application.
+            var versionLabel = new Label
+            {
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
+                AutoSize = false,
+                Font = new Font(Font, FontStyle.Bold),
+                Location = new Point(ClientSize.Width - 232, ClientSize.Height - 26),
+                Name = "label_ProductVersion",
+                Size = new Size(220, 18),
+                TabIndex = 100003,
+                Text = ProductInfo.DISPLAY_NAME,
+                TextAlign = ContentAlignment.MiddleRight
+            };
+
+            Controls.Add(versionLabel);
+            versionLabel.BringToFront();
         }
 
         private void Startup_FixLegacySonglistBug()
@@ -366,10 +386,9 @@ namespace RSMods
 
         private void Startup_VerifyInstallOfASIO()
         {
-            if (!ASIO.ReadSettings.VerifySettingsExist())
-                TabController.TabPages.Remove(tab_RSASIO);
-            else
-                Startup_LoadASIODevices();
+            // Always hidden: this GUI never writes RS_ASIO.ini (its save handler is a no-op), so the inherited tab
+            // would silently discard edits. The Audio Bridge setup page shows the Driver= line to use instead.
+            TabController.TabPages.Remove(tab_RSASIO);
         }
 
         private void Startup_LoadRocksmithProfiles()
@@ -700,17 +719,10 @@ namespace RSMods
             }
 
             checkBox_DropPedal.Checked = ReadSettings.ProcessSettings(ReadSettings.DropPedalEnabledIdentifier) == "on";
-            string dropPedalEngine = ReadSettings.ProcessSettings(ReadSettings.DropPedalEngineIdentifier);
-            foreach (object engineItem in comboBox_DropPedalEngine.Items)
-            {
-                if (engineItem.ToString().ToLower() == dropPedalEngine)
-                {
-                    comboBox_DropPedalEngine.SelectedItem = engineItem;
-                    break;
-                }
-            }
-            checkBox_DropPedalCustomOverlayColors.Checked = ReadSettings.ProcessSettings(ReadSettings.DropPedalCustomOverlayColorsIdentifier) == "on";
-            DropPedalColors_Load();
+
+            checkBox_MonitorOutput.Checked = ReadSettings.ProcessSettings(ReadSettings.MonitorOutputIdentifier) == "on";
+            checkBox_AudioDiagnosticsOverlay.Checked = ReadSettings.ProcessSettings(ReadSettings.AudioDiagnosticsOverlayIdentifier) != "off";
+            RSModsPlus_RefreshAudioStatus(null, EventArgs.Empty);
 
             checkBox_EnableLooping.Checked = ReadSettings.ProcessSettings(ReadSettings.AllowLoopingIdentifier) == "on";
             groupBox_LoopingLeadUp.Visible = checkBox_EnableLooping.Checked;
@@ -728,6 +740,8 @@ namespace RSMods
             checkBox_RainbowNotes.Checked = ReadSettings.ProcessSettings(ReadSettings.RainbowNotesEnabledIdentifier) == "on";
             checkBox_WhammyFiveChordsMode.Checked = ReadSettings.ProcessSettings(ReadSettings.ChordsModeIdentifier) == "on";
             checkBox_ShowCurrentNote.Checked = ReadSettings.ProcessSettings(ReadSettings.ShowCurrentNoteOnScreenIdentifier) == "on";
+            checkBox_AudioDiagnosticsOverlay.Checked = ReadSettings.ProcessSettings(ReadSettings.AudioDiagnosticsOverlayIdentifier) == "on";
+            RSModsPlus_RefreshAudioStatus(null, EventArgs.Empty);
             checkBox_CustomHighway.Checked = ReadSettings.ProcessSettings(ReadSettings.CustomHighwayColorsIdentifier) == "on";
             checkBox_SecondaryMonitor.Checked = ReadSettings.ProcessSettings(ReadSettings.SecondaryMonitorIdentifier) == "on";
             checkBox_NoteColors_UseRocksmithColors.Checked = ReadSettings.ProcessSettings(ReadSettings.SeparateNoteColorsModeIdentifier) == "1";
@@ -828,6 +842,7 @@ namespace RSMods
 
             checkBox_Rocksmith_EnableMicrophone.Checked = Convert.ToBoolean(GenUtil.StrToIntDef(Rocksmith.ReadSettings.ProcessSettings(Rocksmith.ReadSettings.EnableMicrophoneIdentifier), 1));
             checkBox_Rocksmith_ExclusiveMode.Checked = Convert.ToBoolean(GenUtil.StrToIntDef(Rocksmith.ReadSettings.ProcessSettings(Rocksmith.ReadSettings.ExclusiveModeIdentifier), 1));
+			UpdateExclusiveModeLabel();
             if (GenUtil.StrToDecDef(Rocksmith.ReadSettings.ProcessSettings(Rocksmith.ReadSettings.LatencyBufferIdentifier), 16) <= 0 || GenUtil.StrToDecDef(Rocksmith.ReadSettings.ProcessSettings(Rocksmith.ReadSettings.LatencyBufferIdentifier), 16) > 16)
                 SaveSettings_Rocksmith_Middleware(Rocksmith.ReadSettings.LatencyBufferIdentifier, "4");
             nUpDown_Rocksmith_LatencyBuffer.Value = GenUtil.StrToDecDef(Rocksmith.ReadSettings.ProcessSettings(Rocksmith.ReadSettings.LatencyBufferIdentifier), 4);
@@ -915,6 +930,7 @@ namespace RSMods
 
             foreach (Control controlToChange in ControlList)
             {
+				if (controlToChange == tab_RSModsPlus || tab_RSModsPlus.Contains(controlToChange)) continue;
                 controlToChange.ForeColor = textColor;
 
                 if (controlToChange is Button)
@@ -1271,9 +1287,9 @@ namespace RSMods
             if (!AllowSaving)
                 return;
 
-
-            ASIO.WriteSettings.SaveChanges(identifierToChange, section, ChangedSettingValue, checkBox_ASIO_Output_Disabled.Checked, checkBox_ASIO_Input0_Disabled.Checked, checkBox_ASIO_Input1_Disabled.Checked, checkBox_ASIO_InputMic_Disabled.Checked);
-            SaveSettings_ShowLabel();
+			// RS_ASIO.ini is owned by RS_ASIO and by the user. RSMods only toggles the presence of
+			// RS_ASIO.dll and avrt.dll; all ASIO settings remain a manual configuration requirement.
+			return;
         }
 
         private void SaveSettings_Rocksmith_Middleware(string identifierToChange, string ChangedSettingValue)
@@ -2070,70 +2086,96 @@ namespace RSMods
 
         private void Save_DropPedalEnabled(object sender, EventArgs e) => SaveSettings_Save(ReadSettings.DropPedalEnabledIdentifier, checkBox_DropPedal.Checked.ToString().ToLower());
 
-        private void Save_DropPedalEngine(object sender, EventArgs e)
-        {
-            if (comboBox_DropPedalEngine.SelectedItem == null) return;
+        private void Save_MonitorOutput(object sender, EventArgs e) => SaveSettings_Save(ReadSettings.MonitorOutputIdentifier, checkBox_MonitorOutput.Checked ? "on" : "off");
 
-            SaveSettings_Save(ReadSettings.DropPedalEngineIdentifier, comboBox_DropPedalEngine.SelectedItem.ToString().ToLower());
+        private void Save_AudioDiagnosticsOverlay(object sender, EventArgs e) => SaveSettings_Save(ReadSettings.AudioDiagnosticsOverlayIdentifier, checkBox_AudioDiagnosticsOverlay.Checked ? "on" : "off");
+
+        /// <summary>
+        /// One-screen answer to "why is there no sound / no cable": the deployed host, RS_ASIO state,
+        /// the audio keys of both ini files, the stream-open lines of audiodump.txt and every
+        /// (CABLE INPUT) / (OUTPUT) / [AsioHook] line of RSMods_debug.txt. The host opens its log
+        /// with shared read, so this works while Rocksmith is running.
+        /// </summary>
+        private void RSModsPlus_RefreshAudioStatus(object sender, EventArgs e)
+        {
+            var report = new System.Text.StringBuilder();
+            try
+            {
+                string rsDir = GenUtil.GetRSDirectory();
+                if (string.IsNullOrEmpty(rsDir) || !Directory.Exists(rsDir))
+                {
+                    textBox_RSModsPlus_AudioStatus.Text = "Rocksmith folder not found.";
+                    return;
+                }
+
+                bool running = System.Diagnostics.Process.GetProcessesByName("Rocksmith2014").Length > 0;
+                report.AppendLine("Rocksmith: " + (running ? "RUNNING" : "not running"));
+                report.AppendLine("RS_ASIO.dll: " + (File.Exists(Path.Combine(rsDir, "RS_ASIO.dll")) ? "present (input managed by RS_ASIO; standalone cable option unused)" : "absent (cable input; bridge ASIO output is independent)"));
+				SyncBridgeOwnedSettingsFromDisk();
+				report.AppendLine("Audio bridge: uses its own cable capture, or RS_ASIO input when enabled. Output is selected separately in the bridge.");
+
+                string rocksmithIni = Path.Combine(rsDir, "Rocksmith.ini");
+                if (File.Exists(rocksmithIni))
+                {
+                    foreach (string line in ReadSharedLines(rocksmithIni))
+                    {
+                        if (line.StartsWith("ExclusiveMode=") || line.StartsWith("MaxOutputBufferSize=") || line.StartsWith("LatencyBuffer=") || line.StartsWith("RealToneCableOnly="))
+                            report.AppendLine("Rocksmith.ini " + line.Trim());
+                    }
+                }
+
+                report.AppendLine();
+                report.AppendLine("audiodump.txt (this launch):");
+                AppendMatchingLines(report, Path.Combine(rsDir, "audiodump.txt"), new[] { "OpenStream", "INPUT ON", "capping", "ReleaseAudioSink", "RestoreAudioSink", "AK_Fail", " err " }, 12);
+
+                report.AppendLine();
+                report.AppendLine("RSMods_debug.txt (this launch):");
+                AppendMatchingLines(report, Path.Combine(rsDir, "RSMods_debug.txt"), new[] { "(CABLE INPUT)", "(OUTPUT)", "(AUDIO ROUTING)", "[AsioHook]", "[InputCapture]", "[ERROR]" }, 25);
+
+                report.AppendLine();
+                report.AppendLine("How to read it: no \"Input alive\" line = the cable stream never delivered audio; \"stalled\" = the device dropped mid-session;");
+                report.AppendLine("\"capping output buffer size (N -> M)\" with M below N and no sound = raise MaxOutputBufferSize to N in Rocksmith.ini.");
+            }
+            catch (Exception ex)
+            {
+                report.AppendLine("Could not read the audio status: " + ex.Message);
+            }
+            textBox_RSModsPlus_AudioStatus.Text = report.ToString();
         }
 
-        private void Save_DropPedalCustomOverlayColors(object sender, EventArgs e)
+        private static IEnumerable<string> ReadSharedLines(string path)
         {
-            groupBox_DropPedalOverlayColors.Visible = checkBox_DropPedalCustomOverlayColors.Checked;
-            groupBox_DropPedal.Height = checkBox_DropPedalCustomOverlayColors.Checked ? 200 : 101;
-            SaveSettings_Save(ReadSettings.DropPedalCustomOverlayColorsIdentifier, checkBox_DropPedalCustomOverlayColors.Checked.ToString().ToLower());
+            // FileShare.ReadWrite: the game holds these files open for writing while it runs.
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var reader = new StreamReader(stream))
+            {
+                string line;
+                while ((line = reader.ReadLine()) != null) yield return line;
+            }
         }
 
-        private void DropPedalColors_Load()
+        private static void AppendMatchingLines(System.Text.StringBuilder report, string path, string[] needles, int max)
         {
-            DropPedalColors_LoadSwatch(textBox_DropPedalOverlayDownColor, ReadSettings.DropPedalOverlayDownColorIdentifier);
-            DropPedalColors_LoadSwatch(textBox_DropPedalOverlayUpColor, ReadSettings.DropPedalOverlayUpColorIdentifier);
-            DropPedalColors_LoadSwatch(textBox_DropPedalOverlayStatusColor, ReadSettings.DropPedalOverlayStatusColorIdentifier);
-        }
-
-        private void DropPedalColors_LoadSwatch(TextBox colorSwatch, string settingIdentifier)
-        {
-            colorSwatch.BackColor = ColorTranslator.FromHtml("#" + ReadSettings.ProcessSettings(settingIdentifier));
-        }
-
-        private void DropPedalColors_ChangeColor(object sender, EventArgs e)
-        {
-            TextBox colorSwatch;
-            string settingIdentifier;
-
-            if (sender == button_DropPedalOverlayDownColor)
+            if (!File.Exists(path))
             {
-                colorSwatch = textBox_DropPedalOverlayDownColor;
-                settingIdentifier = ReadSettings.DropPedalOverlayDownColorIdentifier;
+                report.AppendLine("  (no " + Path.GetFileName(path) + ")");
+                return;
             }
-            else if (sender == button_DropPedalOverlayUpColor)
+            var hits = new List<string>();
+            foreach (string line in ReadSharedLines(path))
             {
-                colorSwatch = textBox_DropPedalOverlayUpColor;
-                settingIdentifier = ReadSettings.DropPedalOverlayUpColorIdentifier;
+                foreach (string needle in needles)
+                {
+                    if (line.Contains(needle)) { hits.Add(line.Trim()); break; }
+                }
             }
-            else if (sender == button_DropPedalOverlayStatusColor)
+            if (hits.Count == 0)
             {
-                colorSwatch = textBox_DropPedalOverlayStatusColor;
-                settingIdentifier = ReadSettings.DropPedalOverlayStatusColorIdentifier;
+                report.AppendLine("  (no matching lines)");
+                return;
             }
-            else
-            {
-                throw new InvalidOperationException("Unknown Drop Pedal overlay colour control.");
-            }
-
-            using (ColorDialog colorDialog = new ColorDialog
-            {
-                AllowFullOpen = true,
-                ShowHelp = false,
-                Color = colorSwatch.BackColor
-            })
-            {
-                if (colorDialog.ShowDialog() != DialogResult.OK) return;
-
-                string colorHex = (colorDialog.Color.ToArgb() & 0x00ffffff).ToString("X6");
-                SaveSettings_Save(settingIdentifier, colorHex);
-                colorSwatch.BackColor = colorDialog.Color;
-            }
+            int start = Math.Max(0, hits.Count - max);
+            for (int i = start; i < hits.Count; i++) report.AppendLine("  " + hits[i]);
         }
 
         private void Save_ExtendedRange(object sender, EventArgs e)
@@ -2873,7 +2915,7 @@ namespace RSMods
                     {
                         xs.Serialize(writer, TwitchSettings.Get.Rewards);
 
-                        string exePath = AppDomain.CurrentDomain.BaseDirectory;
+                        string exePath = System.Windows.Forms.Application.StartupPath;
                         string effectListPath = Path.Combine(exePath, "TwitchEnabledEffects.xml");
 
                         File.WriteAllText(effectListPath, sww.ToString());
@@ -3147,7 +3189,7 @@ namespace RSMods
         {
             try
             {
-                string exePath = AppDomain.CurrentDomain.BaseDirectory;
+                string exePath = System.Windows.Forms.Application.StartupPath;
                 string logPath = Path.Combine(exePath, "twitchLog.txt");
 
                 File.WriteAllText(logPath, TwitchSettings.Get.Log);
@@ -3159,7 +3201,7 @@ namespace RSMods
             }
         }
 
-        private void Twitch_CopyCredentialsForDevs(object sender, MouseEventArgs e) => Clipboard.SetText("Send to RSMod Developers ( Discord Ffio#2221 or LovroM8#9999 )\nUsername: " + TwitchSettings.Get.Username + "\nChannel ID: " + TwitchSettings.Get.ChannelID + "\nAccess Token: " + TwitchSettings.Get.AccessToken);
+        private void Twitch_CopyCredentialsForDevs(object sender, MouseEventArgs e) => Clipboard.SetText("Keep this private: it includes your Twitch access token.\nUsername: " + TwitchSettings.Get.Username + "\nChannel ID: " + TwitchSettings.Get.ChannelID + "\nAccess Token: " + TwitchSettings.Get.AccessToken);
 
         /*private void dgv_EnabledRewards_CellMouseClick(object sender, DataGridViewCellMouseEventArgs e)
        {
@@ -3353,7 +3395,20 @@ namespace RSMods
         #region Rocksmith Settings
         // Audio Settings
         private void Rocksmith_EnableMicrophone(object sender, EventArgs e) => SaveSettings_Rocksmith_Middleware(Rocksmith.ReadSettings.EnableMicrophoneIdentifier, checkBox_Rocksmith_EnableMicrophone.Checked.ToString().ToLower());
-        private void Rocksmith_ExclusiveMode(object sender, EventArgs e) => SaveSettings_Rocksmith_Middleware(Rocksmith.ReadSettings.ExclusiveModeIdentifier, checkBox_Rocksmith_ExclusiveMode.Checked.ToString().ToLower());
+		private void Rocksmith_ExclusiveMode(object sender, EventArgs e)
+		{
+			UpdateExclusiveModeLabel();
+			SaveSettings_Rocksmith_Middleware(
+				Rocksmith.ReadSettings.ExclusiveModeIdentifier,
+				checkBox_Rocksmith_ExclusiveMode.Checked.ToString().ToLower());
+		}
+
+		private void UpdateExclusiveModeLabel()
+		{
+			checkBox_Rocksmith_ExclusiveMode.Text = checkBox_Rocksmith_ExclusiveMode.Checked
+				? "Exclusive Mode (lower latency)"
+				: "Shared Mode (higher latency)";
+		}
         private void Rocksmith_LatencyBuffer(object sender, EventArgs e) => SaveSettings_Rocksmith_Middleware(Rocksmith.ReadSettings.LatencyBufferIdentifier, nUpDown_Rocksmith_LatencyBuffer.Value.ToString());
         private void Rocksmith_ForceWDM(object sender, EventArgs e) => SaveSettings_Rocksmith_Middleware(Rocksmith.ReadSettings.ForceWDMIdentifier, checkBox_Rocksmith_ForceWDM.Checked.ToString().ToLower());
         private void Rocksmith_ForceDirextXSink(object sender, EventArgs e) => SaveSettings_Rocksmith_Middleware(Rocksmith.ReadSettings.ForceDirectXSinkIdentifier, checkBox_Rocksmith_ForceDirextXSink.Checked.ToString().ToLower());
@@ -3627,58 +3682,6 @@ namespace RSMods
             }
         }
 
-        private void Profiles_AddDropPedalToTones(object sender, EventArgs e)
-        {
-            if (listBox_Profiles_AvailableProfiles.SelectedItem == null)
-            {
-                MessageBox.Show("Please select a profile!");
-                return;
-            }
-
-            DialogResult confirmation = MessageBox.Show(
-                "This adds a MultiPitch pedal set to 0 semitones to every custom tone that does not already have one, so the drop pedal can retune them in game.\n\nYour profile will be backed up first. Continue?",
-                "Add drop pedal to tones",
-                MessageBoxButtons.OKCancel,
-                MessageBoxIcon.Question);
-
-            if (confirmation != DialogResult.OK)
-            {
-                return;
-            }
-
-            Profiles.SaveProfile();
-
-            int changed;
-            List<string> skipped;
-
-            try
-            {
-                changed = Profiles.AddDropPedalToCustomTones(out skipped);
-            }
-            catch (InvalidOperationException ioex)
-            {
-                MessageBox.Show(ioex.Message, "Error");
-                return;
-            }
-
-            if (changed == 0 && skipped.Count == 0)
-            {
-                MessageBox.Show("Every custom tone already has a pitch pedal. Nothing to change.", "Add drop pedal to tones");
-                return;
-            }
-
-            Profiles_ENCRYPT();
-
-            string message = $"Added a drop pedal to {changed} tone(s).";
-
-            if (skipped.Count > 0)
-            {
-                message += $"\n\nSkipped {skipped.Count}:\n{string.Join("\n", skipped)}";
-            }
-
-            MessageBox.Show(message, "Add drop pedal to tones");
-        }
-
         private void Profiles_ChangeSelectedProfile(object sender, EventArgs e)
         {
             if (listBox_Profiles_AvailableProfiles.SelectedItem == null) return;
@@ -3687,8 +3690,6 @@ namespace RSMods
             groupBox_Profiles_Rewards.Visible = true;
             groupBox_Profile_MoreSongLists.Visible = true;
             groupBox_ImportJsonTones.Visible = true;
-            button_Profiles_AddDropPedalToTones.Visible = true;
-
             Profiles_UnpackProfile();
 
             List<List<string>> SongLists = Profiles.DecryptedProfile["SongListsRoot"]["SongLists"].ToObject<List<List<string>>>();
@@ -4457,7 +4458,7 @@ namespace RSMods
             return wavFile;
         }
 
-        private void SoundPacks_Beta(object sender, EventArgs e) => Process.Start("https://github.com/Lovrom8/RSMods/issues/new");
+        private void SoundPacks_Beta(object sender, EventArgs e) => Process.Start("https://github.com/Cheesewizard/RocksmithAudioBridge/issues/new");
 
         private string SoundPacks_ConvertWAVToWem(string wavFile)
         {

@@ -8,7 +8,7 @@
     <ProjectGuid>{9E11FD67-DFFE-40F1-8E69-26D359F896EC}</ProjectGuid>
     <OutputType>WinExe</OutputType>
     <RootNamespace>RS2014_Mod_Installer</RootNamespace>
-    <AssemblyName>RS2014-Mod-Installer</AssemblyName>
+    <AssemblyName>RocksmithAudioBridge-Installer</AssemblyName>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
@@ -97,6 +97,7 @@
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
     <Compile Include="Worker.cs" />
+    <Compile Include="Uninstaller.cs" />
     <Compile Include="GUI.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -165,7 +166,6 @@
     <Content Include="Resources\RSModsGUI\RocksmithToolkitLib.dll" />
     <Content Include="Resources\RSModsGUI\RocksmithToTabLib.dll" />
     <Content Include="Resources\RSModsGUI\RSMods.exe" />
-    <Content Include="Resources\RSModsGUI\RSMods.pdb" />
     <Content Include="Resources\RSModsGUI\SevenZipSharp.dll" />
     <Content Include="Resources\RSModsGUI\SharpConfig.dll" />
     <Content Include="Resources\RSModsGUI\System.Security.AccessControl.dll" />
@@ -187,7 +187,6 @@
     <Content Include="Resources\RSModsGUI\X360.dll" />
     <Content Include="Resources\RSModsGUI\zlib.net.dll" />
     <Content Include="Resources\xinput1_3.dll" />
-    <Content Include="Resources\xinput1_3.pdb" />
     <None Include="Assets\LogoX256.ico" />
     <Content Include="LogoX256.ico" />
     <Content Include="Resources\RSModsGUI\ddc\ddc.exe" />
@@ -225,6 +224,12 @@
     </BootstrapperPackage>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <!-- A Release installer is what ships: refuse to package inputs that are stale, the wrong build type or the
+       wrong architecture (ValidatePackageResources.ps1), e.g. a Debug RSMods.exe left in the shared
+       Installer\Resources\RSModsGUI folder by a Debug build. -->
+  <Target Name="ValidatePackageResources" BeforeTargets="PrepareForBuild" Condition="'$(Configuration)' == 'Release'">
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(ProjectDir)ValidatePackageResources.ps1&quot;" />
+  </Target>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
       <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>

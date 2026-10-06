@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.20)
+project(rswindowcapture CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+add_library(rswindowcapture SHARED WindowCapture.cpp WindowMux.cpp)
+target_compile_definitions(rswindowcapture PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_link_libraries(rswindowcapture PRIVATE windowsapp d3d11 dxgi mf mfplat mfreadwrite mfuuid ole32 user32)

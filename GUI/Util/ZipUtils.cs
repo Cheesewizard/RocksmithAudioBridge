@@ -263,7 +263,7 @@ namespace RSMods.Util
 
             // "7za.dll" only supports 7Zip archives
             // use "7z64.dll" to support many archive formats 
-            var libraryPath = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "7z64.dll");
+            var libraryPath = Path.Combine(RuntimeBootstrap.DirectoryPath, Environment.Is64BitProcess ? "7z64.dll" : "7z.dll");
 
             SevenZipBase.SetLibraryPath(libraryPath);
 

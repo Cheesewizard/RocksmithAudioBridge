@@ -17,6 +17,15 @@ namespace
 	constexpr AkUInt32 AUDIOKINETIC_COMPANY_ID = 0;
 	constexpr AkUInt32 VORBIS_CODEC_ID = 4;
 	constexpr AkUInt32 MIN_MUSIC_DURATION_SECONDS = 20;
+	// A slot is never cleared (Wwise destroys sources without telling us, and clearing would break
+	// the probe chains of FindDecoderSource). Once all slots are taken, a new source reuses the one
+	// idle longest, provided it has produced no audio for this long: without reuse the table fills
+	// in a long session (every Vorbis source claims a slot, and each mode switch restarts the music)
+	// and Speaker Mode silently stops working until the game restarts.
+	// The window is long because a paused song produces no audio; a short window would let a new source
+	// take a paused song's slot and switch Speaker Mode off on resume. With 256 slots the table cannot
+	// fill with sources all active in the last 5 minutes.
+	constexpr DWORD SOURCE_REUSE_IDLE_MS = 300000;
 
 	constexpr LONG EVENT_FREE = 0;
 	constexpr LONG EVENT_WRITING = 1;
@@ -43,6 +52,7 @@ namespace
 		volatile LONG nextGeneration;
 		volatile LONG activeGeneration;
 		volatile LONG failureReported;
+		volatile LONG lastActiveTick;   // GetTickCount() when the source was claimed or last produced audio
 		int generationSemitones;
 		PVOID activeCache;
 		Audio::SongShift::StreamingPitchShifter pitchShifter;
@@ -122,6 +132,7 @@ namespace
 
 			if (existingSource == sourceValue || existingSource == 0)
 			{
+				InterlockedExchange(&sourceState.lastActiveTick, static_cast<LONG>(GetTickCount()));
 				const LONG generation = InterlockedIncrement(&sourceState.nextGeneration);
 				sourceState.pitchShifter.ResetGeneration();
 				sourceState.generationSemitones = 0;
@@ -129,6 +140,32 @@ namespace
 				InterlockedExchange(&sourceState.failureReported, 0);
 				MemoryBarrier();
 				InterlockedExchange(&sourceState.activeGeneration, generation);
+				return generation;
+			}
+		}
+
+		// Full: take over the slot idle longest, in place (never through zero).
+		const DWORD now = GetTickCount();
+		DecoderSourceState* oldest = nullptr;
+		DWORD oldestIdle = 0;
+		for (auto& sourceState : decoderSources)
+		{
+			const DWORD idle = now - static_cast<DWORD>(InterlockedCompareExchange(&sourceState.lastActiveTick, 0, 0));
+			if (idle >= SOURCE_REUSE_IDLE_MS && idle > oldestIdle) { oldest = &sourceState; oldestIdle = idle; }
+		}
+		if (oldest != nullptr)
+		{
+			const LONG previous = InterlockedCompareExchange(&oldest->source, 0, 0);
+			if (previous != 0 && InterlockedCompareExchange(&oldest->source, sourceValue, previous) == previous)
+			{
+				InterlockedExchange(&oldest->lastActiveTick, static_cast<LONG>(now));
+				const LONG generation = InterlockedIncrement(&oldest->nextGeneration);
+				oldest->pitchShifter.ResetGeneration();
+				oldest->generationSemitones = 0;
+				InterlockedExchangePointer(&oldest->activeCache, nullptr);
+				InterlockedExchange(&oldest->failureReported, 0);
+				MemoryBarrier();
+				InterlockedExchange(&oldest->activeGeneration, generation);
 				return generation;
 			}
 		}
@@ -250,6 +287,7 @@ namespace
 	void ProcessMusicOutput(void* source, void* outputState)
 	{
 		auto* sourceState = FindDecoderSource(source);
+		if (sourceState != nullptr) InterlockedExchange(&sourceState->lastActiveTick, static_cast<LONG>(GetTickCount()));
 		if (!IsSupportedMusicStream(outputState))
 		{
 			if (sourceState != nullptr)
@@ -389,8 +427,6 @@ namespace
 
 	IAkSoftwareCodec* __cdecl SpyVorbisFileFactory(void* context)
 	{
-		auto* selectedCache = static_cast<Audio::SongShift::PreparedPitchCache*>(
-			InterlockedCompareExchangePointer(&selectedSongCache, nullptr, nullptr));
 		const bool isPreparedSongExpected = InterlockedCompareExchange(
 			&isSelectedSongPlaybackExpected,
 			0,
@@ -403,17 +439,11 @@ namespace
 			LOG_ERROR("Speaker Mode did not resolve the selected chart tuning before playback" << std::endl);
 			DropPedal::DisableSpeakerMode();
 		}
-		else if (DropPedal::IsSpeakerModeEnabled() && isPreparedSongExpected
-			&& hasLeftPreSongTuner
-			&& DropPedal::GetShiftSemitones() != 0
-			&& (selectedCache == nullptr
-				|| !Audio::SongShift::PreRenderedPitchCache::WaitUntilPlayable(selectedCache, 30000)))
-		{
-			LOG_ERROR("Speaker Mode could not prepare the selected song opening: "
-				<< Audio::SongShift::PreRenderedPitchCache::GetError(selectedCache)
-				<< std::endl);
-			DropPedal::DisableSpeakerMode();
-		}
+
+		// Never wait for pre-rendering on Wwise's codec thread. Blocking this factory
+		// starves the mixer, so the output device repeats its last buffer as a tone.
+		// Decoder output uses the live shifter until the cache matches, and CopyFrames
+		// returns silence whenever playback reaches beyond the rendered frontier.
 
 		auto* source = originalVorbisFileFactory(context);
 		HookFileDecoderOutput(source);

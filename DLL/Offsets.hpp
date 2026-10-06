@@ -160,6 +160,8 @@ namespace Offsets {
 	inline VersioningStruct<uintptr_t> ptr_AdvancedDisplayCrash;
 	inline VersioningStruct<uintptr_t> ptr_AdvancedDisplayCrashJmpBck;
 	inline VersioningStruct<uintptr_t> ptr_PortAudioInCrash; 
+	inline VersioningStruct<uintptr_t> func_PortAudioOpenStream;
+	inline VersioningStruct<uintptr_t> func_PortAudioGetClosestFormat;
 	inline VersioningStruct<uintptr_t> ptr_AdditionalAudioDevicesCrash;
 	inline VersioningStruct<uintptr_t> ptr_ModdedPtrCrashFix;
 
@@ -213,7 +215,11 @@ namespace Offsets {
 	extern const char* patch_scrollSpeedChange;
 
 	// Runtime data.
+	// Scratch for a naked hook's "store computed jmp target, then jmp through it" trampoline.
+	// Each hook that uses this pattern MUST have its OWN scratch: sharing one global lets two
+	// hooks on the draw path stomp each other's jmp target if they ever interleave. One per hook.
 	inline uintptr_t runtimeVersionStructValue;
+	inline uintptr_t runtimeVersionStructValueWavyNotes;
 
 	extern std::vector<unsigned int> ptr_noteDataOffsets;
 	extern std::vector<unsigned int> ptr_scoreAttackNoteDataOffsets;

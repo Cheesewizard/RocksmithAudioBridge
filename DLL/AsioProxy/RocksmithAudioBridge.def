@@ -1,0 +1,28 @@
+EXPORTS
+	DllGetClassObject   PRIVATE
+	DllCanUnloadNow     PRIVATE
+	DllRegisterServer   PRIVATE
+	DllUnregisterServer PRIVATE
+	RSModsAsio_SetInputObserver
+	RSModsAsio_SetSink
+	RSModsAsio_AddSink
+	RSModsAsio_RemoveSink
+	RSModsAsio_ArmLatencyProbe
+	RSModsAsio_ProbeLength
+	RSModsAsio_ConfigureLimiter
+	RSModsAsio_ConfigureOutputGuard
+	RSModsAsio_EnableMeter
+	RSModsAsio_GetOutputLevels
+	RSModsAsio_SetForwardMuted
+	RSModsAsio_GetOutputMode
+	RSModsAsio_TryPromote
+	RSModsAsio_TryDemote
+	RSModsAsio_TryRebind
+	RSModsAsio_GetInputMode
+	RSModsAsio_TestInjectInput
+	RSModsAsio_SetVirtualCaptureTestMode
+	RSModsAsio_GetVirtualInputStats
+	RSModsAsio_ConfigureAmpLink
+	RSModsAsio_GetAmpLinkStatus
+	RSModsAsio_SetAmpLinkLatency
+	RSModsAsio_SetAmpLinkPitch

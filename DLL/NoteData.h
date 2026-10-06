@@ -15,6 +15,22 @@ private:
     int32_t currentMissStreak;  // 0x44
 
 public:
+    int32_t getTotalNotesHit() const {
+        return totalNotesHit;
+    }
+
+    int32_t getTotalNotesMissed() const {
+        return totalNotesMissed;
+    }
+
+    int32_t getCurrentHitStreak() const {
+        return currentHitStreak;
+    }
+
+    int32_t getCurrentMissStreak() const {
+        return currentMissStreak;
+    }
+
     float getAccuracy() const  {
         if (getTotalNotes() > 0) {
             if (totalNotesHit == 0) {

@@ -41,6 +41,40 @@ void RiffRepeater::SetSpeed(float newSpeed, bool isRealSpeed) {
 }
 
 /// <summary>
+/// Asks the GAME to play at a real speed (percent), the way its own Riff Repeater slider does:
+/// GE_SetRRSpeed 0x405880 (void __cdecl(float sliderPercent), the lesson-script builtin) broadcasts
+/// EventDataSongTimeStretch, so the music, the highway and the game's speed notification all follow.
+/// Writing the Time_Stretch RTPC (SetSpeed) does not: the game re-sets it on its own music object.
+/// Main thread only.
+/// </summary>
+float RiffRepeater::RealSpeedToSlider(float realPercent) {
+	// Slider -> RTPC is 400 - 3*slider at or below 100 (0x409400); the LinearRR hook makes it 10000/slider.
+	return currentlyEnabled_LinearRR ? realPercent : (400.f - 10000.f / realPercent) / 3.f;
+}
+
+// The inverse, honouring RSMods' Linear Riff Repeater (real = slider) and "Allow RR Speed Above 100"
+// (slider > 100: RTPC = 100 - (slider - 100) * 0.75). Game curve 0x409400, RTPC clamped 25..400,
+// real = 10000 / RTPC. -1 for an unknown slider.
+float RiffRepeater::SliderToRealSpeed(float sliderPercent) {
+	if (!(sliderPercent > 0.f)) return -1.f;
+	if (currentlyEnabled_LinearRR) return sliderPercent;
+	float rtpc = sliderPercent <= 100.f ? 400.f - 3.f * sliderPercent : 100.f - (sliderPercent - 100.f) * 0.75f;
+	rtpc = (std::min)(400.f, (std::max)(25.f, rtpc));
+	return Divisor / rtpc;
+}
+
+float RiffRepeater::GetPlayerRealSpeed() {
+	return SliderToRealSpeed(playerSliderPercent.load());
+}
+
+void RiffRepeater::RequestGameSpeed(float realPercent) {
+	if (!(realPercent >= 25.f && realPercent <= 100.f)) return;
+	const float slider = RealSpeedToSlider(realPercent);
+	using SetRRSpeedFn = void(__cdecl*)(float);
+	reinterpret_cast<SetRRSpeedFn>(0x405880)(slider);
+}
+
+/// <summary>
 /// Converts Real Speed and Wwise RTPC back and forth
 /// </summary>
 /// <param name="speed"> - Speed you want to convert</param>

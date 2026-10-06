@@ -2,6 +2,22 @@
 #include "../Mods/ExtendedRangeMode.hpp"
 
 namespace D3DHooks {
+	struct PhysicalMarkerCaptureState
+	{
+		unsigned int armGeneration = 0;
+		unsigned long long callbackCount = 0;
+		unsigned long long armCallbackBase = 0;
+		unsigned long long matchedDrawCount = 0;
+		unsigned long long armMatchedDrawBase = 0;
+		unsigned long long publishedDrawCount = 0;
+		unsigned long long armPublishedDrawBase = 0;
+		bool guideSuppressionEnabled = false;
+		unsigned long long guideConsideredDrawCount = 0;
+		unsigned long long guideSuppressedDrawCount = 0;
+		bool isArmed = false;
+		bool isActive = false;
+	};
+
 	inline UINT StartRegister;
 	inline UINT VectorCount;
 
@@ -43,7 +59,66 @@ namespace D3DHooks {
 	HRESULT APIENTRY Hook_SetStreamSource(LPDIRECT3DDEVICE9 pDevice, UINT StreamNumber, IDirect3DVertexBuffer9* pStreamData, UINT OffsetInBytes, UINT Stride);
 	HRESULT APIENTRY Hook_Reset(IDirect3DDevice9* pDevice, D3DPRESENT_PARAMETERS* pPresentationParameters);
 	HRESULT APIENTRY Hook_DIP(IDirect3DDevice9* pDevice, D3DPRIMITIVETYPE PrimType, INT BaseVertexIndex, UINT MinVertexIndex, UINT NumVertices, UINT StartIndex, UINT PrimCount);
+	HRESULT APIENTRY Hook_DPUP(IDirect3DDevice9* pDevice, D3DPRIMITIVETYPE PrimType, UINT PrimCount, CONST void* pVertexStreamZeroData, UINT VertexStreamZeroStride);
+	HRESULT APIENTRY Hook_DIPUP(IDirect3DDevice9* pDevice, D3DPRIMITIVETYPE PrimType, UINT MinVertexIndex, UINT NumVertices, UINT PrimCount, CONST void* pIndexData, D3DFORMAT IndexDataFormat, CONST void* pVertexStreamZeroData, UINT VertexStreamZeroStride);
 	HRESULT APIENTRY Hook_EndScene(IDirect3DDevice9* pDevice);
+	void ArmNoteByNoteRenderSnapshot();
+	void ArmPhysicalMarkerDrawCapture();
+	bool ShouldSuppressDrawBySignature(IDirect3DDevice9* device, UINT stride, UINT vertexCount, UINT primitiveCount);
+	void SetPhysicalGuideSuppression(
+		bool shouldEnable,
+		uint32_t stride,
+		uint32_t vertexCount,
+		uint32_t primitiveCount);
+	void FinishNoteByNoteRenderFrame();
+	PhysicalMarkerCaptureState GetPhysicalMarkerCaptureState();
+
+	// Stale fretboard marker quad filter (drops doubled markers): runtime toggle and
+	// counters for the bridge.
+	struct StaleMarkerFilterState
+	{
+		bool enabled = false;
+		unsigned long long consideredQuads = 0;
+		unsigned long long droppedQuads = 0;
+		unsigned long long filteredDraws = 0;
+		// Read-back locks taken with (lockNoWaits) and without (lockWaits) NOOVERWRITE.
+		unsigned long long lockWaits = 0;
+		unsigned long long lockNoWaits = 0;
+	};
+	void SetStaleMarkerFilterEnabled(bool shouldEnable);
+	StaleMarkerFilterState GetStaleMarkerFilterState();
+
+	// Frame-time telemetry: sampled at the EndScene seam, reported by the bridge 'status'
+	// reply. averageMs is a ~60-frame exponential average; windowMaxMs the worst frame of
+	// the last 120.
+	struct FrameTimeStats
+	{
+		float averageMilliseconds = 0.0f;
+		float windowMaxMilliseconds = 0.0f;
+		unsigned long long frameCount = 0;
+	};
+	FrameTimeStats GetFrameTimeStats();
+
+	// Host-drawn finger numerals: screen anchors collected from kept
+	// members' marker draws (world translation in c0..c3, view-projection in
+	// c4..c7), consumed by the overlay each frame. The game's own numeral glyphs
+	// are screen-space and never repaint on frozen retargets, so the overlay
+	// draws the SNG template's fingers at these anchors instead. Render thread only.
+	void SetFingerNumeralsEnabled(bool shouldEnable);
+	bool AreFingerNumeralsEnabled();
+	// True when the game's finger ring for a kept chord member stood at rest this frame or the last.
+	bool HasRestingFingerRing(int stringIndex, int fret);
+	int GetFreshFingerAnchors(
+		int (&strings)[8],
+		int (&frets)[8],
+		float (&screenX)[8],
+		float (&screenY)[8]);
+
+	// Shadow of vertex-shader constants c0..c7, kept by Hook_SetVertexShaderConstantF for
+	// the research probe's screen-map capture (readable even if the device rejects
+	// GetVertexShaderConstantF).
+	extern float vertexShaderConstantShadow[8][4];
+	void SetNoteByNoteNativeLifecycleTraceEnabled(bool shouldEnable);
 
 	// Mod Settings
 	inline bool resetHeadstockCache = true; // Do we want to reset the headstock cache? Triggers when opening tuning menu
@@ -104,6 +179,12 @@ inline tBeginScene oBeginScene;
 
 typedef HRESULT(WINAPI* tDrawPrimitive)(IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, UINT);
 inline tDrawPrimitive oDrawPrimitive;
+
+typedef HRESULT(WINAPI* tDrawPrimitiveUP)(IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, CONST void*, UINT);
+inline tDrawPrimitiveUP oDrawPrimitiveUP;
+
+typedef HRESULT(WINAPI* tDrawIndexedPrimitiveUP)(IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, UINT, UINT, CONST void*, D3DFORMAT, CONST void*, UINT);
+inline tDrawIndexedPrimitiveUP oDrawIndexedPrimitiveUP;
 
 typedef HRESULT(__stdcall* tEndScene)(IDirect3DDevice9*);
 inline tEndScene oEndScene;

@@ -1,268 +1,252 @@
-# RSModsPlus
+# Rocksmith Audio Bridge
 
-If RSModsPlus has saved you time or made Rocksmith more enjoyable, consider
-buying me a beer. Your support helps me keep improving the mod.
+![Rocksmith Audio Bridge](.github/images/rocksmith-audio-bridge-banner.jpg)
 
 <a href="https://buymeacoffee.com/cheesewizard">
-  <img src="docs/images/buy-me-a-beer-alt-amplifier-v2.png" alt="Buy me a beer" width="240">
+  <img src=".github/images/buy-me-a-beer-alt-amplifier-v2.png" alt="Buy me a beer" width="200">
 </a>
-<br><br>
 
-A fork of [RSMods](https://github.com/Lovrom8/RSMods) that adds pitch routing
-to Rocksmith 2014: a **Drop Pedal** that shifts the guitar to the song, and a
-**Speaker Mode** that shifts the song to the guitar.
+I build this mod in my own time and I'm currently looking for work. If it has
+helped you, please consider [supporting its development](#support). Thank you!
 
-`F7` cycles between the two modes and Off. Range is -24 to +24 semitones.
-Supported game versions: Rocksmith 2014 Remastered (September 2022 update) and
-Learn & Play (December 2024 update). Drop Pedal multiplayer is supported on
-both versions.
+An extension of [RSMods](https://github.com/Lovrom8/RSMods) for Rocksmith 2014
+Remastered. Play any song without retuning, run your own amp sim, record your
+playing, and practise note by note, with stable audio on speakers and
+headphones Rocksmith can't normally use. Everything is controlled from an in-game
+overlay.
+
+Formerly RSModsPlus, renamed because the old name was easily mistaken for
+Rocksmith+.
 
 https://github.com/user-attachments/assets/c8951c94-e760-4830-a8f5-6b383dbb05da
 
-## Quick start
+**Features**
 
-1. Make sure this is in `RSMods.ini` next to `Rocksmith2014.exe`:
+- [Stable audio on any speakers](#stable-audio-on-any-speakers)
+- [Drop Pedal](#drop-pedal)
+- [Speaker Mode](#speaker-mode)
+- [Note by Note (beta)](#note-by-note-beta)
+- [External amp](#external-amp)
+- [Recording](#recording)
+- [Mixer](#mixer)
+- [Guitar input cleanup](#guitar-input-cleanup)
+- [Output switching](#output-switching)
 
-   ```ini
-   [Drop Pedal]
-   EnableDropPedal = on
-   Engine = automatic
-   ```
+## Install
 
-2. Start Rocksmith and press `F7` once. The top-left readout changes from
-   `Pitch: Off` to `Drop: E`.
+1. Close Rocksmith and RSMods.
+2. Download `RocksmithAudioBridge-Installer.exe` from the
+   [latest release](https://github.com/Cheesewizard/RocksmithAudioBridge/releases).
+3. Run it and press **Install**. Accept the Windows admin prompt; it registers
+   the Audio Bridge ASIO driver.
 
-3. Match the readout to the song. Press `,` to move down one semitone or `.`
-   to move up one semitone. For example, with a guitar in E standard and an Eb
-   song, press `,` once until the readout says `Drop: E -> Eb (-1)`.
+The installer includes the full RSMods suite, so you do not need to install
+RSMods first. Run it again to **Reinstall / Repair** (for example after a Steam
+file check) or **Uninstall**. Uninstall asks before removing your settings and
+never touches your recordings.
 
-Other controls:
+Requirements: the Steam version of Rocksmith 2014 Remastered on Windows, and
+the MS Visual C++ 2015-2019 redistributable. Works with a Real Tone Cable or an
+ASIO interface through [RS_ASIO](https://github.com/mdias/rs_asio).
 
-| Action | Player 1 | Player 2 |
-|---|---|---|
-| Cycle Drop Pedal / Speaker Mode / Off for everyone | `F7` | - |
-| Move the target down / up | `,` / `.` | `Control+,` / `Control+.` |
-| Tell the mod the guitar's physical tuning | `F9` | `Control+F9` |
+### After installing
 
-Settings are read when the game starts, and every session starts at
-`Pitch: Off`. If the keys do nothing or the mod seems missing, the
-[Quick Start guide](docs/quick-start.md) walks through the install gotchas
-and the extra controls.
+With Rocksmith closed, open RSMods (`RSMods\RSMods.exe` in your Rocksmith
+folder) and go to the **Rocksmith Audio Bridge** tab. Set **Guitar input** to
+**Real Tone Cable** or **ASIO interface** to match how your guitar is
+connected.
+
+<img src=".github/images/rsmods-audio-bridge-setup.png" alt="The Rocksmith Audio Bridge tab in RSMods" width="600">
+
+With an ASIO interface, the **ASIO bridge driver** row shows that the driver is
+installed and which interface it is using.
+
+## The overlay
+
+Press `\` in game to open the Audio Bridge overlay. Each feature below says
+which page of it to use. Overlay settings are saved to `RSMods.ini`.
+
+Keys can be changed in RSMods.exe, on the Keybindings tab. Upgrading from an
+earlier version keeps the keys you already had.
 
 ---
+
+## Stable audio on any speakers
+
+<img src=".github/images/no-audio-output-device.png" alt="Rocksmith's No audio output device error" width="450">
+
+"No audio output device" is the most common reason a fresh Rocksmith install
+won't start. The Audio Bridge gives Rocksmith its own input and output devices,
+so one badly behaved Windows playback device can't stop the game from starting,
+even with no speakers connected at all.
+
+Rocksmith always sees the standard 48 kHz stereo device it expects, and the
+Audio Bridge converts to whatever your real speakers or headphones use. So
+devices at other sample rates (such as 44.1 kHz) or with surround layouts (such
+as 5.1) play without errors or crackling. Sound goes to your Windows default
+playback device, or to whichever one you pick in
+[Output switching](#output-switching).
+
+**Needs:** nothing with a Real Tone Cable. With an ASIO interface, set the
+Audio Bridge driver in `RS_ASIO.ini`.
 
 ## Drop Pedal
 
-Shifts the **guitar** so a song in any uniform tuning can be played without
-touching a tuning peg. To play an Eb song on an E-standard guitar, set the
-pedal to -1. Audio and note detection move together, so the tuner and scoring
-follow the shift.
+Shifts your **guitar** to match the song, from -24 to +24 semitones, without
+touching a tuning peg. Note detection, the tuner and scoring follow the shift,
+and any tone works. In multiplayer each player has their own shift and base
+tuning; a player who doesn't need a shift leaves theirs at 0.
 
-![Downward shift applied](docs/images/overlay-drop-tuning-down.png)
+To play an Eb song on an E-standard guitar, press `F7` once, then `,` once.
 
-Two engines realise the shift, selected at launch and announced on screen:
+| Action | Player 1 | Player 2 |
+|---|---|---|
+| Cycle Drop Pedal / Speaker Mode / Off (both players) | `F7` | |
+| Shift down / up one semitone | `,` / `.` | `Ctrl+,` / `Ctrl+.` |
+| Set the guitar's physical tuning | `F9` | `Ctrl+F9` |
 
-- **ASIO engine**: with [RS_ASIO](https://github.com/mdias/rs_asio), the raw
-  input is shifted before Rocksmith receives it. No tone setup: every tone,
-  stock or custom, receives the shifted signal.
-- **Cable engine**: without RS_ASIO, such as a plain Real Tone cable, the
-  shift is applied through a MultiPitch pedal in the tone and the game's
-  tuning reference is transposed to match.
-
-Multiplayer is supported by both engines: each player has an independent
-target and base tuning (`Control` + the pedal keys addresses Player 2), with
-`[Asio.Input.0]` as Player 1 and `[Asio.Input.1]` as Player 2 under ASIO.
-
-![Independent targets in multiplayer](docs/images/overlay-multiplayer-tunings.png)
-
-**Setup and usage:** the **[ASIO Drop Pedal guide](docs/asio-drop-pedal.md)**
-for RS_ASIO interfaces, or the
-**[Cable Drop Pedal guide](docs/cable-drop-pedal.md)** for Real Tone cable
-setups.
-
----
+**Overlay page:** Drop Pedal (readout and colours).
 
 ## Speaker Mode
 
-Shifts the **song** instead of the guitar. Intended for playing through
-speakers, where the acoustic guitar is audible in the room: the music comes to
-your tuning, and the guitar stays physically untouched.
+Shifts the **song** to match your guitar instead. Made for playing through
+speakers, where you hear the guitar itself in the room. The song is
+pitch-rendered ahead of time, so there is no added latency. Drop and open
+tunings work too: the tuner tells you which strings to retune.
 
-![Speaker Mode raising an Eb song to an E-standard guitar](docs/images/overlay-speaker-mode.png)
+Press `F7` until the readout says `Speaker`, then use `,` and `.` as with the
+Drop Pedal.
 
-- Requires no RS_ASIO, no audio interface, and no MultiPitch tone; a Real
-  Tone cable alone is enough.
-- Gameplay audio carries **zero added latency**: the full song is
-  pitch-rendered ahead of playback into temporary audio and read by exact song
-  position.
-- The chart tuning is read automatically at the pre-song tuner, and **any
-  chart shape works**: uniform, drop and open tunings. For non-uniform
-  shapes, the tuner guides the physical retune string by string (a Drop Db
-  chart with an E-standard guitar asks for one string down to D, then raises
-  the song a semitone: `Speaker: Eb Drop Db -> Drop D (+1)`).
-- Prepared audio is session-temporary and deleted on close; nothing persists
-  between launches.
+Speaker Mode is a global setting that only Player 1 can change; in
+multiplayer, both players tune to Player 1's tuning. For separate settings per
+player, use the Drop Pedal.
 
-**Setup and usage:** the **[Speaker Mode guide](docs/speaker-mode.md)**.
+## Note by Note (beta)
 
----
+A Riff Repeater practice mode that checks every note you play. Detection
+combines the game's own matcher, a raw pitch verifier and a bundled
+machine-learning detector, which starts on its own.
 
-## What this fork adds
+- **Flow mode** (on by default): the song keeps playing while you hit the
+  notes, and stops at the first note you miss until you play it. The Riff
+  Repeater speed is capped to what detection can keep up with.
+- **Flow mode off:** the song waits at every note until you play it.
 
-- The Drop Pedal, -24 to +24 semitones, with ASIO and Cable engines and full
-  multiplayer support: independent per-player targets, base tunings and
-  overlay rows.
-- Speaker Mode, temporary full-song pitch rendering with zero added gameplay
-  latency and automatic chart synchronization for any tuning shape.
-- A base tuning setting, so shifts are named from whatever the guitar is
-  physically in rather than from E.
-- An on-screen readout of the current mode, route and per-player state, plus
-  settings and rebindable keys in the settings app (Tuning tab).
+Turn it on in game with the **NOTE BY NOTE** switch in Riff Repeater Advanced
+Settings; this menu is the only place to switch it on. The **FLOW MODE** switch
+sits just below it.
 
-Everything else comes from RSMods 1.2.8.2 and behaves as upstream documents
-it: extended range mode, custom song list titles, toggle loft, force
-re-enumeration, GuitarSpeak, and the rest. See
-[upstream's README](https://github.com/Lovrom8/RSMods#readme) for that list
-and for the full `RSMods.ini` reference.
-
----
-
-## Installing
-
-This is built from RSMods 1.2.8.2 and uses the same filename, so it replaces
-RSMods' own `xinput1_3.dll` rather than sitting beside it. Only one of the two
-can be loaded at a time.
-
-Install upstream RSMods 1.2.8.2 first. RSModsPlus uses its existing settings,
-libraries and decode tools.
-
-Back up `xinput1_3.dll` and `RSMods\RSMods.exe` if you want to restore plain
-RSMods later. Then download the ZIP from the
-[latest release](https://github.com/Cheesewizard/RSModsPlus/releases) and
-extract its complete contents into the Rocksmith 2014 folder. Allow it to
-replace `xinput1_3.dll` and `RSMods\RSMods.exe`.
-
-The updated settings executable also runs invisibly when Speaker Mode prepares
-full-song audio. The rest of the existing `RSMods` folder and `RSMods.ini`
-remain untouched.
-
-To uninstall, restore those two files, or reinstall upstream RSMods.
-
-Requirements are upstream's: Steam Rocksmith 2014 Remastered on Windows, and
-the MS Visual C++ 2015-2019 redistributable. The ASIO engine additionally
-needs [RS_ASIO](https://github.com/mdias/rs_asio) and an ASIO audio interface;
-the Cable engine and Speaker Mode need neither.
-
----
-
-## How it works
-
-**ASIO Drop Pedal.** With RS_ASIO installed, the mod hooks the ASIO driver
-below RS_ASIO and gives each configured Rocksmith input its own persistent
-pitch shifter, so note detection, the tuner and tone processing all consume
-the same shifted signal. The shifter uses period-synchronous splicing.
-At 48 kHz with 128-frame callbacks, the production-shifter harness measures
-roughly 6-20 ms of observable content delay depending on the note and shift.
-This is added to the interface's normal round-trip latency. For comparison,
-DigiTech does not publish a latency specification for its well-regarded Drop
-pedal, but independent waveform tests report roughly
-[12-17 ms](https://www.thefretboard.co.uk/discussion/107282/digitech-drop-tune/p2),
-including a detailed burst test measuring about
-[16 ms](https://www.reddit.com/r/audioengineering/comments/r3mecr/analyzing_the_digitech_drop_pedal/). The methods are not identical,
-but they put this mod's measured delay in the same broad range as dedicated
-hardware. End-to-end feel also depends on the interface's round trip, so a low
-ASIO buffer remains important. Input formats `Float32`, `Int32`, `Int24` and
-`Int16` and buffer sizes from 1 to 4096 frames are accepted, so common
-interfaces work out of the box.
-
-**Cable Drop Pedal.** Without RS_ASIO, detection reads the raw signal upstream
-of the tone chain, so the mod shifts inside the game instead: it retunes a
-MultiPitch pedal in the player's tone and transposes the reference frequency
-the game derives its expected pitch from. In multiplayer, each tone's pitch
-pedal and each player's detection reference are attributed to their owning
-player. This engine needs the MultiPitch pedal in the tone and covers uniform
-tunings.
-
-**Speaker Mode.** The mod hooks the game's Wwise music decoding. Menu previews
-are shifted live; for gameplay, the selected song is decoded and pitch-rendered
-in full into a temporary delete-on-close file, which playback reads by exact
-song position, with zero added latency and no change to the song's duration. The
-chart tuning is synchronized automatically, the game's tuning reference is
-adjusted so the chart is playable in the physical tuning, and any preparation
-failure turns the mode off rather than play at a wrong pitch.
-
----
-
-## Documentation
-
-### User guides
-
-| Document | Covers |
+| Action | Key |
 |---|---|
-| [docs/asio-drop-pedal.md](docs/asio-drop-pedal.md) | ASIO Drop Pedal: requirements, controls, multiplayer, bass, troubleshooting |
-| [docs/cable-drop-pedal.md](docs/cable-drop-pedal.md) | Cable Drop Pedal: tone setup, constraints, multiplayer, troubleshooting |
-| [docs/speaker-mode.md](docs/speaker-mode.md) | Speaker Mode: setup, choosing tunings, chart shapes, troubleshooting |
+| Skip the note you're stuck on | `Right Arrow` |
 
-### Designs
+**Overlay page:** Note by Note (settings only: readout, target style and size,
+colours, and dragging the on-screen readout into place).
 
-| Document | Covers |
-|---|---|
-| [docs/designs/drop-pedal-multiplayer.md](docs/designs/drop-pedal-multiplayer.md) | Drop Pedal multiplayer architecture, lifecycle and performance data |
-| [docs/designs/speaker-mode.md](docs/designs/speaker-mode.md) | Speaker Mode engine internals |
+Works on guitar and bass arrangements. Bass support is experimental: it uses
+the game's own detection with a bass-trained machine-learning model.
 
-### Investigation records
+## External amp
 
-| Document | Covers |
-|---|---|
-| [docs/investigations/drop-pedal-multiplayer.md](docs/investigations/drop-pedal-multiplayer.md) | Earlier findings behind multiplayer pitch processing |
-| [docs/investigations/speaker-mode.md](docs/investigations/speaker-mode.md) | The investigation that led to the Speaker Mode design |
+Play through your own amp sim, such as AmpliTube 5, instead of Rocksmith's amp,
+while the game keeps the clean signal for note detection. It shares your
+interface with the game, adding one buffer of latency at your interface's
+buffer size. When the amp sim closes, the game's amp comes back. The
+[Drop Pedal](#drop-pedal) works with it too: the amp sim gets your shifted
+guitar.
 
-### Technical reference
+In the amp sim's audio settings, pick **Rocksmith Audio Bridge ASIO** as both
+the input and output device. Set the input channels to **Rocksmith guitar** and
+the outputs to **Rocksmith out L** and **Rocksmith out R**.
 
-| Document | Covers |
-|---|---|
-| [docs/wwise-plugin-internals.md](docs/wwise-plugin-internals.md) | Reverse-engineered Wwise plugin structures used by the Cable engine |
+<img src=".github/images/external-amp-amplitube-setup.png" alt="AmpliTube 5 audio settings using Rocksmith Audio Bridge ASIO" width="600">
+
+**Overlay page:** External amp (status, return level, safety buffer).
+
+**Needs:** an ASIO interface with the Audio Bridge driver set as the `Driver` in
+`RS_ASIO.ini`. The mod never edits `RS_ASIO.ini` for you.
+
+## Recording
+
+Record what you play without leaving the game. An audio take saves the full
+game mix and your dry guitar together as a pair. A video take saves an MP4 with
+the game sound.
+
+The recording is exactly what you hear: the song, your guitar and, with
+[External amp](#external-amp), your amp sim's tone. It works the same whichever
+playback device the sound goes to. The dry take is your clean guitar, ready to
+re-amp later. Each game launch saves into its own dated folder under
+`Videos\Rocksmith Audio Bridge`.
+
+Press `F6`, or the record button on the overlay's Record page. A red REC
+indicator shows while recording.
+
+**Overlay page:** Record (audio or video, the record key).
+
+**Needs:** with an ASIO interface, the Audio Bridge driver set in
+`RS_ASIO.ini` to record the game mix.
+
+## Mixer
+
+Seven volume faders: Master, Player 1, Player 2, Song, Microphone, Voice-over
+and Effects. Player levels change only what you hear, never note detection.
+Levels reset when the game closes.
+
+**Overlay page:** Mixer.
+
+## Guitar input cleanup
+
+Fixes a quiet or noisy guitar signal before Rocksmith hears it: make-up gain, a
+noise suppressor that keeps your sustain, a compressor, a hum filter that
+removes only the mains hum, and an override for Rocksmith's own noise gate.
+Works with a Real Tone Cable or an ASIO interface.
+
+**Overlay page:** Input (with a live level meter).
+
+## Output switching
+
+Move the game's sound to another playback device while you play, with no
+restart. The change lasts until you close Rocksmith. An optional limiter caps
+the maximum volume.
+
+**Overlay page:** Output.
 
 ---
+
+Everything else (extended range, custom song list titles, toggle loft and the
+rest) comes from RSMods and works as
+[upstream documents it](https://github.com/Lovrom8/RSMods#readme). The overlay's
+General page can also rescan the song list after you add a new song, without
+restarting.
 
 ## Support
 
-If RSModsPlus has saved you time or made Rocksmith more enjoyable, consider
-buying me a beer. Your support helps me keep improving the mod.
+Rocksmith Audio Bridge is free, and I develop it entirely in my own time while
+looking for work. If the mod has made Rocksmith better for you, a beer goes a
+long way towards keeping it going. Thank you!
 
 <a href="https://buymeacoffee.com/cheesewizard">
-  <img src="docs/images/buy-me-a-beer-alt-amplifier-v2.png" alt="Buy me a beer" width="240">
+  <img src=".github/images/buy-me-a-beer-alt-amplifier-v2.png" alt="Buy me a beer" width="200">
 </a>
 
----
+## Reporting problems
 
-## Issues
+Report bugs [here](https://github.com/Cheesewizard/RocksmithAudioBridge/issues), not on
+the RSMods tracker. A bug in an inherited RSMods feature that also happens on
+plain RSMods belongs [upstream](https://github.com/Lovrom8/RSMods/issues).
 
-Drop Pedal and Speaker Mode problems go
-[on this repository](https://github.com/Cheesewizard/RSModsPlus/issues), not on
-upstream's tracker. These features aren't theirs to support.
-
-A bug in an inherited RSMods feature that reproduces on a stock upstream build
-belongs [upstream](https://github.com/Lovrom8/RSMods/issues).
-
-A debug log is written to `RSMods_debug.txt` beside `Rocksmith2014.exe`. It is
-overwritten on every launch and locked while the game runs, so quit before
-copying it. Attaching it makes a bug report far easier to act on.
-
----
+Attach the logs from `%LOCALAPPDATA%\Rocksmith Audio Bridge\Logs` and `RSMods_debug.txt` from
+the Rocksmith folder. The debug log is locked while the game runs, so quit
+first.
 
 ## Credits
 
 RSMods is the work of **Lovrom8** and **ffio1**, with contributions from
-ZagatoZee, Kokolihapihvi and L0fka. This fork is the pitch routing on top of
-their project. If you find the rest of the mod suite useful, thank them.
+ZagatoZee, Kokolihapihvi and L0fka.
+[RS_ASIO](https://github.com/mdias/rs_asio) by **mdias** makes the ASIO path
+possible. [Signalsmith Stretch](https://github.com/Signalsmith-Audio/signalsmith-stretch)
+by **Signalsmith Audio** does Speaker Mode's pitch shifting. Full third-party
+notices are in [NOTICE](NOTICE).
 
-[RS_ASIO](https://github.com/mdias/rs_asio) by **mdias** is what makes the
-ASIO engine possible; the ASIO Drop Pedal lives underneath it.
-
-[Signalsmith Stretch](https://github.com/Signalsmith-Audio/signalsmith-stretch)
-by **Signalsmith Audio** performs Speaker Mode's pitch shifting.
-
-The reference-frequency technique the Cable Drop Pedal relies on is the same
-one CDLC charters have long used to move a chart's expected notes by setting
-an arrangement's tuning pitch.
+Code written for this project is MIT licensed ([LICENSE](LICENSE)). RSMods code
+remains its authors' property.

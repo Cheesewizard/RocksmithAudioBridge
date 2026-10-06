@@ -248,7 +248,7 @@ namespace RSMods.Twitch
 
         public void LoadEnabledEffects()
         {
-            string exePath = AppDomain.CurrentDomain.BaseDirectory;
+            string exePath = System.Windows.Forms.Application.StartupPath;
             string effectListPath = Path.Combine(exePath, "TwitchEnabledEffects.xml");
 
             if (!File.Exists(effectListPath))

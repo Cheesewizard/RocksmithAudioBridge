@@ -4,48 +4,94 @@
 #include "IInputProcessor.hpp"
 
 #include <cstddef>
+#include <cstdint>
 
-// Intercepts the guitar signal underneath RS_ASIO, on the ASIO driver's own buffers.
-//
-// RS_ASIO does not create the driver through COM. It reads InprocServer32 for the driver's
-// CLSID and loads that DLL directly, then goes through the module's class factory. Nothing
-// in that path calls CoCreateInstance, which is why the WASAPI side probe never saw it:
-// RS_ASIO's log shows "Creating AsioSharedHost - dll: ...MAudioMTrackSoloDuo_Asio.dll" with
-// no corresponding creation in ours.
-//
-// So we get there first. The driver name comes from RS_ASIO.ini, the CLSID from
-// HKLM\SOFTWARE\ASIO, and the module path from InprocServer32. Loading that module early
-// means RS_ASIO later gets the same already-loaded module, and calls a DllGetClassObject we
-// have already detoured. From there: class factory -> IASIO -> createBuffers, which hands
-// over the ASIOCallbacks RS_ASIO registered. Wrapping bufferSwitch puts us on the driver's
-// input buffers before RS_ASIO copies them anywhere.
-//
-// Two things about IASIO differ from the WASAPI interfaces. It is a plain C++ class with
-// virtual methods rather than a COM interface, so on x86 its methods are __thiscall, not
-// __stdcall, and the hooks are declared __fastcall with a dummy EDX argument. And its
-// buffers are per channel and non-interleaved, so a processor here sees one mono channel
-// rather than an interleaved block.
-	namespace Audio::AsioHook
+namespace Audio::AsioHook
 {
 	constexpr size_t INPUT_ROUTE_COUNT = 2;
 
+	namespace Detail
+	{
+		class NoiseSuppressor final
+		{
+		public:
+			void Configure(uint32_t sampleRate, float threshold);
+			float NextGain(float sidechain, float threshold);
+			void Process(float* samples, size_t sampleCount, uint32_t sampleRate, float threshold);
+			void Reset();
+
+		private:
+			static constexpr float EXPANDER_RATIO = 6.0f;
+			static constexpr float EXPANDER_RANGE_DB = -80.0f;
+			static constexpr float DETECTOR_ATTACK_SECONDS = 0.002f;
+			static constexpr float DETECTOR_RELEASE_SECONDS = 0.080f;
+			static constexpr float GAIN_ATTACK_SECONDS = 0.002f;
+			static constexpr float GAIN_RELEASE_SECONDS = 0.180f;
+			static constexpr float OPEN_CONFIRM_SECONDS = 0.003f;
+			static constexpr float CLOSE_HYSTERESIS = 0.65f;
+			// Opening level, relative to the configured threshold. An absolute level would hard-mute every
+			// note between the threshold and that level, leaving the input dead after a pause until one
+			// hit is loud enough. The 3 ms confirm still rejects spikes.
+			static constexpr float ATTACK_ABOVE_THRESHOLD_DB = 6.0f;
+
+			float energy = 0.0f;
+			float appliedGain = 0.0f;
+			float detectorAttackCoef = 0.0f;
+			float detectorReleaseCoef = 0.0f;
+			float gainAttackCoef = 0.0f;
+			float gainReleaseCoef = 0.0f;
+			float rangeGain = 0.0001f;
+			float configuredThreshold = -1.0f;
+			float attackThreshold = 0.0316228f;
+			uint32_t openConfirmSamples = 1;
+			uint32_t openConfirmCount = 0;
+			uint32_t configuredRate = 0;
+			bool isOpen = false;
+		};
+	}
+
+	// Validates and chains RS_ASIO's existing PortAudio unmarshal patch. This observes the
+	// IAudioCaptureClient RS_ASIO already created instead of creating another ASIO host.
 	void Install();
 
-	// Called from the game loop. Enables processing once the driver has built its buffers
-	// and a processor plus input channel are in place; createBuffers happens ~40s after
-	// Install, so readiness can only be observed by polling.
+	// Called from the game loop so buffers and processor state are prepared off the audio thread.
 	void Poll();
 
-	// Pins a route to a specific ASIO channel, overriding whatever RS_ASIO.ini resolves.
-	// Pass a negative value for automatic resolution. Must be called before Install; the
-	// configuration is read once there.
-	void SetChannelOverride(size_t routeIndex, int asioChannel);
-
-	// Ownership stays with the caller, which must keep both processors alive for as long as
-	// the ASIO stream runs. Route 0 is [Asio.Input.0], route 1 is [Asio.Input.1]. When only
-	// [Asio.Input.1] names a driver, route 0 follows that section instead, because RS_ASIO
-	// serves the single active player from it.
+	// Ownership stays with the caller. Active endpoints are assigned in RS_ASIO.ini order.
 	void SetProcessor(size_t routeIndex, IInputProcessor* inputProcessor);
+
+
+	// Make-up gain (dB) applied to the real guitar input before the game's amp and note gate.
+	// Compensates for RS_ASIO/interface inputs arriving quieter than a hot Real Tone Cable, which
+	// otherwise makes the game's level-sensitive gate mute sustains and bends early. 0 dB = off.
+	void SetInputGainDb(float decibels);
+
+	// Adaptive suppressor threshold in dBFS, keyed to the raw pre-gain input. It requires a sustained
+	// onset, rejects idle noise and brief spikes, and closes gradually after notes. >= 0 dB = off.
+	void SetNoiseGateThresholdDb(float decibels);
+	float GetNoiseGateThresholdDb();
+
+	// Logs "(INPUT STAGES)" every 10 s: Player 1's peak at the device (proxy), at the game capture
+	// before the conditioner, and after it, so a dead input stretch shows which stage went silent.
+	void PollInputStageMeter();
+
+	// Input compressor strength (0..1, 0 = off). Flattens the natural string-beat wobble before the game
+	// amp so a quiet interface input doesn't warble the way a hot cable's compressed signal doesn't.
+	void SetCompressorStrength(float strength);
+	float GetCompressorStrength();
+
+	// Mains-hum notch base frequency in Hz (0 = off, else 50 or 60). Notches out the 50/60 Hz ground-loop
+	// hum comb a grounded interface injects and a single-USB Real Tone Cable does not; front of chain, so
+	// it cleans the raw input before the gate/gain and the game see it.
+	void SetHumFilterBaseHz(float baseHz);
+	float GetHumFilterBaseHz();
+
+	// Round-trip latency measurement (paired with the proxy's probe injection): arm a one-shot capture of
+	// `frames` route-0 input samples (the looped-back probe), then the host correlates them against the probe.
+	void StartLatencyCapture(int frames);
+	bool IsLatencyCaptureDone();
+	int GetLatencyCapture(const float** out);   // returns frames captured so far; *out = buffer
+	float GetInputGainDb();
 
 	void SetProcessingEnabled(bool enabled);
 	bool IsProcessingEnabled();

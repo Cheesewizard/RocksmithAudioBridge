@@ -1,7 +1,15 @@
 #include "stdafx.h"
 #include "ModManager.hpp"
 #include "Mods/DropPedal/DropPedal.hpp"
+#include "Mods/RocksmithGate.hpp"
+#include "Research/ResearchBridge.hpp"
+#include "Audio/MlAudioExporter.hpp"
+#include "Audio/CableInput.hpp"
+#include "Audio/AsioHook.hpp"
+#include "Audio/OutputTap.hpp"
+#include "OverlayToggles.hpp"
 #include "Audio/SongShift/WwiseMusicHook.hpp"
+#include "Audio/CableInput.hpp"
 
 namespace ModManager {
 	void InitializeConfiguration() {
@@ -21,6 +29,9 @@ namespace ModManager {
 		BugPrevention::PreventAdvancedDisplayCrash();
 		BugPrevention::PreventPortAudioInDeviceCrash();
 		BugPrevention::PreventExtraAudioDevicesCrash();
+		// Modern WASAPI capture for the Real Tone Cable: replaces the game's
+		// legacy exclusive/shared input open so the cable works regardless of Rocksmith.ini.
+		Audio::CableInput::Install();
 
 		if (Settings::ReturnSettingValue("FixBrokenTones") == "on") {
 			BugPrevention::PreventStuckTone();
@@ -90,6 +101,9 @@ namespace ModManager {
 		oEndScene = (tEndScene)MemUtil::TrampHook((byte*)vTable[D3DInfo::EndScene_Index], (byte*)D3DHooks::Hook_EndScene, 7); // https://docs.microsoft.com/en-us/windows/win32/api/d3d9helper/nf-d3d9helper-idirect3ddevice9-endscene
 		oDrawIndexedPrimitive = (tDrawIndexedPrimitive)MemUtil::TrampHook((byte*)vTable[D3DInfo::DrawIndexedPrimitive_Index], (byte*)D3DHooks::Hook_DIP, 5); // https://docs.microsoft.com/en-us/windows/win32/api/d3d9helper/nf-d3d9helper-idirect3ddevice9-drawindexedprimitive
 		oDrawPrimitive = (tDrawPrimitive)MemUtil::TrampHook((byte*)vTable[D3DInfo::DrawPrimitive_Index], (byte*)D3DHooks::Hook_DP, 7); // https://docs.microsoft.com/en-us/windows/win32/api/d3d9helper/nf-d3d9helper-idirect3ddevice9-drawprimitive
+		// Detours computes the prologue length itself.
+		oDrawPrimitiveUP = (tDrawPrimitiveUP)DetourFunction((byte*)vTable[D3DInfo::DrawPrimitiveUP_Index], (byte*)D3DHooks::Hook_DPUP);
+		oDrawIndexedPrimitiveUP = (tDrawIndexedPrimitiveUP)DetourFunction((byte*)vTable[D3DInfo::DrawIndexedPrimitiveUP_Index], (byte*)D3DHooks::Hook_DIPUP);
 	}
 
 	/// <summary>
@@ -114,6 +128,7 @@ namespace ModManager {
 		BugPrevention::FixModifyingFunctions();
 		Settings::Initialize();
 		UpdateSettings();
+		OverlayToggles::ApplyIniDefaults();   // per-feature overlay .ini gates ("Overlay_<name>")
 		ERMode::Initialize();
 		GUI();
 		Midi::InitMidi();
@@ -122,10 +137,15 @@ namespace ModManager {
 		CrowdControl::StartServer();
 	}
 
+	// True once the capture hook has been installed to carry the front-of-chain input conditioner in
+	// normal play (a non-zero AsioInputGain or NoiseGateThreshold at launch). Keeps the per-frame Poll
+	// running so the hook's detour stays installed even when Drop Pedal is off.
+	static bool inputConditionerHookActive = false;
+
 	/// <summary>
 	/// Applies all mods and fixes that must run at startup.
 	/// </summary>
-	void ApplyStartupMods() 
+	void ApplyStartupMods()
 	{
 		if (DropPedal::IsConfiguredEnabled())
 		{
@@ -135,6 +155,30 @@ namespace ModManager {
 		// Runs before the game instantiates its ASIO driver, so the detour is in place
 		// when RS_ASIO loads the same module.
 		DropPedal::InstallInputHooks();
+
+		// Configure the front-of-chain input conditioner before RS_ASIO starts delivering capture buffers.
+		// Applying these values later from the post-load game loop leaves the initial ASIO stream unconditioned.
+		const int inputGainTenths = Settings::GetModSetting("AsioInputGain");
+		const int suppressorThresholdTenths = Settings::GetModSetting("NoiseGateThreshold");
+		const int compressorStrength = Settings::GetModSetting("CompressorStrength");
+		const int humFilterBaseHz = Settings::GetModSetting("HumFilter");
+		Audio::AsioHook::SetInputGainDb(inputGainTenths / 10.0f);
+		Audio::AsioHook::SetNoiseGateThresholdDb(suppressorThresholdTenths / 10.0f);
+		Audio::AsioHook::SetCompressorStrength(compressorStrength / 100.0f);
+		Audio::AsioHook::SetHumFilterBaseHz(static_cast<float>(humFilterBaseHz));
+		LOG_INFO("[InputCapture] Startup conditioner configured: gain " << inputGainTenths / 10.0f
+			<< " dB, suppressor " << suppressorThresholdTenths / 10.0f
+			<< " dBFS, compressor " << compressorStrength
+			<< "%, hum filter " << humFilterBaseHz << " Hz." << std::endl);
+
+		// The conditioner shares the Drop Pedal capture hook, but it must also run when Drop Pedal is off.
+		if (inputGainTenths != 0 || suppressorThresholdTenths != 0
+			|| compressorStrength != 0 || humFilterBaseHz != 0)
+		{
+			Audio::AsioHook::Install();
+			inputConditionerHookActive = true;
+		}
+
 
 		AudioDevices::SetupMicrophones();
 		ApplyBugPrevention();
@@ -170,7 +214,7 @@ namespace ModManager {
 	/// Configures audio device settings including sample rates.
 	/// We have to do this early in execution as we need to change it before the audio engine starts up.
 	/// </summary>
-	void ApplyAudioDeviceConfiguration() 
+	void ApplyAudioDeviceConfiguration()
 	{
 		Midi::tuningOffset = Settings::GetModSetting("TuningOffset");
 
@@ -237,7 +281,7 @@ namespace ModManager {
 	/// </summary>
 	void HandleVolumeDisplay() {
 		if (Settings::ReturnSettingValue("VolumeControlEnabled") == "on" && MoreThanThreeSecondsPassed()) {
-			GameOverlay::displayCurrentVolume = false;	
+			GameOverlay::displayCurrentVolume = false;
 		}
 	}
 
@@ -253,27 +297,34 @@ namespace ModManager {
 
 		DropPedal::Poll();
 
+		// Tier-1 export pump: the shared-memory mapping the ML companion reads is
+		// created here, off the audio thread (which must never allocate), and the
+		// applied input shift is refreshed here because walking DropPedal state is not
+		// audio-thread-safe. Runs regardless of the input-hook mode: the tier-0/tier-1
+		// tap observes the route even when no processor is installed (Speaker Mode).
+		MlAudioExporter::Poll(DropPedal::GetAppliedInputShiftSemitones());
+
+		// Liveness report for the modern cable input (packets flowing / stalled / resumed).
+		Audio::CableInput::Poll();
+
+
 		if (DropPedal::ShouldInstallInputHooks())
 		{
 			Audio::AsioHook::Poll();
 
-			// Engine arbitration: exactly one pitch system may be live. Once the ASIO input
-			// shifter is processing, it owns pitch; the game-side MultiPitch path stays
-			// suppressed for the session. WndProc key commands update the input shifter as
-			// soon as each control is released.
-			DropPedal::SetInputShifterActive(Audio::AsioHook::IsProcessingEnabled());
-			if (DropPedal::ConsumeInputShifterTransitionFailure())
-			{
-				Audio::AsioHook::SetProcessingEnabled(false);
-				DropPedal::SetInputShifterActive(false);
-				LOG_ERROR("Drop pedal could not restore the live Cable pitch safely. "
-					"ASIO processing was disabled and Cable retained pitch ownership." << std::endl);
-			}
-
-			if (DropPedal::RequiresInputShifter() && !Audio::AsioHook::IsProcessingEnabled())
+			const bool isInputReady = Audio::AsioHook::IsProcessingEnabled();
+			DropPedal::SetInputShifterActive(isInputReady);
+			if (!isInputReady)
 			{
 				DropPedal::ReportInputShifterUnavailable();
 			}
+		}
+		else if (inputConditionerHookActive)
+		{
+			// Keep the capture hook's detour-install attempts and housekeeping running so the
+			// front-of-chain input conditioner (gain + gate) stays live, without engaging the Drop Pedal
+			// processor path (no processor/source means Poll never auto-enables the shift stage).
+			Audio::AsioHook::Poll();
 		}
 
 		if (Settings::ReturnSettingValue("RemoveHeadstockEnabled") == "on" &&
@@ -326,11 +377,13 @@ namespace ModManager {
 	/// <summary>
 	/// Main update loop when the game has finished loading.
 	/// </summary>
-	void HandlePostGameLoadedMods(GameLoopState& state) 
+	void HandlePostGameLoadedMods(GameLoopState& state)
 	{
 		GameState::currentMenu = GameState::GetCurrentMenu(); // This loads without checking if memory is safe... This can cause crashes if used when GameLoaded is false.
 
 		HandleExternalMonitor(state);
+		HandleRocksmithGate();
+		HandleAudioBridgeLimiter();
 		HandleMicrophoneVolumeOverride();
 		HandleAudioBackgroundToggle();
 		HandleTwoRTCBypassToggle();
@@ -506,7 +559,7 @@ namespace ModManager {
 	/// <summary>
 	/// Handles moving the game window to an external monitor.
 	/// </summary>
-	void HandleExternalMonitor(GameLoopState& state) 
+	void HandleExternalMonitor(GameLoopState& state)
 	{
 		if (!state.movedToExternalDisplay && Settings::ReturnSettingValue("SecondaryMonitor") == "on") {
 			LaunchOnExternalMonitor::SendRocksmithToScreen(
@@ -518,13 +571,48 @@ namespace ModManager {
 	}
 
 	/// <summary>
+	/// Seeds the manual Rocksmith gate override once at startup. RocksmithGateOverride is 0/1;
+	/// RocksmithGateThreshold is the forced P1_NoiseFloor in tenths of a dB. Live changes arrive over the
+	/// control pipe, and the value is re-asserted each frame in the EndScene hook, so this only seeds launch.
+	/// </summary>
+	void HandleRocksmithGate() {
+		static bool applied = false;
+		if (applied) return;
+		applied = true;
+		RocksmithGate::SetOverride(Settings::GetModSetting("RocksmithGateOverride") != 0,
+			Settings::GetModSetting("RocksmithGateThreshold") / 10.0f);
+	}
+
+	/// <summary>
+	/// Seeds the Rocksmith Audio Bridge proxy's output loudness guard from the saved settings once the proxy
+	/// driver is loaded. Cable mode seeds its shared-output engine when that stream initializes. Live changes
+	/// arrive over the control pipe (op 16). The guard is a
+	/// look-ahead brickwall limiter that holds the ceiling (hearing safety) plus a slow loudness AGC that
+	/// equalises song-to-song; each stage toggles independently.
+	/// </summary>
+	void HandleAudioBridgeLimiter() {
+		static bool applied = false;
+		if (applied) return;
+		if (!Audio::OutputTap::ProxyAvailable()) return;
+		// Levels are stored in tenths of a dBFS (e.g. -60 = -6.0 dBFS ceiling; -200 = -20.0 dBFS AGC target).
+		const bool limiterOn = Settings::GetModSetting("AudioBridgeLimiter") != 0;
+		const float ceilingDb = Settings::GetModSetting("AudioBridgeLimiterLevel") / 10.0f;
+		const bool agcOn = Settings::GetModSetting("AudioBridgeLoudnessMatch") != 0;
+		const float targetDb = Settings::GetModSetting("AudioBridgeLoudnessTarget") / 10.0f;
+		const float ceiling = std::pow(10.0f, ceilingDb / 20.0f);
+		const float target = std::pow(10.0f, targetDb / 20.0f);
+		applied = Audio::OutputTap::ConfigureOutputGuard(limiterOn, ceiling, agcOn, target);
+		if (applied) LOG_INFO("(AUDIO ROUTING) Saved output limiter applied to the ASIO proxy" << std::endl);
+	}
+
+	/// <summary>
 	/// Manages microphone volume override settings.
 	/// </summary>
 	void HandleMicrophoneVolumeOverride() {
 		if (Settings::ReturnSettingValue("OverrideInputVolumeEnabled") == "on" &&
 			Settings::ReturnSettingValue("OverrideInputVolumeDevice") != "" &&
 			AudioDevices::GetMicrophoneVolume(Settings::ReturnSettingValue("OverrideInputVolumeDevice")) !=
-			Settings::GetModSetting("OverrideInputVolume")) 
+			Settings::GetModSetting("OverrideInputVolume"))
 		{
 			AudioDevices::SetMicrophoneVolume(
 				Settings::ReturnSettingValue("OverrideInputVolumeDevice"),
@@ -536,7 +624,7 @@ namespace ModManager {
 	/// <summary>
 	/// Handles dynamic toggling of audio-in-background feature.
 	/// </summary>
-	void HandleAudioBackgroundToggle() 
+	void HandleAudioBackgroundToggle()
 	{
 		if (Settings::ReturnSettingValue("AllowAudioInBackground") == "on" && !VolumeControl::allowedAltTabbingWithAudio) {
 			VolumeControl::AllowAltTabbingWithAudio();
@@ -548,7 +636,7 @@ namespace ModManager {
 	/// <summary>
 	/// Handles dynamic toggling of the two RTC message box bypass.
 	/// </summary>
-	void HandleTwoRTCBypassToggle() 
+	void HandleTwoRTCBypassToggle()
 	{
 		static bool rsAsioBypassTwoRTC = false;
 
@@ -682,7 +770,7 @@ namespace ModManager {
 	/// We are in a song we haven't seen in this play session. Log its Id so we can prep for the Riff Repeater > 100% mod.
 	/// </summary>
 	void LogSongIDForRiffRepeater() {
-		if (RiffRepeater::readyToLogSongID && RiffRepeater::LogSongID(GameState::GetSongKey())) {	
+		if (RiffRepeater::readyToLogSongID && RiffRepeater::LogSongID(GameState::GetSongKey())) {
 			RiffRepeater::readyToLogSongID = false;
 		}
 	}

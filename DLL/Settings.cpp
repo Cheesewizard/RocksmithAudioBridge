@@ -1,5 +1,242 @@
 #include "stdafx.h"
 #include "Settings.hpp"
+#include <atomic>
+
+namespace
+{
+	std::atomic<bool> noteByNoteDetectionVisible{ true };
+	std::atomic<bool> noteByNoteCustomColours{ false };
+	std::atomic<int> noteByNoteUiSize{ 100 };
+	std::atomic<int> noteByNoteTargetSize{ 150 };
+	std::atomic<Settings::NoteByNoteTargetPosition> noteByNoteTargetPosition{ Settings::NoteByNoteTargetPosition::Left };
+	std::atomic<uint32_t> noteByNoteColors[] = { 0xFFFFFFFF, 0xFF55DD77, 0xFFFFAA44, 0xFFFF5555 };
+	std::atomic<int> noteByNoteLineSpacing{ 100 };
+	std::atomic<Settings::NoteByNoteTargetStyle> noteByNoteTargetStyle{ Settings::NoteByNoteTargetStyle::Detailed };
+	const char* const kNoteByNoteTargetStyles[] = { "Detailed", "Simple", "Tab" };
+	// HUD block placements in 1/10000ths of the window (-1 = built-in layout); index = NoteByNoteHudBlock.
+	// Packed x << 16 | y so a reader never sees a new x with an old y.
+	std::atomic<uint32_t> noteByNotePlacements[2] = { 0xFFFFFFFFu, 0xFFFFFFFFu };
+	const char* const kNoteByNotePlacementKeys[2] = { "NoteByNoteReadoutPlacement", "NoteByNoteTargetPlacement" };
+
+	uint32_t PackPlacement(Settings::HudPlacement placement)
+	{
+		if (!placement.IsSet()) return 0xFFFFFFFFu;
+		const auto unit = [](float v) { return static_cast<uint32_t>(std::clamp(v, 0.0f, 1.0f) * 10000.0f + 0.5f); };
+		return (unit(placement.x) << 16) | unit(placement.y);
+	}
+}
+
+namespace
+{
+	// Values changed at runtime by the in-game overlay (keybinds, Drop Pedal overlay options). The upstream settings
+	// maps (modSettings / customSettings) are plain std::maps read by several threads without a lock; upstream only
+	// rebuilds them on "update all", and that race is inherited. Our overlay writes must not add to it, so they never
+	// touch those maps: they go here, under our own mutex, and to RSMods.ini (surgical per-key write). The readers
+	// below check this table first. A reload from the ini (UpdateSettings) clears it, since the ini is then current.
+	std::mutex runtimeOverrideMutex;
+	std::map<std::string, std::string, std::less<>> runtimeOverrides;
+
+	bool TryRuntimeOverride(const std::string& name, std::string& value)
+	{
+		std::lock_guard<std::mutex> guard(runtimeOverrideMutex);
+		const auto found = runtimeOverrides.find(name);
+		if (found == runtimeOverrides.end()) return false;
+		value = found->second;
+		return true;
+	}
+
+	void SetRuntimeOverride(const std::string& name, const std::string& value)
+	{
+		std::lock_guard<std::mutex> guard(runtimeOverrideMutex);
+		runtimeOverrides[name] = value;
+	}
+}
+
+bool Settings::IsNoteByNoteDetectionVisible()
+{
+	return noteByNoteDetectionVisible.load();
+}
+
+bool Settings::SetNoteByNoteDetectionVisible(bool visible)
+{
+	char executablePath[MAX_PATH]{};
+	GetModuleFileNameA(nullptr, executablePath, MAX_PATH);
+	const auto iniPath = (std::filesystem::path(executablePath).parent_path() / "RSMods.ini").string();
+	if (!WritePrivateProfileStringA("Note by Note", "NoteByNoteDetectionOverlay", visible ? "on" : "off", iniPath.c_str()))
+	{
+		LOG_ERROR("[SETTINGS] Could not persist NoteByNoteDetectionOverlay" << std::endl);
+		return false;
+	}
+	noteByNoteDetectionVisible.store(visible);
+	return true;
+}
+
+bool Settings::SetNoteByNoteTargetPosition(NoteByNoteTargetPosition position)
+{
+	const char* value = position == NoteByNoteTargetPosition::Center ? "Center"
+		: position == NoteByNoteTargetPosition::Custom ? "Custom" : "Left";
+	char executablePath[MAX_PATH]{};
+	GetModuleFileNameA(nullptr, executablePath, MAX_PATH);
+	const auto iniPath = (std::filesystem::path(executablePath).parent_path() / "RSMods.ini").string();
+	if (!WritePrivateProfileStringA("Note by Note", "NoteByNoteTargetPosition", value, iniPath.c_str()))
+	{
+		LOG_ERROR("[SETTINGS] Could not persist NoteByNoteTargetPosition" << std::endl);
+		return false;
+	}
+	noteByNoteTargetPosition.store(position);
+	return true;
+}
+
+int Settings::GetNoteByNoteUiSize()
+{
+	return noteByNoteUiSize.load();
+}
+
+int Settings::GetNoteByNoteTargetSize()
+{
+	return noteByNoteTargetSize.load();
+}
+
+Settings::NoteByNoteTargetPosition Settings::GetNoteByNoteTargetPosition()
+{
+	return noteByNoteTargetPosition.load();
+}
+
+NoteByNote::DetectionPalette Settings::GetNoteByNoteDetectionPalette()
+{
+	if (!noteByNoteCustomColours.load()) return {};
+	return { noteByNoteColors[0].load(), noteByNoteColors[1].load(),
+		noteByNoteColors[2].load(), noteByNoteColors[3].load() };
+}
+
+namespace
+{
+	// Same keys, section and formats ReadModSettings loads, so an overlay edit survives the next launch and the
+	// desktop GUI shows it. Surgical per-key writes (never a whole-file rewrite) so nothing else in RSMods.ini moves.
+	const char* const kNoteByNoteColorKeys[] = { "NoteByNoteNeutralColor", "NoteByNoteConfirmedColor", "NoteByNotePartialColor", "NoteByNoteRejectedColor" };
+	const uint32_t kNoteByNoteColorDefaults[] = { 0xFFFFFF, 0x55DD77, 0xFFAA44, 0xFF5555 };
+
+	bool WriteNoteByNoteKey(const char* key, const std::string& value)
+	{
+		char executablePath[MAX_PATH]{};
+		GetModuleFileNameA(nullptr, executablePath, MAX_PATH);
+		const auto iniPath = (std::filesystem::path(executablePath).parent_path() / "RSMods.ini").string();
+		if (WritePrivateProfileStringA("Note by Note", key, value.c_str(), iniPath.c_str())) return true;
+		LOG_ERROR("[SETTINGS] Could not persist " << key << std::endl);
+		return false;
+	}
+
+	std::string HexColor(uint32_t rgb)
+	{
+		char text[8]{};
+		sprintf_s(text, "%06X", rgb & 0xFFFFFFu);
+		return text;
+	}
+}
+
+bool Settings::IsNoteByNoteCustomColours()
+{
+	return noteByNoteCustomColours.load();
+}
+
+bool Settings::SetNoteByNoteCustomColours(bool enabled)
+{
+	noteByNoteCustomColours.store(enabled);
+	return WriteNoteByNoteKey("NoteByNoteCustomColours", enabled ? "on" : "off");
+}
+
+uint32_t Settings::GetNoteByNoteColor(int index)
+{
+	if (index < 0 || index > 3) return 0xFFFFFF;
+	return noteByNoteColors[index].load() & 0xFFFFFFu;
+}
+
+bool Settings::SetNoteByNoteColor(int index, uint32_t rgb, bool persist)
+{
+	if (index < 0 || index > 3) return false;
+	noteByNoteColors[index].store(0xFF000000u | (rgb & 0xFFFFFFu));
+	return !persist || WriteNoteByNoteKey(kNoteByNoteColorKeys[index], HexColor(rgb));
+}
+
+bool Settings::ResetNoteByNoteColors()
+{
+	bool saved = true;
+	for (int index = 0; index < 4; ++index)
+		saved = SetNoteByNoteColor(index, kNoteByNoteColorDefaults[index], true) && saved;
+	return saved;
+}
+
+bool Settings::SetNoteByNoteUiSize(int percent, bool persist)
+{
+	percent = std::clamp(percent, 50, 300);   // the range ReadModSettings accepts
+	noteByNoteUiSize.store(percent);
+	return !persist || WriteNoteByNoteKey("NoteByNoteUiSize", std::to_string(percent));
+}
+
+bool Settings::SetDropPedalSetting(const char* modKey, const char* iniKey, const std::string& value, bool persist)
+{
+	SetRuntimeOverride(modKey, value);   // never the shared map (see runtimeOverrides)
+	if (!persist) return true;
+	char executablePath[MAX_PATH]{};
+	GetModuleFileNameA(nullptr, executablePath, MAX_PATH);
+	const auto iniPath = (std::filesystem::path(executablePath).parent_path() / "RSMods.ini").string();
+	if (WritePrivateProfileStringA("Drop Pedal", iniKey, value.c_str(), iniPath.c_str())) return true;
+	LOG_ERROR("[SETTINGS] Could not persist Drop Pedal " << iniKey << std::endl);
+	return false;
+}
+
+bool Settings::SetNoteByNoteTargetSize(int percent, bool persist)
+{
+	percent = std::clamp(percent, 50, 300);
+	noteByNoteTargetSize.store(percent);
+	return !persist || WriteNoteByNoteKey("NoteByNoteTargetSize", std::to_string(percent));
+}
+
+Settings::HudPlacement Settings::GetNoteByNoteHudPlacement(NoteByNoteHudBlock block)
+{
+	const uint32_t packed = noteByNotePlacements[static_cast<int>(block)].load();
+	if (packed == 0xFFFFFFFFu) return {};
+	return { (packed >> 16) / 10000.0f, (packed & 0xFFFFu) / 10000.0f };
+}
+
+bool Settings::SetNoteByNoteHudPlacement(NoteByNoteHudBlock block, HudPlacement placement, bool persist)
+{
+	const int index = static_cast<int>(block);
+	noteByNotePlacements[index].store(PackPlacement(placement));
+	if (!persist) return true;
+	std::string value = "Default";
+	if (placement.IsSet())
+	{
+		const HudPlacement stored = GetNoteByNoteHudPlacement(block);
+		char text[32]{};
+		sprintf_s(text, "%.4f,%.4f", stored.x, stored.y);
+		value = text;
+	}
+	return WriteNoteByNoteKey(kNoteByNotePlacementKeys[index], value);
+}
+
+int Settings::GetNoteByNoteLineSpacing()
+{
+	return noteByNoteLineSpacing.load();
+}
+
+bool Settings::SetNoteByNoteLineSpacing(int percent, bool persist)
+{
+	percent = std::clamp(percent, 50, 300);
+	noteByNoteLineSpacing.store(percent);
+	return !persist || WriteNoteByNoteKey("NoteByNoteLineSpacing", std::to_string(percent));
+}
+
+Settings::NoteByNoteTargetStyle Settings::GetNoteByNoteTargetStyle()
+{
+	return noteByNoteTargetStyle.load();
+}
+
+bool Settings::SetNoteByNoteTargetStyle(NoteByNoteTargetStyle style)
+{
+	noteByNoteTargetStyle.store(style);
+	return WriteNoteByNoteKey("NoteByNoteTargetStyle", kNoteByNoteTargetStyles[static_cast<int>(style)]);
+}
 
 /// <summary>
 /// Load Default Settings.
@@ -26,6 +263,7 @@ void Settings::Initialize()
 		{"DropPedalPitchUpKey", "VK_OEM_PERIOD"},
 		{"DropPedalToggleKey", "VK_F7"},
 		{"DropPedalBaseTuningKey", "VK_F9"},
+		{"RecordingHotkey", "VK_F6"},
 
 		{"MasterVolumeKey", "5"},
 		{"SongVolumeKey", "6"},
@@ -96,8 +334,8 @@ void Settings::Initialize()
 		{"DisplayCurrentAccuracy", "off"},
 		{"PreventMidSongPause", "off"},
 		{"RemoveFingerprints", "off"},
-		{"EnableDropPedal", "off"},
-		{"DropPedalEngine", "automatic"},
+		{"EnableDropPedal", "on"},   // ships with the mod; toggled in game with F7. "off" is a revert switch only.
+		{"DropPedalShowOverlay", "on"},
 		{"DropPedalCustomOverlayColors", "off"},
 		{"DropPedalOverlayDownColor", "6BE06B"},
 		{"DropPedalOverlayUpColor", "FFC24D"},
@@ -115,6 +353,16 @@ void Settings::Initialize()
 		{"SecondaryMonitorYPosition", 0},
 		{"SeparateNoteColorsMode", 0},
 		{"OverrideInputVolume", 17},
+		{"AsioInputGain", 0},
+		{"NoiseGateThreshold", 0},
+		{"CompressorStrength", 0},
+		{"HumFilter", 0},
+		{"RocksmithGateOverride", 0},
+		{"RocksmithGateThreshold", -593},
+		{"AudioBridgeLimiter", 0},
+		{"AudioBridgeLimiterLevel", -60},
+		{"AudioBridgeLoudnessMatch", 0},
+		{"AudioBridgeLoudnessTarget", -200},
 		{"CustomStringColors", 0},
 		{"AlternativeOutputSampleRate", 48000},
 		{"LoopingLeadUp", 0},
@@ -122,8 +370,6 @@ void Settings::Initialize()
 		{"RewindLeadup", 0},
 		{"CustomNSPTimeLimit", 10000},
 		{"OnScreenFontSize", 24},
-		{"DropPedalPlayer1AsioChannel", -1},
-		{"DropPedalPlayer2AsioChannel", -1},
 
 		{"GuitarSpeakDelete", 0},
 		{"GuitarSpeakSpace", 0},
@@ -202,6 +448,7 @@ void Settings::ReadKeyBinds() {
 		{ "DropPedalPitchUpKey", reader.GetValue("Keybinds", "DropPedalPitchUpKey", "VK_OEM_PERIOD")},
 		{ "DropPedalToggleKey", reader.GetValue("Keybinds", "DropPedalToggleKey", "VK_F7")},
 		{ "DropPedalBaseTuningKey", reader.GetValue("Keybinds", "DropPedalBaseTuningKey", "VK_F9")},
+		{ "RecordingHotkey", reader.GetValue("Keybinds", "RecordingHotkey", "VK_F6")},
 
 		{ "MasterVolumeKey", reader.GetValue("Audio Keybindings", "MasterVolumeKey", "5") },
 		{ "SongVolumeKey", reader.GetValue("Audio Keybindings", "SongVolumeKey", "6") },
@@ -214,6 +461,18 @@ void Settings::ReadKeyBinds() {
 		{ "MutePlayer1Key", reader.GetValue("Audio Keybindings", "MutePlayer1Key", "X")},
 		{ "MutePlayer2Key", reader.GetValue("Audio Keybindings", "MutePlayer2Key", "C")}
 	};
+
+	// A recording hotkey on the Drop Pedal base-tuning key (older configs defaulted both to F9) would make
+	// every press toggle a recording as well. Base tuning keeps its key; the recording key moves to F6 (the
+	// default; F8 has known issues, F11 is the game's fullscreen key) and is saved, or is left unbound if
+	// base tuning itself is on F6. The overlay's Record page can rebind it.
+	if (modSettings["RecordingHotkey"] == modSettings["DropPedalBaseTuningKey"]) {
+		const bool f6Free = modSettings["DropPedalBaseTuningKey"] != "VK_F6";
+		LOG_WARNING("RecordingHotkey " << modSettings["RecordingHotkey"] << " collides with DropPedalBaseTuningKey; recording "
+			<< (f6Free ? "moved to VK_F6." : "left unbound; pick a key in the overlay's Record page.") << std::endl);
+		if (f6Free) SetKeyBind("RecordingHotkey", 0x75, true);   // VK_F6
+		else modSettings["RecordingHotkey"] = "";
+	}
 }
 
 /// <summary>
@@ -238,16 +497,22 @@ void Settings::ReadModSettings() {
 		{"SeparateNoteColorsMode", reader.GetLongValue("Mod Settings", "SeparateNoteColorsMode", 0)}, // 0 = same as strings, 1 = default, 2 = custom
 		{"CustomStringColors", reader.GetLongValue("Toggle Switches", "CustomStringColors", 0)}, //0 = default, 1 = Zag, 2 = custom colors
 		{"OverrideInputVolume", reader.GetLongValue("Mod Settings", "OverrideInputVolume", 17)}, // 17 is what Rocksmith calls default.
+		{"AsioInputGain", reader.GetLongValue("Mod Settings", "AsioInputGain", 0)}, // tenths of a dB of guitar input make-up gain (0 = off)
+		{"NoiseGateThreshold", reader.GetLongValue("Mod Settings", "NoiseGateThreshold", 0)}, // guitar input suppressor open threshold in tenths of a dB (0 = off, else negative)
+		{"CompressorStrength", reader.GetLongValue("Mod Settings", "CompressorStrength", 0)}, // guitar input compressor strength, 0-100 (0 = off); flattens string-beat wobble before the game amp
+		{"HumFilter", reader.GetLongValue("Mod Settings", "HumFilter", 0)}, // mains-hum notch base frequency (0 = off, else 50 or 60); notches out the 50/60 Hz ground-loop hum comb on a grounded interface
+		{"RocksmithGateOverride", reader.GetLongValue("Mod Settings", "RocksmithGateOverride", 0)}, // 1 = take over the game's own amp noise gate (P1_NoiseFloor); 0 = leave the game's calibrated gate alone
+		{"RocksmithGateThreshold", reader.GetLongValue("Mod Settings", "RocksmithGateThreshold", -593)}, // forced P1_NoiseFloor in tenths of a dB while the override is on (-593 = game default; lower opens the gate for longer sustain)
+		{"AudioBridgeLimiter", reader.GetLongValue("Mod Settings", "AudioBridgeLimiter", 0)}, // output limiter / safety ceiling (0 = off, 1 = on)
+		{"AudioBridgeLimiterLevel", reader.GetLongValue("Mod Settings", "AudioBridgeLimiterLevel", -60)}, // limiter ceiling in tenths of a dBFS (-60 = -6.0 dBFS); nothing leaves above this
+		{"AudioBridgeLoudnessMatch", reader.GetLongValue("Mod Settings", "AudioBridgeLoudnessMatch", 0)}, // loudness equalisation / AGC (0 = off, 1 = on)
+		{"AudioBridgeLoudnessTarget", reader.GetLongValue("Mod Settings", "AudioBridgeLoudnessTarget", -200)}, // AGC target loudness in tenths of a dBFS RMS (-200 = -20.0 dBFS)
 		{"AlternativeOutputSampleRate", reader.GetLongValue("Mod Settings", "AlternativeOutputSampleRate", 48000)},
 		{"LoopingLeadUp", reader.GetLongValue("Mod Settings", "LoopingLeadUp", 0)},
 		{"RewindBy", reader.GetLongValue("Mod Settings", "RewindBy", 0)},
 		{"RewindLeadup", reader.GetLongValue("Mod Settings", "RewindLeadup", 0)},
 		{"CustomNSPTimeLimit", reader.GetLongValue("Mod Settings", "CustomNSPTimeLimit", 10000)},
 		{"OnScreenFontSize", reader.GetLongValue("Mod Settings", "OnScreenFontSize", 24)},
-
-		// -1 means resolve the ASIO channel from RS_ASIO.ini; >= 0 pins it.
-		{"DropPedalPlayer1AsioChannel", reader.GetLongValue("Drop Pedal", "Player1AsioChannel", -1)},
-		{"DropPedalPlayer2AsioChannel", reader.GetLongValue("Drop Pedal", "Player2AsioChannel", -1)},
 
 		{"GuitarSpeakDelete", reader.GetLongValue("Guitar Speak", "GuitarSpeakDeleteWhen", 0)},
 		{"GuitarSpeakSpace", reader.GetLongValue("Guitar Speak", "GuitarSpeakSpaceWhen", 0)},
@@ -325,12 +590,85 @@ void Settings::ReadModSettings() {
 	modSettings["DisplayCurrentAccuracy"] = reader.GetValue("Toggle Switches", "DisplayCurrentAccuracy", "off");
 	modSettings["PreventMidSongPause"] = reader.GetValue("Toggle Switches", "PreventMidSongPause", "off");
 	modSettings["RemoveFingerprints"] = reader.GetValue("Toggle Switches", "RemoveFingerprints", "off");
-	modSettings["EnableDropPedal"] = reader.GetValue("Drop Pedal", "EnableDropPedal", "off");
-	modSettings["DropPedalEngine"] = reader.GetValue("Drop Pedal", "Engine", "automatic");
+	modSettings["EnableDropPedal"] = reader.GetValue("Drop Pedal", "EnableDropPedal", "on");
+	modSettings["DropPedalShowOverlay"] = reader.GetValue("Drop Pedal", "ShowOverlay", "on");
 	modSettings["DropPedalCustomOverlayColors"] = reader.GetValue("Drop Pedal", "CustomOverlayColors", "off");
 	modSettings["DropPedalOverlayDownColor"] = reader.GetValue("Drop Pedal", "OverlayDownColor", "6BE06B");
 	modSettings["DropPedalOverlayUpColor"] = reader.GetValue("Drop Pedal", "OverlayUpColor", "FFC24D");
 	modSettings["DropPedalOverlayStatusColor"] = reader.GetValue("Drop Pedal", "OverlayStatusColor", "FFFFFF");
+
+	noteByNoteCustomColours.store(std::string(reader.GetValue("Note by Note", "NoteByNoteCustomColours", "off")) == "on");
+	noteByNoteDetectionVisible.store(std::string(reader.GetValue("Note by Note", "NoteByNoteDetectionOverlay", "on")) != "off");
+	const std::string targetPosition = reader.GetValue("Note by Note", "NoteByNoteTargetPosition", "Left");
+	if (targetPosition == "Left")
+		noteByNoteTargetPosition.store(Settings::NoteByNoteTargetPosition::Left);
+	else if (targetPosition == "Center")
+		noteByNoteTargetPosition.store(Settings::NoteByNoteTargetPosition::Center);
+	else if (targetPosition == "Custom")
+		noteByNoteTargetPosition.store(Settings::NoteByNoteTargetPosition::Custom);
+	else
+		LOG_ERROR("Invalid NoteByNoteTargetPosition: expected Left, Center or Custom; keeping Left." << std::endl);
+	const char* sizeKeys[] = { "NoteByNoteUiSize", "NoteByNoteTargetSize" };
+	// Target text ships larger than the UI readout: at 100% the target label was too small to
+	// read comfortably, so its default is 150%. The UI readout stays at 100%.
+	const char* sizeDefaults[] = { "100", "150" };
+	std::atomic<int>* sizes[] = { &noteByNoteUiSize, &noteByNoteTargetSize };
+	for (unsigned index = 0; index < 2; ++index)
+	{
+		const std::string value = reader.GetValue("Note by Note", sizeKeys[index], sizeDefaults[index]);
+		if (value.empty() || value.size() > 3 || value.find_first_not_of("0123456789") != std::string::npos)
+		{
+			LOG_ERROR("Invalid " << sizeKeys[index] << ": expected a whole percentage from 50 to 300; keeping the current size." << std::endl);
+			continue;
+		}
+		const int size = std::stoi(value);
+		if (size < 50 || size > 300)
+		{
+			LOG_ERROR("Invalid " << sizeKeys[index] << ": expected 50 to 300; keeping the current size." << std::endl);
+			continue;
+		}
+		sizes[index]->store(size);
+	}
+	{
+		const std::string value = reader.GetValue("Note by Note", "NoteByNoteLineSpacing", "100");
+		const bool numeric = !value.empty() && value.size() <= 3 && value.find_first_not_of("0123456789") == std::string::npos;
+		const int spacing = numeric ? std::stoi(value) : -1;
+		if (spacing >= 50 && spacing <= 300) noteByNoteLineSpacing.store(spacing);
+		else LOG_ERROR("Invalid NoteByNoteLineSpacing: expected 50 to 300; keeping the current spacing." << std::endl);
+	}
+	{
+		const std::string style = reader.GetValue("Note by Note", "NoteByNoteTargetStyle", "Detailed");
+		bool known = false;
+		for (int index = 0; index < 3; ++index)
+			if (style == kNoteByNoteTargetStyles[index]) { noteByNoteTargetStyle.store(static_cast<NoteByNoteTargetStyle>(index)); known = true; }
+		if (!known) LOG_ERROR("Invalid NoteByNoteTargetStyle: expected Detailed, Simple or Tab; keeping Detailed." << std::endl);
+	}
+	for (int index = 0; index < 2; ++index)
+	{
+		// "Default" (or absent) = built-in layout; otherwise "x,y" as fractions of the game window.
+		const std::string value = reader.GetValue("Note by Note", kNoteByNotePlacementKeys[index], "Default");
+		HudPlacement placement;
+		if (value != "Default" && sscanf_s(value.c_str(), "%f,%f", &placement.x, &placement.y) != 2)
+		{
+			LOG_ERROR("Invalid " << kNoteByNotePlacementKeys[index] << ": expected Default or x,y fractions; using the default layout." << std::endl);
+			placement = {};
+		}
+		if (placement.IsSet() && (placement.x > 1.0f || placement.y > 1.0f)) placement = {};
+		noteByNotePlacements[index].store(PackPlacement(placement));
+	}
+	const char* colorKeys[] = { "NoteByNoteNeutralColor", "NoteByNoteConfirmedColor", "NoteByNotePartialColor", "NoteByNoteRejectedColor" };
+	const char* colorDefaults[] = { "FFFFFF", "55DD77", "FFAA44", "FF5555" };
+	for (unsigned index = 0; index < 4; ++index)
+	{
+		const std::string value = reader.GetValue("Note by Note", colorKeys[index], colorDefaults[index]);
+		if (value.size() != 6 || value.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos)
+		{
+			LOG_ERROR("Invalid Note by Note colour for " << colorKeys[index] << ": expected six hexadecimal digits; keeping the current colour." << std::endl);
+			continue;
+		}
+		noteByNoteColors[index].store(0xFF000000u | static_cast<uint32_t>(std::stoul(value, nullptr, 16)));
+	}
+
 }
 
 /// <summary>
@@ -413,6 +751,8 @@ void Settings::ToggleExtendedRangeMode()
 /// <param name="name"> - std::map[key]</param>
 /// <returns>Virtual Key | uint</returns>
 unsigned int Settings::GetKeyBind(const std::string& name) {
+	std::string value;
+	if (TryRuntimeOverride(name, value)) return GetVKCodeForString(value);
 	return GetVKCodeForString(modSettings[name]);
 }
 
@@ -431,6 +771,8 @@ int Settings::GetModSetting(const std::string& name) {
 /// <param name="name"> - std::map[key]</param>
 /// <returns>Value of mod toggle</returns>
 std::string Settings::ReturnSettingValue(const std::string& name) {
+	std::string value;
+	if (TryRuntimeOverride(name, value)) return value;
 	return modSettings[name];
 }
 
@@ -439,6 +781,43 @@ std::string Settings::ReturnSettingValue(const std::string& name) {
 /// </summary>
 /// <param name="vkString"> - std::map[key]</param>
 /// <returns></returns>
+namespace
+{
+	// Every entry ReadKeyBinds loads (Keybinds and Audio Keybindings), for the overlay picker's clash check.
+	const char* const kAllKeyBindNames[] = {
+		"ToggleLoftKey", "CustomSongListTitles", "ShowSongTimerKey", "ForceReEnumerationKey", "MenuToggleKey",
+		"RainbowStringsKey", "RainbowNotesKey", "RemoveLyricsKey", "RRSpeedKey", "TuningOffsetKey",
+		"ToggleExtendedRangeKey", "LoopStartKey", "LoopEndKey", "RewindKey", "DropPedalPitchDownKey",
+		"DropPedalPitchUpKey", "DropPedalToggleKey", "DropPedalBaseTuningKey", "RecordingHotkey",
+		"MasterVolumeKey", "SongVolumeKey", "Player1VolumeKey", "Player2VolumeKey", "MicrophoneVolumeKey",
+		"VoiceOverVolumeKey", "SFXVolumeKey", "DisplayMixerKey", "MutePlayer1Key", "MutePlayer2Key",
+	};
+}
+
+bool Settings::SetKeyBind(const char* name, unsigned int vk, bool persist) {
+	// The ini stores names ("VK_F6", "T"); prefer the VK_ spelling when the table has both.
+	std::string value;
+	for (const auto& [text, code] : keyMap) {
+		if (code != vk) continue;
+		if (value.empty() || (text.rfind("VK_", 0) == 0 && value.rfind("VK_", 0) != 0)) value = text;
+	}
+	if (value.empty()) return false;
+	SetRuntimeOverride(name, value);   // never the shared map (see runtimeOverrides)
+	if (!persist) return true;
+	char executablePath[MAX_PATH]{};
+	GetModuleFileNameA(nullptr, executablePath, MAX_PATH);
+	const auto iniPath = (std::filesystem::path(executablePath).parent_path() / "RSMods.ini").string();
+	if (WritePrivateProfileStringA("Keybinds", name, value.c_str(), iniPath.c_str())) return true;
+	LOG_ERROR("[SETTINGS] Could not persist " << name << std::endl);
+	return false;
+}
+
+std::string Settings::FindKeyBindUsing(unsigned int vk, const char* except) {
+	for (const char* name : kAllKeyBindNames)
+		if (std::string_view(name) != except && GetKeyBind(name) == vk) return name;
+	return "";
+}
+
 int Settings::GetVKCodeForString(const std::string& vkString) {
 	return keyMap[vkString];
 }
@@ -610,6 +989,11 @@ void Settings::SetNoteColors(int strIndex, RSColor c, bool CB) {
 /// Re-Parse INI
 /// </summary>
 void Settings::UpdateSettings() {
+	{
+		// Reloading from RSMods.ini: it now holds everything the overlay persisted, and anything newer the GUI saved.
+		std::lock_guard<std::mutex> guard(runtimeOverrideMutex);
+		runtimeOverrides.clear();
+	}
 	ReadKeyBinds();
 	ReadModSettings();
 	ReadStringColors();

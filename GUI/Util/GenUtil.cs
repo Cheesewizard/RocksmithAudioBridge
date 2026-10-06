@@ -335,8 +335,8 @@ namespace RSMods.Util
                 var rs2RootDir = string.Empty;
                 var steamRootPath = GetSteamDirectory();
 
-                if (Directory.GetParent(Application.StartupPath).FullName.IsRSFolder()) // Before we ask the user to say where RS is located, lets check to see if we are located in a RS Install folder.
-                    return Directory.GetParent(Application.StartupPath).FullName;
+                if (Application.StartupPath.IsRSFolder()) // Before we ask the user to say where RS is located, lets check to see if we are located in a RS Install folder.
+                    return Application.StartupPath;
 
                 if (!string.IsNullOrEmpty(steamRootPath))
                 {
@@ -436,13 +436,16 @@ namespace RSMods.Util
             string steamUserdataPath = Path.Combine(GenUtil.GetSteamDirectory(), "userdata");
             try
             {
-                var subdirs = new DirectoryInfo(steamUserdataPath).GetDirectories(@"221680", SearchOption.AllDirectories).ToArray();
-                var userprofileFolder = subdirs.FirstOrDefault(dir => !dir.FullName.Contains("760")); //760 is the ID for Steam's screenshot thingy
+                // Only userdata/<account>/221680/remote holds the saves. The old recursive search for any "221680" folder
+                // returned the folder above remote (never a valid save path) and skipped every path containing "760" to
+                // dodge Steam's screenshot folder (userdata/<account>/760/remote/221680), which also skipped accounts whose
+                // ID contains 760, so those players were always asked to pick the folder by hand.
+                string saveFolder = new DirectoryInfo(steamUserdataPath).GetDirectories()
+                    .Select(account => Path.Combine(account.FullName, "221680", "remote"))
+                    .FirstOrDefault(folder => folder.IsSavePath());
 
-                if (Directory.Exists(userprofileFolder.FullName))
-                    return userprofileFolder.FullName;
-                else
-                    MessageBox.Show("Could not find profile folder!", "Error");
+                if (saveFolder != null)
+                    return saveFolder;
             }
             catch (IOException ioex)
             {
