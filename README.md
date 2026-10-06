@@ -1,3 +1,7 @@
+
+
+https://github.com/user-attachments/assets/1b51d057-285e-4ded-a113-5c25af1f3346
+
 # Rocksmith Audio Bridge
 
 ![Rocksmith Audio Bridge](.github/images/rocksmith-audio-bridge-banner.jpg)
@@ -11,7 +15,7 @@ headphones Rocksmith can't normally use. Everything is controlled from an in-gam
 overlay.
 
 Formerly RSModsPlus, renamed because the old name was easily mistaken for
-Rocksmith+.
+Rocksmith+ and its expanded into a suite of features now.
 
 ---
 
@@ -23,12 +27,13 @@ Rocksmith+.
 
 <p align="center">
   I build this mod in my own time and I'm currently looking for work.<br>
-  If it has helped you, please consider <a href="#support">supporting its development</a>. Thank you!
+  If it has helped you, please consider <a href="#support">supporting its development</a>. Thank you
 </p>
 
 ---
 
-https://github.com/user-attachments/assets/c8951c94-e760-4830-a8f5-6b383dbb05da
+https://github.com/user-attachments/assets/09487e67-f613-4fee-9253-9ced7625a1f3
+
 
 **Features**
 
