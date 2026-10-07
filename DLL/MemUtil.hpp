@@ -28,6 +28,10 @@ namespace MemUtil {
 	uint32_t GetTextSectionAddress();
 	uint32_t GetTextSectionLength();
 	void CheckMemoryProtection(void* address);
+
+	// The first `count` bytes at `address` as hex, for logging a failed prologue check. A leading E9 (jmp rel32) or
+	// FF 25 (jmp [abs]) means another hook already sits there, so the jump target's module is named too.
+	std::string DescribeCodeBytes(uintptr_t address, size_t count);
 };
 
 template <typename T>

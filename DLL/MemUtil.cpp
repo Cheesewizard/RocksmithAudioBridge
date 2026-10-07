@@ -1,6 +1,8 @@
 #include "stdafx.h"
 #include "MemUtil.hpp"
 
+#include <cstring>
+
 typedef enum _MEMORY_INFORMATION_CLASS {
 	MemoryBasicInformation,
 	MemoryWorkingSetList,
@@ -339,4 +341,60 @@ void MemUtil::CheckMemoryProtection(void* address) {
 	else {
 		std::cerr << "VirtualQuery failed. Error: " << GetLastError() << std::endl;
 	}
+}
+
+namespace {
+	bool CopyCodeBytes(uintptr_t address, byte* out, size_t count)
+	{
+		__try
+		{
+			std::memcpy(out, reinterpret_cast<const void*>(address), count);
+			return true;
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			return false;
+		}
+	}
+
+	std::string ModuleNameFor(uintptr_t address)
+	{
+		HMODULE module = nullptr;
+		char path[MAX_PATH] = {};
+		if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+				reinterpret_cast<LPCSTR>(address), &module)
+			|| GetModuleFileNameA(module, path, MAX_PATH) == 0)
+			return "no module (allocated memory)";
+		const char* name = std::strrchr(path, '\\');
+		return name != nullptr ? name + 1 : path;
+	}
+}
+
+std::string MemUtil::DescribeCodeBytes(uintptr_t address, size_t count)
+{
+	byte bytes[16] = {};
+	count = (std::min)(count, sizeof(bytes));
+	if (!CopyCodeBytes(address, bytes, count)) return "unreadable";
+
+	std::ostringstream text;
+	text << std::hex << std::uppercase << std::setfill('0');
+	for (size_t i = 0; i < count; ++i)
+		text << (i == 0 ? "" : " ") << std::setw(2) << static_cast<int>(bytes[i]);
+
+	uintptr_t target = 0;
+	if (count >= 5 && bytes[0] == 0xE9)
+	{
+		int32_t relative = 0;
+		std::memcpy(&relative, bytes + 1, sizeof(relative));
+		target = address + 5 + relative;
+	}
+	else if (count >= 6 && bytes[0] == 0xFF && bytes[1] == 0x25)
+	{
+		uint32_t slot = 0;
+		std::memcpy(&slot, bytes + 2, sizeof(slot));
+		if (!CopyCodeBytes(slot, reinterpret_cast<byte*>(&target), sizeof(target))) target = 0;
+	}
+	if (target != 0)
+		text << " (already hooked: jumps to 0x" << std::setw(8) << target << " in " << ModuleNameFor(target) << ")";
+	return text.str();
 }
