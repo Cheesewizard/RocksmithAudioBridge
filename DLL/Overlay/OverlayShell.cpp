@@ -1938,6 +1938,14 @@ namespace Overlay
 			const std::string otherAppText = guest + " is using the amp link, so Tone designer plays nothing. Close "
 				+ guest + " to use Tone designer.";
 
+			// A plugin crashed the host this session: say which, and that it was restarted (VstHostLink::FollowCrashes).
+			if (!vst.crashNote.empty()) {
+				BeginCard();
+				WarnCaption(vst.crashNote.c_str());
+				if (Button("OK")) VstHostLink::DismissCrashNote();
+				EndCard();
+			}
+
 			if (vst.hostHung) {
 				BeginCard();
 				WarnCaption("Tone designer has stopped answering.");

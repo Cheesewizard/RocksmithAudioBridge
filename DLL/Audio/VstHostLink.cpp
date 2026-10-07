@@ -46,6 +46,12 @@ namespace VstHostLink
 		Snapshot g_snapshot;
 		ULONGLONG g_snapshotAt = 0;
 
+		bool g_wasRunning = false;
+		std::string g_crashNote;
+		std::deque<ULONGLONG> g_crashRestarts;   // when the host was restarted after a crash, for the loop guard
+		constexpr size_t kMaxCrashRestarts = 3;      // within kCrashWindowMs; then it stays off and says so
+		constexpr ULONGLONG kCrashWindowMs = 5 * 60 * 1000;
+
 		bool g_autoStartChecked = false;
 		bool g_mutedForTuning = false;
 		ULONGLONG g_tuningPolledAt = 0;
@@ -400,6 +406,35 @@ namespace VstHostLink
 			}
 		}
 
+		// A plugin that crashes takes the host with it. The host leaves a note as it goes (LastCrash = the module,
+		// LastCrashAt = seconds since boot, Main.cpp OnCrash); seeing the host gone with a fresh note, the overlay
+		// starts it again with the last autosaved chain and tells the player which plugin it was. Three crashes
+		// within five minutes and it stays off, so a plugin that crashes on load cannot loop.
+		void FollowCrashes(bool hostRunning)
+		{
+			if (hostRunning) { g_wasRunning = true; return; }
+			if (!g_wasRunning || !HostProcessGone()) return;
+			g_wasRunning = false;
+			const ULONGLONG now = GetTickCount64();
+			const DWORD crashedAt = ReadDword(L"LastCrashAt", 0);
+			if (crashedAt == 0 || now / 1000 - crashedAt > 15 || GameState::GameClosing) return;
+			const std::string plugin = Utf8(ReadString(L"LastCrash"));
+			WriteDword(L"LastCrashAt", 0);   // handled
+			const std::string what = plugin.empty() || _stricmp(plugin.c_str(), "RocksmithAudioBridgeVstHost.exe") == 0
+				? "Tone designer crashed" : plugin + " crashed (a problem inside that plugin)";
+			while (!g_crashRestarts.empty() && now - g_crashRestarts.front() > kCrashWindowMs) g_crashRestarts.pop_front();
+			if (g_crashRestarts.size() >= kMaxCrashRestarts) {
+				g_crashNote = what + " again, so Tone designer stays off. Remove or replace that plugin after starting it.";
+				LOG_WARNING("(VST HOST) " << plugin << " crashed the host again; not restarting" << std::endl);
+				return;
+			}
+			g_crashRestarts.push_back(now);
+			g_crashNote = what + ". Tone designer restarted with your last autosave (up to 30 s of changes may be lost).";
+			LOG_WARNING("(VST HOST) " << plugin << " crashed the host; restarting it" << std::endl);
+			g_commands.clear();
+			Launch({});
+		}
+
 		// Starts the host once per game session, when the player has used it before and the amp link exists.
 		void AutoStart(bool hostRunning)
 		{
@@ -437,6 +472,7 @@ namespace VstHostLink
 			s.exclusiveFullscreen = ExclusiveFullscreen();
 			s.songKey = g_songKey;
 			s.songTone = SongTone(g_songKey);
+		s.crashNote = g_crashNote;
 			if (shared)
 			{
 				s.hostRunning = HostAlive(shared);
@@ -495,6 +531,7 @@ namespace VstHostLink
 			if (!ListHas(g_failed, failed)) g_failed.push_back(failed);
 		}
 		AutoStart(hostRunning);
+		FollowCrashes(hostRunning);
 		FollowSong(shared, hostRunning);
 		FollowTuner(hostRunning);
 		PumpCommands(shared, hostRunning);
@@ -661,6 +698,8 @@ namespace VstHostLink
 		InterlockedExchange(&shared->hostPid, 0);
 		g_commands.clear();
 	}
+
+	void DismissCrashNote() { g_crashNote.clear(); g_snapshotAt = 0; }
 
 	void SetAutoStart(bool on) { WriteDword(L"AutoStart", on ? 1 : 0); g_snapshotAt = 0; }
 	void SetMuteWhileTuning(bool on) { WriteDword(L"MuteWhileTuning", on ? 1 : 0); g_snapshotAt = 0; }

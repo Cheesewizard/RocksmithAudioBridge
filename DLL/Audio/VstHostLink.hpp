@@ -32,6 +32,7 @@ namespace VstHostLink
 		float inputPeak = 0.0f, outputPeak = 0.0f;   // linear, 1.0 = full scale
 		std::string loadError;        // the last command's problem
 		bool chainBypassed = false;   // every plugin skipped for now (clean guitar)
+		std::string crashNote;        // a plugin crashed the host this session (what, and whether it was restarted)
 		bool popoutWanted = false;
 		bool popoutShown = false;
 		bool autoStart = true;
@@ -85,6 +86,7 @@ namespace VstHostLink
 	void SetAutoStart(bool on);
 	void SetMuteWhileTuning(bool on);   // the chain goes quiet in the tuner screens
 	void SetPopout(bool wanted);
+	void DismissCrashNote();
 
 	// Chain commands (queued; the host handles them in order). AddPlugin starts the host when it is not running.
 	void AddPlugin(const std::wstring& path);

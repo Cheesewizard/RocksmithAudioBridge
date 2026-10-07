@@ -28,11 +28,14 @@
 #include <commdlg.h>
 #include <shellapi.h>
 #include <TlHelp32.h>
+#include <DbgHelp.h>
 #include <algorithm>
 #include <cmath>
 #include <string>
 
 using namespace VstHost;
+
+void InstallCrashReporter();
 
 namespace
 {
@@ -649,6 +652,7 @@ namespace
 				return 0;
 			}
 			if (g_control) InterlockedIncrement(&g_control->hostBeat);
+			InstallCrashReporter();   // a plugin may have replaced it with its own
 			if (GameClosed())
 			{
 				Log("host: Rocksmith has closed, closing too");
@@ -743,10 +747,56 @@ namespace
 	}
 }
 
+namespace
+{
+	DWORD g_mainThread = 0;
+
+	// Plugins run inside this process, so a plugin that crashes ends the host. Before Windows ends it: log which
+	// module crashed and on which thread, keep one minidump (vst-host-crash.dmp in
+	// %APPDATA%\RocksmithAudioBridge\VstHost, replaced each time) for diagnosis, and leave the overlay a note (LastCrash, LastCrashAt
+	// in HKCU\Software\RSMods\VstHost) so it restarts the host and tells the player which plugin it was.
+	LONG WINAPI OnCrash(EXCEPTION_POINTERS* info)
+	{
+		static LONG reported = 0;
+		if (InterlockedExchange(&reported, 1)) return EXCEPTION_CONTINUE_SEARCH;
+		void* address = info->ExceptionRecord->ExceptionAddress;
+		HMODULE module = nullptr;
+		wchar_t modulePath[MAX_PATH] = L"unknown";
+		if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, static_cast<LPCWSTR>(address), &module))
+			GetModuleFileNameW(module, modulePath, MAX_PATH);
+		const wchar_t* slash = wcsrchr(modulePath, L'\\');
+		const wchar_t* moduleName = slash ? slash + 1 : modulePath;
+		const unsigned long long offset = module ? static_cast<unsigned long long>(static_cast<const char*>(address) - reinterpret_cast<const char*>(module)) : 0;
+		const bool windowThread = GetCurrentThreadId() == g_mainThread;
+		Log("host: CRASH 0x%08X in %ls+0x%llX on the %s thread", static_cast<unsigned>(info->ExceptionRecord->ExceptionCode), moduleName, offset,
+			windowThread ? "window (plugin editor)" : "audio or plugin worker");
+
+		WriteString(L"LastCrash", moduleName);
+		WriteDword(L"LastCrashAt", static_cast<DWORD>(GetTickCount64() / 1000));   // seconds since boot, same clock in the game
+
+		const std::wstring folder = DataDirectory();
+		SHCreateDirectoryExW(nullptr, folder.c_str(), nullptr);
+		HANDLE dump = CreateFileW((folder + L"\\vst-host-crash.dmp").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+		if (dump != INVALID_HANDLE_VALUE)
+		{
+			MINIDUMP_EXCEPTION_INFORMATION exception{ GetCurrentThreadId(), info, FALSE };
+			MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), dump,
+				static_cast<MINIDUMP_TYPE>(MiniDumpWithThreadInfo | MiniDumpWithIndirectlyReferencedMemory), &exception, nullptr, nullptr);
+			CloseHandle(dump);
+		}
+		return EXCEPTION_CONTINUE_SEARCH;
+	}
+}
+
+// Plugins may install their own filter when they load; the host's is put back after every command.
+void InstallCrashReporter() { SetUnhandledExceptionFilter(OnCrash); }
+
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 {
 	SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 	LogOpen();
+	g_mainThread = GetCurrentThreadId();
+	InstallCrashReporter();
 
 	// One host at a time: the external amp link carries one amp sim.
 	HANDLE singleInstance = CreateMutexW(nullptr, TRUE, L"Local\\RocksmithAudioBridge.VstHost");
