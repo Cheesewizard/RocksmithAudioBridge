@@ -16,6 +16,7 @@ namespace VstHostLink
 		std::string name;
 		std::wstring path;
 		bool bypass = false;
+		bool windowOpen = false;      // its plugin window is open (shown while popoutWanted and the overlay is open)
 	};
 
 	struct Snapshot
@@ -32,6 +33,11 @@ namespace VstHostLink
 		float inputPeak = 0.0f, outputPeak = 0.0f;   // linear, 1.0 = full scale
 		std::string loadError;        // the last command's problem
 		bool chainBypassed = false;   // every plugin skipped for now (clean guitar)
+		// Plugins loading now (read every frame): the plugin's file name, the step of a tone, and for how long.
+		bool loading = false;
+		std::string loadingName;
+		int loadingStep = 0, loadingTotal = 0;
+		float loadingSeconds = 0.0f;
 		std::string crashNote;        // a plugin crashed the host this session (what, and whether it was restarted)
 		bool popoutWanted = false;
 		bool popoutShown = false;
@@ -94,7 +100,8 @@ namespace VstHostLink
 	void RemoveSlot(int slot);
 	void MoveSlot(int slot, int delta);
 	void SetBypass(int slot, bool bypass);
-	void ShowSlot(int slot);
+	void ShowSlot(int slot);             // opens that pedal's plugin window (or brings it to the front)
+	void HideSlot(int slot);             // closes it
 	void DuplicateSlot(int slot);
 	void SetChainBypass(bool bypass);
 	void ClearChain();

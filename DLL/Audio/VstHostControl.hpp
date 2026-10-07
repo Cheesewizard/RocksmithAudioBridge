@@ -10,11 +10,12 @@
 
 namespace VstHostControl
 {
-	// v4: plugin chains, tones, levels, plus slot paths, chain bypass and the Tone designer page's commands. A new
-	// mapping name per version, so an old host and a new overlay never meet.
-	constexpr wchar_t kMappingName[] = L"Local\\RocksmithAudioBridge.VstHost.v4";
+	// v5: one window per plugin (openWindows, HideSlot). v4: slot paths, chain bypass and the Tone designer page's
+	// commands. v3: plugin chains, tones, levels. A new mapping name per version, so an old host and a new overlay
+	// never meet.
+	constexpr wchar_t kMappingName[] = L"Local\\RocksmithAudioBridge.VstHost.v5";
 	constexpr uint32_t kMagic = 0x56424152;   // "RABV"
-	constexpr uint32_t kVersion = 4;
+	constexpr uint32_t kVersion = 5;
 	constexpr int kBeatMs = 250;              // both sides bump their beat at least this often
 	constexpr int kAliveMs = 1500;            // a side is gone when its beat stops this long
 	constexpr int kPathChars = 520;
@@ -31,7 +32,7 @@ namespace VstHostControl
 		RemoveSlot = 3,     // arg = slot
 		MoveSlot = 4,       // arg = slot, arg2 = -1 (earlier) or +1 (later)
 		SetBypass = 5,      // arg = slot, arg2 = 0/1
-		ShowSlot = 6,       // arg = slot whose editor the amp window shows
+		ShowSlot = 6,       // arg = slot: open its plugin window (or bring it to the front)
 		LoadTone = 7,       // text = tone name
 		SaveTone = 8,       // text = tone name
 		DeleteTone = 9,     // text = tone name
@@ -41,6 +42,7 @@ namespace VstHostControl
 		DuplicateSlot = 13, // arg = slot; the copy, with the same settings, goes right after it
 		SetChainBypass = 14,// arg = 0/1: every plugin skipped (clean guitar); each slot keeps its own bypass
 		RenameTone = 15,    // text = old name, a newline, new name
+		HideSlot = 16,      // arg = slot: close its plugin window
 	};
 
 	struct Slot
@@ -83,8 +85,8 @@ namespace VstHostControl
 		// Written by the host.
 		volatile LONG commandDone;
 
-		// Written by both: the page's "Pop out amp" button and the amp window's own close button. The VST host seeds
-		// it from its saved choice when it starts.
+		// "Show plugin windows": the open plugin windows are on screen while this is on and the overlay is open.
+		// Written by the page; the VST host seeds it from its saved choice when it starts.
 		volatile LONG popoutWanted;
 		volatile LONG quitRequested;   // overlay -> VST host: close (saves the chain)
 
@@ -92,6 +94,13 @@ namespace VstHostControl
 		volatile LONG chainBypassed;   // SetChainBypass is on
 		wchar_t slotPaths[kMaxSlots][kPathChars];   // each slot's plugin file
 		wchar_t failedPath[kPathChars];             // the last plugin that did not load (Add or Replace)
+
+		// Written by the host (v5).
+		volatile LONG openWindows;     // bit per slot: that plugin's window is open
+		// While `loading`: which plugin is loading now (UTF-8, its file name) and how far a tone has got (step 1..total).
+		char loadingText[kNameChars];
+		volatile LONG loadingStep;
+		volatile LONG loadingTotal;
 	};
 
 	// Creates or opens the block. Returns nullptr on failure; `mapping` must stay open while it is used.

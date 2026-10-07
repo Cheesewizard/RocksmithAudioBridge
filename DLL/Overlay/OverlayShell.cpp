@@ -916,10 +916,20 @@ namespace Overlay
 				S().selected = to;
 			}
 
+			// Each pedal has its own plugin window (VstHost Main.cpp). Opening one also turns "Show plugin windows" on.
 			void OpenWindow(int slot)
 			{
 				VstHostLink::ShowSlot(slot);
 				VstHostLink::SetPopout(true);
+			}
+
+			// The bar's button: all open windows on or off. Turned on with none open, it opens the selected pedal's.
+			void ToggleWindows(const VstHostLink::Snapshot& vst)
+			{
+				const bool anyOpen = std::any_of(vst.slots.begin(), vst.slots.end(), [](const VstHostLink::SlotView& slot) { return slot.windowOpen; });
+				if (!vst.popoutWanted && !anyOpen && !vst.slots.empty())
+					VstHostLink::ShowSlot(S().selected >= 0 && S().selected < static_cast<int>(vst.slots.size()) ? S().selected : 0);
+				VstHostLink::SetPopout(!vst.popoutWanted);
 			}
 
 			// Popups and menus get room around their items (the overlay's windows have no padding of their own).
@@ -952,7 +962,9 @@ namespace Overlay
 				const int count = static_cast<int>(vst.slots.size());
 				const bool valid = i >= 0 && i < count;
 				const bool idle = !vst.busy;
-				if (ImGui::MenuItem("Open window", "Double-click", false, valid)) OpenWindow(i);
+				const bool windowOpen = valid && vst.slots[i].windowOpen;
+				if (ImGui::MenuItem(windowOpen ? "Bring window to front" : "Open window", "Double-click", false, valid)) OpenWindow(i);
+				if (windowOpen && ImGui::MenuItem("Close window")) VstHostLink::HideSlot(i);
 				if (ImGui::MenuItem(valid && vst.slots[i].bypass ? "Turn on" : "Bypass", "Footswitch", false, valid && idle))
 					VstHostLink::SetBypass(i, !vst.slots[i].bypass);
 				ImGui::Separator();
@@ -1012,7 +1024,7 @@ namespace Overlay
 			void ViewMenu(const VstHostLink::Snapshot& vst, const ExternalAmp::Snapshot& amp)
 			{
 				if (!ImGui::BeginMenu("View")) return;
-				if (ImGui::MenuItem("Amp window", nullptr, vst.popoutWanted)) VstHostLink::SetPopout(!vst.popoutWanted);
+				if (ImGui::MenuItem("Plugin windows", nullptr, vst.popoutWanted)) ToggleWindows(vst);
 				if (ImGui::MenuItem("Tone library", nullptr, IsOpen(Library))) Toggle(Library);
 				if (ImGui::MenuItem("Plugin browser", nullptr, IsOpen(Browser))) Toggle(Browser);
 				if (ImGui::MenuItem("Meters", nullptr, IsOpen(Meters))) Toggle(Meters);
@@ -1092,8 +1104,8 @@ namespace Overlay
 					x += sideW[0] + sideW[1] + 10.0f;
 					ImGui::SetCursorScreenPos(ImVec2(origin.x + x, origin.y + y));
 					if (IconSquare("##ampWindow", Glyph::NewWindow, vst.popoutWanted,
-						vst.popoutWanted ? "Hide the amp window." : "Show the selected pedal's own window over the game whenever this overlay is open. Drag its top bar to move it.", button))
-						VstHostLink::SetPopout(!vst.popoutWanted);
+						vst.popoutWanted ? "Hide the plugin windows." : "Show the plugin windows over the game whenever this overlay is open. Each pedal has its own: double-click a pedal to open it. Drag a window's top bar to move it.", button))
+						ToggleWindows(vst);
 					x += button + 6.0f;
 					ImGui::SetCursorScreenPos(ImVec2(origin.x + x, origin.y + y));
 					if (IconSquare("##power", Glyph::Power, false, "Close Tone designer (saves the chain). The game's amp comes back.", button))
@@ -1113,7 +1125,7 @@ namespace Overlay
 					Hint("Your tones. Click to pick one; File has Save and Save as.");
 					list->AddRectFilled(box, ImVec2(box.x + nameW, box.y + button), Ink::Field, 6.0f);
 					list->AddRect(box, ImVec2(box.x + nameW, box.y + button), Ink::FieldEdge, 6.0f);
-					const std::string name = vst.busy ? "Loading..." : vst.toneName.empty() ? (vst.slots.empty() ? "New tone" : "Unsaved tone") : vst.toneName;
+					const std::string name = vst.loading ? "Loading..." : vst.toneName.empty() ? (vst.slots.empty() ? "New tone" : "Unsaved tone") : vst.toneName;
 					const bool dot = HasUnsavedChanges(vst);
 					const float textW = ImGui::CalcTextSize(name.c_str()).x + (dot ? 13.0f : 0.0f);
 					const float tx = box.x + std::max(8.0f, (nameW - textW) * 0.5f);
@@ -1271,6 +1283,50 @@ namespace Overlay
 				Text(list, caption, ImVec2(center.x - TextWidth(caption, label) * 0.5f, center.y + 12.0f), Ink::Dim, label);
 			}
 
+			// Over the rack while plugins load: which plugin, the step of a tone, the seconds so far, and a bar that keeps
+			// moving. The overlay draws it, so it moves even while the host is busy inside a slow plugin's loader; a
+			// load that is truly stuck shows as the seconds climbing (the page offers Force close once the host stops
+			// answering).
+			void LoadingPanel(const VstHostLink::Snapshot& vst)
+			{
+				ImDrawList* list = ImGui::GetWindowDrawList();
+				const ImVec2 min = ImGui::GetWindowPos();
+				const ImVec2 size = ImGui::GetWindowSize();
+				const ImVec2 max(min.x + size.x, min.y + size.y);
+				list->PushClipRect(min, max, false);
+				list->AddRectFilled(min, max, IM_COL32(15, 17, 21, 215), 10.0f);
+				ImFont* caption = CaptionFont();
+				const float centerX = min.x + size.x * 0.5f;
+				const float top = min.y + size.y * 0.5f - 34.0f;
+
+				const std::string title = "Loading " + (vst.loadingName.empty() ? std::string("plugins") : vst.loadingName);
+				const float titleW = ImGui::CalcTextSize(title.c_str()).x;
+				list->AddText(ImVec2(centerX - titleW * 0.5f, top), IM_COL32_WHITE, title.c_str());
+
+				char detail[96];
+				const int seconds = static_cast<int>(vst.loadingSeconds);
+				if (vst.loadingTotal > 1) sprintf_s(detail, "%d of %d, %d s", std::max(vst.loadingStep, 1), vst.loadingTotal, seconds);
+				else sprintf_s(detail, "%d s", seconds);
+				std::string line = detail;
+				if (seconds >= 8) line += ". Big plugins (AmpliTube, Helix) can take a while";
+				const float lineW = TextWidth(caption, line.c_str());
+				Text(list, caption, ImVec2(centerX - lineW * 0.5f, top + ImGui::GetFontSize() + 6.0f), Ink::Muted, line.c_str());
+
+				// The bar: the plugins done so far filled, and a block sweeping through the one loading now.
+				const float barW = std::min(320.0f, size.x * 0.6f), barH = 6.0f;
+				const ImVec2 bar(centerX - barW * 0.5f, top + ImGui::GetFontSize() + caption->FontSize + 20.0f);
+				list->AddRectFilled(bar, ImVec2(bar.x + barW, bar.y + barH), Ink::Field, 3.0f);
+				const int total = std::max(vst.loadingTotal, 1);
+				const int done = std::clamp(vst.loadingStep - 1, 0, total);
+				const float segment = barW / total;
+				if (done > 0) list->AddRectFilled(bar, ImVec2(bar.x + segment * done, bar.y + barH), Ink::Blue, 3.0f);
+				const float sweep = 0.5f + 0.5f * std::sin(static_cast<float>(ImGui::GetTime()) * 3.0f);
+				const float blockW = std::max(segment * 0.35f, 12.0f);
+				const float blockX = bar.x + segment * done + (segment - blockW) * sweep;
+				list->AddRectFilled(ImVec2(blockX, bar.y), ImVec2(blockX + blockW, bar.y + barH), Ink::AddText, 3.0f);
+				list->PopClipRect();
+			}
+
 			// The rack: In, the pedals joined by cables, Add, Out. Scrolls sideways when the chain is longer than the panel.
 			void Board(const VstHostLink::Snapshot& vst, float width, float height)
 			{
@@ -1354,6 +1410,8 @@ namespace Overlay
 					list->AddRectFilled(at, end, fade(hovered ? Mix(look.body, IM_COL32_WHITE, 0.06f) : look.body), 9.0f);
 					list->AddRect(at, end, fade(look.edge), 9.0f);
 					list->AddCircleFilled(ImVec2(x + look.width * 0.5f, at.y + 12.0f), 4.0f, playing ? Ink::Led : Ink::LedOff, 12);
+					if (slot.windowOpen)   // its plugin window is open
+						DrawIcon(list, ImVec2(end.x - 13.0f, at.y + 13.0f), Glyph::NewWindow, fade(vst.popoutWanted ? Ink::AddText : Ink::Dim));
 					list->PushClipRect(ImVec2(at.x + 4.0f, at.y), ImVec2(end.x - 4.0f, end.y), true);
 					const float nameW = ImGui::CalcTextSize(slot.name.c_str()).x;
 					list->AddText(ImVec2(x + std::max(5.0f, (look.width - nameW) * 0.5f), at.y + 22.0f), fade(IM_COL32_WHITE), slot.name.c_str());
@@ -1403,6 +1461,7 @@ namespace Overlay
 				x += 42.0f;
 				ImGui::SetCursorScreenPos(ImVec2(x, top + pedalH));
 				ImGui::Dummy(ImVec2(10.0f, 4.0f));   // the rack's scroll width
+				if (vst.loading) LoadingPanel(vst);
 
 				PushPopupPadding();
 				if (ImGui::BeginPopup("##addMenu") || ImGui::BeginPopupContextWindow("##boardMenu", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {

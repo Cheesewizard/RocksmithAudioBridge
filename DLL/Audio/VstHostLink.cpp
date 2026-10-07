@@ -487,7 +487,7 @@ namespace VstHostLink
 						memcpy(name, shared->slots[i].name, VstHostControl::kNameChars);
 						wchar_t path[VstHostControl::kPathChars + 1]{};
 						memcpy(path, const_cast<const wchar_t*>(shared->slotPaths[i]), sizeof(shared->slotPaths[i]));
-						s.slots.push_back({ name, path, shared->slots[i].bypass != 0 });
+						s.slots.push_back({ name, path, shared->slots[i].bypass != 0, (shared->openWindows & (1 << i)) != 0 });
 					}
 					s.chainBypassed = shared->chainBypassed != 0;
 					s.shownSlot = shared->shownSlot;
@@ -548,6 +548,20 @@ namespace VstHostLink
 			s.inputPeak = shared->inputPeak / 1000.0f;
 			s.outputPeak = shared->outputPeak / 1000.0f;
 		}
+		// Loading, every frame: a heavy plugin takes seconds and the page shows it moving the whole time.
+		static ULONGLONG loadingSince = 0;
+		if (shared && shared->loading != 0)
+		{
+			if (loadingSince == 0) loadingSince = GetTickCount64();
+			char name[VstHostControl::kNameChars + 1]{};
+			memcpy(name, shared->loadingText, VstHostControl::kNameChars);
+			s.loading = true;
+			s.loadingName = name;
+			s.loadingStep = shared->loadingStep;
+			s.loadingTotal = shared->loadingTotal;
+			s.loadingSeconds = (GetTickCount64() - loadingSince) / 1000.0f;
+		}
+		else loadingSince = 0;
 		return s;
 	}
 
@@ -724,6 +738,7 @@ namespace VstHostLink
 	void MoveSlot(int slot, int delta) { Queue(Command::MoveSlot, slot, delta); }
 	void SetBypass(int slot, bool bypass) { Queue(Command::SetBypass, slot, bypass ? 1 : 0); }
 	void ShowSlot(int slot) { Queue(Command::ShowSlot, slot); }
+	void HideSlot(int slot) { Queue(Command::HideSlot, slot); }
 	void ClearChain() { Queue(Command::ClearChain); }
 	void SetLevels(int inputTenths, int outputTenths) { Queue(Command::SetLevels, inputTenths, outputTenths); }
 	void LoadTone(const std::string& name) { g_toneBeforeSong.clear(); Queue(Command::LoadTone, 0, 0, Wide(name)); }

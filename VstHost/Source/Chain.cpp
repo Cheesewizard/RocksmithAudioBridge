@@ -65,6 +65,7 @@ namespace VstHost
 
 	bool Chain::LoadSlot(Slot& slot, const std::wstring& path, std::string& error)
 	{
+		if (m_report) m_report(path, m_loadStep, m_loadTotal);
 		auto plugin = std::make_unique<PluginHost>();
 		if (!plugin->Load(path, error)) return false;
 		if (m_frames > 0 && !plugin->Prepare(m_frames, error)) return false;
@@ -313,8 +314,11 @@ namespace VstHost
 
 		// Load the new plugins first, while the old chain keeps playing; then swap in one step.
 		std::vector<std::unique_ptr<Slot>> slots;
+		m_loadTotal = std::max(1, static_cast<int>(entries.size()));
+		m_loadStep = 0;
 		for (Entry& entry : entries)
 		{
+			++m_loadStep;
 			auto slot = std::make_unique<Slot>();
 			std::string slotError;
 			if (GetFileAttributesW(entry.path.c_str()) == INVALID_FILE_ATTRIBUTES || !LoadSlot(*slot, entry.path, slotError))
@@ -327,6 +331,8 @@ namespace VstHost
 			slot->bypass = entry.bypass;
 			slots.push_back(std::move(slot));
 		}
+
+		m_loadStep = m_loadTotal = 1;
 
 		Pause();
 		m_slots.swap(slots);

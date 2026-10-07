@@ -38,8 +38,9 @@ void InstallCrashReporter();
 
 namespace
 {
-	constexpr wchar_t kWindowClass[] = L"RocksmithAudioBridgeVstHost";
-	constexpr wchar_t kEditorClass[] = L"RocksmithAudioBridgeVstEditor";
+	constexpr wchar_t kWindowClass[] = L"RocksmithAudioBridgeVstHost";      // one per open plugin window
+	constexpr wchar_t kEditorClass[] = L"RocksmithAudioBridgeVstEditor";    // the editor area inside it
+	constexpr wchar_t kMainClass[] = L"RocksmithAudioBridgeVstHostMain";    // hidden: timers, audio resets, shutdown
 	constexpr wchar_t kSettingsKey[] = L"Software\\RSMods\\VstHost";
 	constexpr UINT_PTR kHousekeepingTimer = 1;
 	constexpr UINT kHousekeepingMs = 500;
@@ -51,11 +52,10 @@ namespace
 
 	Chain g_chain;
 	BridgeAudio g_audio;
-	HWND g_popout = nullptr;
-	HWND g_editor = nullptr;
+	HWND g_main = nullptr;            // message-only window (kMainClass)
+	HINSTANCE g_instance = nullptr;
 	HFONT g_font = nullptr;
-	std::wstring g_title;
-	int g_shown = -1;                 // slot whose editor the popout shows
+	int g_shown = -1;                 // the pedal last opened or selected (the page's starting selection)
 	int g_ticks = 0;
 	bool g_keyDown = false;
 	HANDLE g_controlMapping = nullptr;
@@ -67,10 +67,6 @@ namespace
 	std::wstring g_toneName;          // the tone last loaded or saved
 	bool g_toneModified = false;
 	float g_inputMeter = 0.0f, g_outputMeter = 0.0f;
-
-	int Scale(int dip) { return MulDiv(dip, g_popout ? static_cast<int>(GetDpiForWindow(g_popout)) : 96, 96); }
-	int StripHeight() { return Scale(kStripDip); }
-	int CloseButtonWidth() { return Scale(30); }
 
 	bool ReadDword(const wchar_t* name, DWORD& value)
 	{
@@ -238,63 +234,223 @@ namespace
 		return pid == GetCurrentProcessId();
 	}
 
-	// The screen area the amp window must fit in: the game's monitor (or the popout's when there is no game).
-	RECT WorkArea()
+	// ---- Plugin windows ---------------------------------------------------------------------------------------
+	// Each pedal can have its own window, so several plugins can be tweaked at once: a borderless, topmost tool
+	// window with a drag bar and a close button, the plugin's editor under it. Which pedals have a window open is the
+	// player's choice (the page's double-click, Open window / Close window, the window's own close button); all of
+	// them show only while "Show plugin windows" (popoutWanted) is on and the overlay is open.
+	// A window belongs to a plugin instance, not a slot number: after any chain change (SyncWindows), windows whose
+	// plugin left the chain close and the rest are renumbered; a replaced pedal and a reloaded tone get their windows
+	// back (RunCommand). Positions are remembered per plugin file (WindowPos<hash>X/Y), the open slots as a bit mask
+	// (OpenWindows), both in HKCU\Software\RSMods\VstHost.
+	struct AmpWindow
+	{
+		PluginHost* plugin = nullptr;   // compared only once the plugin may have left the chain, never used then
+		std::wstring path;
+		HWND frame = nullptr;           // strip + editor area
+		HWND area = nullptr;            // the editor's parent
+		std::wstring title;
+	};
+	std::vector<std::unique_ptr<AmpWindow>> g_windows;
+	bool g_windowsShown = false;
+
+	int Scale(HWND window, int dip) { return MulDiv(dip, window ? static_cast<int>(GetDpiForWindow(window)) : 96, 96); }
+	int StripHeight(HWND window) { return Scale(window, kStripDip); }
+	int CloseButtonWidth(HWND window) { return Scale(window, 30); }
+
+	// The screen area windows must fit in: the game's monitor, else the window's own.
+	RECT WorkArea(HWND nearWindow)
 	{
 		HWND anchor = FindGameWindow();
 		MONITORINFO info{ sizeof(info) };
-		GetMonitorInfoW(MonitorFromWindow(anchor ? anchor : g_popout, MONITOR_DEFAULTTOPRIMARY), &info);
+		GetMonitorInfoW(MonitorFromWindow(anchor ? anchor : nearWindow, MONITOR_DEFAULTTOPRIMARY), &info);
 		return info.rcWork;
 	}
 
-	void PlacePopout()
+	AmpWindow* WindowForFrame(HWND frame)
+	{
+		for (auto& window : g_windows) if (window->frame == frame) return window.get();
+		return nullptr;
+	}
+
+	AmpWindow* WindowForPlugin(const PluginHost* plugin)
+	{
+		for (auto& window : g_windows) if (window->plugin == plugin) return window.get();
+		return nullptr;
+	}
+
+	int SlotOf(const PluginHost* plugin)
+	{
+		for (int i = 0; i < g_chain.Count(); ++i) if (g_chain.Plugin(i) == plugin) return i;
+		return -1;
+	}
+
+	unsigned OpenWindowMask()
+	{
+		unsigned mask = 0;
+		for (auto& window : g_windows)
+		{
+			const int slot = SlotOf(window->plugin);
+			if (slot >= 0 && slot < 32) mask |= 1u << slot;
+		}
+		return mask;
+	}
+
+	// FNV-1a of the lower-cased plugin path: one remembered spot per plugin file.
+	std::wstring PositionKey(const std::wstring& path)
+	{
+		uint32_t hash = 2166136261u;
+		for (wchar_t c : path) { hash ^= static_cast<uint32_t>(towlower(c)); hash *= 16777619u; }
+		wchar_t key[32];
+		swprintf_s(key, L"WindowPos%08X", hash);
+		return key;
+	}
+
+	void RememberPosition(const AmpWindow& window)
 	{
 		RECT frame{};
-		GetWindowRect(g_popout, &frame);
-		const int width = frame.right - frame.left, height = frame.bottom - frame.top;
-		DWORD x = 0, y = 0;
-		if (ReadDword(L"PopoutX", x) && ReadDword(L"PopoutY", y))
-		{
-			const POINT topLeft{ static_cast<LONG>(static_cast<int>(x)), static_cast<LONG>(static_cast<int>(y)) };
-			if (MonitorFromPoint(topLeft, MONITOR_DEFAULTTONULL))
-			{
-				SetWindowPos(g_popout, nullptr, topLeft.x, topLeft.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-				return;
-			}
-		}
-		const RECT area = WorkArea();
-		SetWindowPos(g_popout, nullptr, area.left + (area.right - area.left - width) / 2, area.top + (area.bottom - area.top - height) / 2,
-			0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+		GetWindowRect(window.frame, &frame);
+		const std::wstring key = PositionKey(window.path);
+		WriteDword((key + L"X").c_str(), static_cast<DWORD>(frame.left));
+		WriteDword((key + L"Y").c_str(), static_cast<DWORD>(frame.top));
 	}
 
 	// Keeps the whole window on its monitor after it changes size (a bigger plugin can push it off the edge).
-	void KeepPopoutOnScreen()
+	void KeepOnScreen(HWND frameWindow)
 	{
 		RECT frame{};
-		GetWindowRect(g_popout, &frame);
-		const RECT area = WorkArea();
+		GetWindowRect(frameWindow, &frame);
+		const RECT area = WorkArea(frameWindow);
 		const int width = static_cast<int>(frame.right - frame.left), height = static_cast<int>(frame.bottom - frame.top);
 		int x = static_cast<int>(frame.left), y = static_cast<int>(frame.top);
 		x = std::max(static_cast<int>(area.left), std::min(x, static_cast<int>(area.right) - width));
 		y = std::max(static_cast<int>(area.top), std::min(y, static_cast<int>(area.bottom) - height));
-		if (x != frame.left || y != frame.top) SetWindowPos(g_popout, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+		if (x != frame.left || y != frame.top) SetWindowPos(frameWindow, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 	}
 
-	void ShowPopout()
+	// Its remembered spot, else the middle of the game's monitor, each further window a step down and right.
+	void PlaceWindow(AmpWindow& window)
 	{
-		// Topmost but not activated: the game keeps the keyboard until the player clicks the amp.
-		SetWindowPos(g_popout, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE);
-		Log("popout: shown");
+		const std::wstring key = PositionKey(window.path);
+		DWORD x = 0, y = 0;
+		if (ReadDword((key + L"X").c_str(), x) && ReadDword((key + L"Y").c_str(), y))
+		{
+			const POINT topLeft{ static_cast<LONG>(static_cast<int>(x)), static_cast<LONG>(static_cast<int>(y)) };
+			if (MonitorFromPoint(topLeft, MONITOR_DEFAULTTONULL))
+			{
+				SetWindowPos(window.frame, nullptr, topLeft.x, topLeft.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+				KeepOnScreen(window.frame);
+				return;
+			}
+		}
+		RECT frame{};
+		GetWindowRect(window.frame, &frame);
+		const RECT area = WorkArea(window.frame);
+		const int step = Scale(window.frame, 32) * static_cast<int>(g_windows.size() - 1);
+		SetWindowPos(window.frame, nullptr, area.left + (area.right - area.left - (frame.right - frame.left)) / 2 + step,
+			area.top + (area.bottom - area.top - (frame.bottom - frame.top)) / 2 + step, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+		KeepOnScreen(window.frame);
 	}
 
-	void HidePopout()
+	void FitWindow(AmpWindow& window, int width, int height)
 	{
-		ShowWindow(g_popout, SW_HIDE);
-		Log("popout: hidden");
+		const int strip = StripHeight(window.frame);
+		SetWindowPos(window.area, nullptr, 0, strip, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
+		SetWindowPos(window.frame, nullptr, 0, 0, width, height + strip, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+		KeepOnScreen(window.frame);
+		InvalidateRect(window.frame, nullptr, TRUE);
 	}
 
-	// The overlay key while the amp has focus: the game never sees it, so hand focus back and pass the key on.
-	// The game then closes its overlay, and the popout follows it (UpdatePopout).
+	void UpdateTitle(AmpWindow& window)
+	{
+		const int slot = SlotOf(window.plugin);
+		if (slot < 0) return;
+		window.title = std::to_wstring(slot + 1) + L"/" + std::to_wstring(g_chain.Count()) + L"  " + Wide(window.plugin->Name());
+		if (g_chain.Bypassed(slot)) window.title += L"  (bypassed)";
+		SetWindowTextW(window.frame, (window.title + L" - Rocksmith Audio Bridge").c_str());
+		InvalidateRect(window.frame, nullptr, TRUE);
+	}
+
+	// Topmost but not activated: the game keeps the keyboard until the player clicks a plugin.
+	void ShowFrame(HWND frame) { SetWindowPos(frame, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE); }
+
+	void RememberOpenWindows()
+	{
+		WriteDword(L"OpenWindows", OpenWindowMask());
+		WriteDword(L"ShownSlot", static_cast<DWORD>(std::max(g_shown, 0)));
+	}
+
+	// Opens the window of a slot's plugin, or brings it to the front when it is open already.
+	void OpenWindow(int slot)
+	{
+		PluginHost* plugin = g_chain.Plugin(slot);
+		if (!plugin) return;
+		g_shown = slot;
+		if (AmpWindow* existing = WindowForPlugin(plugin))
+		{
+			if (g_windowsShown) ShowFrame(existing->frame);
+			return;
+		}
+		auto created = std::make_unique<AmpWindow>();
+		AmpWindow& window = *created;
+		window.plugin = plugin;
+		window.path = g_chain.Path(slot);
+		// Tool window: no taskbar button or Alt+Tab entry; the overlay drives it.
+		window.frame = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, kWindowClass, L"Rocksmith Audio Bridge",
+			WS_POPUP | WS_CLIPCHILDREN, 0, 0, 800, 600, nullptr, nullptr, g_instance, nullptr);
+		window.area = CreateWindowExW(0, kEditorClass, nullptr, WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN, 0, StripHeight(window.frame),
+			800, 600, window.frame, nullptr, g_instance, nullptr);
+		g_windows.push_back(std::move(created));
+
+		const RECT area = WorkArea(window.frame);
+		const int maxWidth = (area.right - area.left) * 9 / 10;
+		const int maxHeight = (area.bottom - area.top) * 9 / 10 - StripHeight(window.frame);
+		const HWND frame = window.frame;
+		const auto onResized = [frame](int width, int height) { if (AmpWindow* found = WindowForFrame(frame)) FitWindow(*found, width, height); };
+		if (!plugin->OpenEditor(window.area, onResized, maxWidth, maxHeight))
+			FitWindow(window, Scale(window.frame, 460), Scale(window.frame, 60));
+		UpdateTitle(window);
+		PlaceWindow(window);
+		if (g_windowsShown) ShowFrame(window.frame);
+		RememberOpenWindows();
+		Log("window: opened %s (%zu open)", plugin->Name().c_str(), g_windows.size());
+	}
+
+	// Closes a plugin's window. The plugin may already have left the chain (its editor went with it).
+	void CloseWindow(const PluginHost* plugin)
+	{
+		const auto it = std::find_if(g_windows.begin(), g_windows.end(), [&](const auto& window) { return window->plugin == plugin; });
+		if (it == g_windows.end()) return;
+		AmpWindow& window = **it;
+		if (SlotOf(plugin) >= 0) window.plugin->CloseEditor();
+		RememberPosition(window);
+		const bool hadFocus = GetForegroundWindow() == window.frame;
+		DestroyWindow(window.frame);
+		g_windows.erase(it);
+		if (hadFocus) if (HWND game = FindGameWindow()) SetForegroundWindow(game);
+	}
+
+	// After any chain change: windows whose plugin left the chain close, the others get their new number.
+	void SyncWindows()
+	{
+		for (size_t i = g_windows.size(); i-- > 0;)
+			if (SlotOf(g_windows[i]->plugin) < 0) CloseWindow(g_windows[i]->plugin);
+		for (auto& window : g_windows) UpdateTitle(*window);
+		RememberOpenWindows();
+	}
+
+	void ReopenWindows(unsigned mask)
+	{
+		for (int i = 0; i < g_chain.Count() && i < 32; ++i) if (mask & (1u << i)) OpenWindow(i);
+	}
+
+	void CloseAllWindows()
+	{
+		while (!g_windows.empty()) CloseWindow(g_windows.back()->plugin);
+	}
+
+	// The overlay key while a plugin window has focus: the game never sees it, so hand focus back and pass the key on.
+	// The game then closes its overlay, and the windows follow it (UpdateWindows).
 	void OnOverlayKeyReleased()
 	{
 		const HWND foreground = GetForegroundWindow();
@@ -308,47 +464,41 @@ namespace
 		}
 	}
 
-	// The popout is on screen when the Tone designer page's "Show amp window" is on and the overlay is open. Without
+	// The open windows are on screen when the page's "Show plugin windows" is on and the overlay is open. Without
 	// an overlay reporting in (Rocksmith closed, or an overlay that predates this), the switch alone decides.
-	void UpdatePopout()
+	void UpdateWindows()
 	{
-		if (!g_control) return;
-		const ULONGLONG now = GetTickCount64();
-		const LONG overlayBeat = g_control->overlayBeat;
-		if (overlayBeat != g_lastOverlayBeat) { g_lastOverlayBeat = overlayBeat; g_overlayBeatSeenAt = now; }
-		const bool overlayReporting = g_overlayBeatSeenAt != 0 && now - g_overlayBeatSeenAt < static_cast<ULONGLONG>(VstHostControl::kAliveMs);
-
-		const bool wanted = g_control->popoutWanted != 0;
-		if (wanted != g_savedWanted) { g_savedWanted = wanted; WriteDword(L"PopoutWanted", wanted ? 1 : 0); }
-
-		const bool show = wanted && (!overlayReporting || g_control->overlayVisible != 0);
-		if (show == (IsWindowVisible(g_popout) != FALSE)) return;
-		if (show) ShowPopout();
-		else
+		bool show = true;
+		if (g_control)
 		{
-			const bool hadFocus = GetForegroundWindow() && IsOurWindow(GetForegroundWindow());
-			HidePopout();
-			if (hadFocus) if (HWND game = FindGameWindow()) SetForegroundWindow(game);
+			const ULONGLONG now = GetTickCount64();
+			const LONG overlayBeat = g_control->overlayBeat;
+			if (overlayBeat != g_lastOverlayBeat) { g_lastOverlayBeat = overlayBeat; g_overlayBeatSeenAt = now; }
+			const bool overlayReporting = g_overlayBeatSeenAt != 0 && now - g_overlayBeatSeenAt < static_cast<ULONGLONG>(VstHostControl::kAliveMs);
+			const bool wanted = g_control->popoutWanted != 0;
+			if (wanted != g_savedWanted) { g_savedWanted = wanted; WriteDword(L"PopoutWanted", wanted ? 1 : 0); }
+			show = wanted && (!overlayReporting || g_control->overlayVisible != 0);
 		}
-		g_control->popoutShown = show ? 1 : 0;
+		if (show == g_windowsShown) return;
+		g_windowsShown = show;
+		const bool hadFocus = GetForegroundWindow() && IsOurWindow(GetForegroundWindow());
+		for (auto& window : g_windows)
+		{
+			if (show) ShowFrame(window->frame);
+			else ShowWindow(window->frame, SW_HIDE);
+		}
+		if (!show && hadFocus) if (HWND game = FindGameWindow()) SetForegroundWindow(game);
+		if (g_control) g_control->popoutShown = show ? 1 : 0;
+		Log("windows: %s (%zu open)", show ? "shown" : "hidden", g_windows.size());
 	}
 
-	void FitPopoutToEditor(int width, int height)
-	{
-		const int strip = StripHeight();
-		SetWindowPos(g_editor, nullptr, 0, strip, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
-		SetWindowPos(g_popout, nullptr, 0, 0, width, height + strip, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-		KeepPopoutOnScreen();
-		InvalidateRect(g_popout, nullptr, TRUE);
-	}
-
-	void PaintStrip(HWND window)
+	void PaintStrip(HWND frame)
 	{
 		PAINTSTRUCT paint;
-		HDC dc = BeginPaint(window, &paint);
+		HDC dc = BeginPaint(frame, &paint);
 		RECT client{};
-		GetClientRect(window, &client);
-		RECT strip{ 0, 0, client.right, StripHeight() };
+		GetClientRect(frame, &client);
+		RECT strip{ 0, 0, client.right, StripHeight(frame) };
 		HBRUSH background = CreateSolidBrush(RGB(28, 28, 32));
 		FillRect(dc, &strip, background);
 		DeleteObject(background);
@@ -356,54 +506,26 @@ namespace
 		SetBkMode(dc, TRANSPARENT);
 		HGDIOBJ oldFont = SelectObject(dc, g_font);
 		RECT text = strip;
-		text.left += Scale(10);
-		text.right -= CloseButtonWidth() + Scale(8);
+		text.left += Scale(frame, 10);
+		text.right -= CloseButtonWidth(frame) + Scale(frame, 8);
 		SetTextColor(dc, RGB(225, 225, 230));
-		DrawTextW(dc, g_title.c_str(), -1, &text, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+		const AmpWindow* window = WindowForFrame(frame);
+		DrawTextW(dc, window ? window->title.c_str() : L"", -1, &text, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 		SetTextColor(dc, RGB(140, 140, 150));
 		DrawTextW(dc, L"\\ hides", -1, &text, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 
-		RECT close{ client.right - CloseButtonWidth(), 0, client.right, StripHeight() };
+		RECT close{ client.right - CloseButtonWidth(frame), 0, client.right, StripHeight(frame) };
 		SetTextColor(dc, RGB(200, 200, 205));
-		DrawTextW(dc, L"\u2715", -1, &close, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+		DrawTextW(dc, L"✕", -1, &close, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 		SelectObject(dc, oldFont);
-		EndPaint(window, &paint);
+		EndPaint(frame, &paint);
 	}
 
-	bool InCloseButton(HWND window, POINT client)
+	bool InCloseButton(HWND frame, POINT client)
 	{
 		RECT rect{};
-		GetClientRect(window, &rect);
-		return client.y >= 0 && client.y < StripHeight() && client.x >= rect.right - CloseButtonWidth();
-	}
-
-	// The chosen slot's editor in the popout, sized to it (and shrunk to fit the screen). The popout keeps its
-	// place on screen.
-	void ShowSlot(int index)
-	{
-		if (PluginHost* previous = g_chain.Plugin(g_shown)) previous->CloseEditor();
-		g_shown = g_chain.Count() == 0 ? -1 : std::clamp(index, 0, g_chain.Count() - 1);
-		PluginHost* plugin = g_chain.Plugin(g_shown);
-		if (!plugin)
-		{
-			g_title = L"No plugins: add one on the Tone designer page";
-			FitPopoutToEditor(Scale(460), Scale(60));
-		}
-		else
-		{
-			const RECT area = WorkArea();
-			const int maxWidth = (area.right - area.left) * 9 / 10;
-			const int maxHeight = (area.bottom - area.top) * 9 / 10 - StripHeight();
-			g_title = std::to_wstring(g_shown + 1) + L"/" + std::to_wstring(g_chain.Count()) + L"  " + Wide(plugin->Name());
-			if (g_chain.Bypassed(g_shown)) g_title += L"  (bypassed)";
-			if (!plugin->OpenEditor(g_editor, FitPopoutToEditor, maxWidth, maxHeight))
-			{
-				g_title += L"  (no editor)";
-				FitPopoutToEditor(Scale(460), Scale(60));
-			}
-		}
-		SetWindowTextW(g_popout, (g_title + L" - Rocksmith Audio Bridge").c_str());
-		InvalidateRect(g_popout, nullptr, TRUE);
+		GetClientRect(frame, &rect);
+		return client.y >= 0 && client.y < StripHeight(frame) && client.x >= rect.right - CloseButtonWidth(frame);
 	}
 
 	// Everything the overlay shows about the chain.
@@ -426,6 +548,7 @@ namespace
 		g_control->slotCount = count;
 		g_control->chainBypassed = g_chain.ChainBypassed() ? 1 : 0;
 		g_control->shownSlot = g_shown;
+		g_control->openWindows = static_cast<LONG>(OpenWindowMask());
 		CopyText(g_control->toneName, sizeof(g_control->toneName), Utf8(g_toneName));
 		g_control->toneModified = g_toneModified ? 1 : 0;
 		g_control->inputTenths = g_chain.InputTenths();
@@ -447,7 +570,27 @@ namespace
 	}
 
 	void BeginLoading() { if (g_control) InterlockedExchange(&g_control->loading, 1); }
-	void EndLoading() { if (g_control) { InterlockedIncrement(&g_control->hostBeat); InterlockedExchange(&g_control->loading, 0); } }
+	void EndLoading()
+	{
+		if (!g_control) return;
+		InterlockedIncrement(&g_control->hostBeat);
+		CopyText(g_control->loadingText, sizeof(g_control->loadingText), {});
+		InterlockedExchange(&g_control->loading, 0);
+	}
+
+	// What the page shows while plugins load (a heavy one takes seconds, a tone several of them): the plugin's file
+	// name and the step. Called by the chain just before each plugin loads.
+	void ReportLoading(const std::wstring& path, int step, int total)
+	{
+		std::wstring name = path.substr(path.find_last_of(L"\\/") + 1);
+		if (name.size() > 5 && _wcsicmp(name.c_str() + name.size() - 5, L".vst3") == 0) name.resize(name.size() - 5);
+		Log("load: %ls (%d of %d)", name.c_str(), step, total);
+		if (!g_control) return;
+		CopyText(g_control->loadingText, sizeof(g_control->loadingText), Utf8(name));
+		InterlockedExchange(&g_control->loadingStep, step);
+		InterlockedExchange(&g_control->loadingTotal, total);
+		InterlockedExchange(&g_control->loading, 1);
+	}
 
 	void MarkModified() { g_toneModified = true; }
 
@@ -457,30 +600,28 @@ namespace
 		using VstHostControl::Command;
 		SetLoadError({});
 		std::string error;
+		const unsigned openBefore = OpenWindowMask();
 		switch (op)
 		{
 		case Command::AddPlugin:
 			BeginLoading();
-			if (g_chain.Add(text, error)) { MarkModified(); ShowSlot(g_chain.Count() - 1); }
+			if (g_chain.Add(text, error)) { MarkModified(); OpenWindow(g_chain.Count() - 1); }
 			else { SetLoadError(error.empty() ? "That plugin did not load." : error); SetFailedPath(text); }
 			EndLoading();
 			break;
 		case Command::ReplaceSlot:
-		{
 			BeginLoading();
-			const bool shown = arg == g_shown;
-			if (shown) if (PluginHost* plugin = g_chain.Plugin(g_shown)) plugin->CloseEditor();
+			if (PluginHost* old = g_chain.Plugin(arg)) CloseWindow(old);   // before the plugin goes
 			if (g_chain.Replace(arg, text, error)) MarkModified();
 			else { SetLoadError(error.empty() ? "That plugin did not load." : error); SetFailedPath(text); }
-			if (shown || g_shown < 0) ShowSlot(arg);
+			if (openBefore & (1u << arg)) OpenWindow(arg);   // the new pedal gets the old one's window
 			EndLoading();
 			break;
-		}
 		case Command::RemoveSlot:
-			if (PluginHost* plugin = g_chain.Plugin(g_shown)) plugin->CloseEditor();
+			if (PluginHost* old = g_chain.Plugin(arg)) CloseWindow(old);
 			g_chain.Remove(arg);
 			MarkModified();
-			ShowSlot(g_shown > arg ? g_shown - 1 : g_shown);
+			if (g_shown >= g_chain.Count()) g_shown = g_chain.Count() - 1;
 			break;
 		case Command::MoveSlot:
 			if (arg + arg2 >= 0 && arg + arg2 < g_chain.Count())
@@ -489,23 +630,23 @@ namespace
 				if (g_shown == arg) g_shown = arg + arg2;
 				else if (g_shown == arg + arg2) g_shown = arg;
 				MarkModified();
-				ShowSlot(g_shown);
 			}
 			break;
 		case Command::SetBypass:
 			g_chain.SetBypass(arg, arg2 != 0);
 			MarkModified();
-			if (arg == g_shown) ShowSlot(g_shown);
 			break;
 		case Command::ShowSlot:
-			ShowSlot(arg);
+			OpenWindow(arg);
+			break;
+		case Command::HideSlot:
+			if (PluginHost* plugin = g_chain.Plugin(arg)) CloseWindow(plugin);
 			break;
 		case Command::LoadTone:
 		{
 			const std::wstring file = ToneFile(text);
 			BeginLoading();
-			if (PluginHost* plugin = g_chain.Plugin(g_shown)) plugin->CloseEditor();
-			g_shown = -1;
+			CloseAllWindows();   // before the plugins go; reopened for the same slots below
 			std::string missing;
 			if (g_chain.LoadTone(file, error, missing))
 			{
@@ -515,7 +656,7 @@ namespace
 				if (!missing.empty()) SetLoadError("Not installed, skipped: " + missing);
 			}
 			else SetLoadError(error);
-			ShowSlot(0);
+			ReopenWindows(openBefore);
 			EndLoading();
 			break;
 		}
@@ -553,7 +694,7 @@ namespace
 			break;
 		case Command::DuplicateSlot:
 			BeginLoading();
-			if (g_chain.Duplicate(arg, error)) { MarkModified(); ShowSlot(arg + 1); }
+			if (g_chain.Duplicate(arg, error)) { MarkModified(); if (openBefore & (1u << arg)) OpenWindow(arg + 1); }
 			else SetLoadError(error.empty() ? "That plugin did not load a second time." : error);
 			EndLoading();
 			break;
@@ -579,15 +720,16 @@ namespace
 			break;
 		}
 		case Command::ClearChain:
-			if (PluginHost* plugin = g_chain.Plugin(g_shown)) plugin->CloseEditor();
+			CloseAllWindows();
 			g_chain.Clear();
 			g_toneName.clear();
 			g_toneModified = false;
-			ShowSlot(-1);
+			g_shown = -1;
 			break;
 		default:
 			break;
 		}
+		SyncWindows();
 		PublishState();
 	}
 
@@ -625,7 +767,8 @@ namespace
 		return true;
 	}
 
-	LRESULT CALLBACK PopoutProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
+	// The hidden main window: the timers, the audio link's reset message, and shutdown.
+	LRESULT CALLBACK MainProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
 	{
 		switch (message)
 		{
@@ -639,7 +782,7 @@ namespace
 				const bool down = (GetAsyncKeyState(kOverlayKey) & 0x8000) != 0;
 				if (g_keyDown && !down) OnOverlayKeyReleased();
 				g_keyDown = down;
-				UpdatePopout();
+				UpdateWindows();
 				PollCommand();
 				PublishMeters();
 				if (g_control && g_control->quitRequested)
@@ -658,7 +801,7 @@ namespace
 				PostMessageW(window, WM_CLOSE, 0, 0);
 				return 0;
 			}
-			if (g_chain.TakeRestartRequest()) { StartAudio(window); ShowSlot(g_shown); }
+			if (g_chain.TakeRestartRequest()) StartAudio(window);
 			if (g_chain.Dirty() && !g_toneModified) { g_toneModified = true; PublishState(); }
 			if (++g_ticks >= kAutosaveTicks)
 			{
@@ -666,50 +809,60 @@ namespace
 				if (g_chain.Dirty()) SaveCurrentChain();
 			}
 			return 0;
+		case WM_CLOSE:
+			KillTimer(window, kKeyTimer);
+			KillTimer(window, kHousekeepingTimer);
+			g_audio.Stop();
+			SaveCurrentChain();
+			RememberOpenWindows();   // reopened next time
+			CloseAllWindows();
+			DestroyWindow(window);
+			return 0;
+		case WM_DESTROY:
+			PostQuitMessage(0);
+			return 0;
+		}
+		return DefWindowProcW(window, message, wParam, lParam);
+	}
+
+	// One plugin window: drag by its strip, close with its button.
+	LRESULT CALLBACK AmpWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
+	{
+		switch (message)
+		{
 		case WM_NCHITTEST:
 		{
 			const LRESULT hit = DefWindowProcW(window, message, wParam, lParam);
 			POINT point{ static_cast<short>(LOWORD(lParam)), static_cast<short>(HIWORD(lParam)) };
 			ScreenToClient(window, &point);
-			if (hit == HTCLIENT && point.y < StripHeight() && !InCloseButton(window, point)) return HTCAPTION;
+			if (hit == HTCLIENT && point.y < StripHeight(window) && !InCloseButton(window, point)) return HTCAPTION;
 			return hit;
 		}
 		case WM_LBUTTONUP:
 		{
 			const POINT point{ static_cast<short>(LOWORD(lParam)), static_cast<short>(HIWORD(lParam)) };
-			// The window's close button only puts the amp away (the page's "Show amp window" brings it back); without
-			// an overlay to bring it back, it closes the host.
+			// Closes this plugin's window; the page opens it again. Without an overlay to do that, closing the last
+			// window closes the host.
 			if (InCloseButton(window, point))
-			{
-				if (g_control && g_overlayBeatSeenAt) InterlockedExchange(&g_control->popoutWanted, 0);
-				else PostMessageW(window, WM_CLOSE, 0, 0);
-			}
+				if (AmpWindow* amp = WindowForFrame(window))
+				{
+					CloseWindow(amp->plugin);
+					RememberOpenWindows();
+					PublishState();
+					if (g_windows.empty() && !(g_control && g_overlayBeatSeenAt)) PostMessageW(g_main, WM_CLOSE, 0, 0);
+				}
 			return 0;
 		}
 		case WM_EXITSIZEMOVE:
-		{
-			RECT frame{};
-			GetWindowRect(window, &frame);
-			WriteDword(L"PopoutX", static_cast<DWORD>(frame.left));
-			WriteDword(L"PopoutY", static_cast<DWORD>(frame.top));
+			if (AmpWindow* amp = WindowForFrame(window)) RememberPosition(*amp);
 			return 0;
-		}
 		case WM_PAINT:
 			PaintStrip(window);
 			return 0;
 		case WM_ERASEBKGND:
 			return 1;
 		case WM_CLOSE:
-			KillTimer(window, kKeyTimer);
-			KillTimer(window, kHousekeepingTimer);
-			g_audio.Stop();
-			SaveCurrentChain();
-			if (PluginHost* plugin = g_chain.Plugin(g_shown)) plugin->CloseEditor();
-			DestroyWindow(window);
-			return 0;
-		case WM_DESTROY:
-			PostQuitMessage(0);
-			return 0;
+			return 0;   // closed through its button or the page, never Alt+F4 on a tool window
 		}
 		return DefWindowProcW(window, message, wParam, lParam);
 	}
@@ -804,7 +957,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 	HANDLE singleInstance = CreateMutexW(nullptr, TRUE, L"Local\\RocksmithAudioBridge.VstHost");
 	if (GetLastError() == ERROR_ALREADY_EXISTS)
 	{
-		if (HWND existing = FindWindowW(kWindowClass, nullptr)) SetWindowPos(existing, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+		Log("host: already running, leaving it to the overlay");
 		return 0;
 	}
 
@@ -826,14 +979,22 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 
 	g_control = VstHostControl::Open(g_controlMapping);
 	if (g_control) InterlockedExchange(&g_control->loading, 1);
+	g_chain.SetLoadReporter(ReportLoading);
 	RestoreChain(plugin, fromOverlay);
 
-	WNDCLASSEXW popoutClass{ sizeof(popoutClass) };
-	popoutClass.lpfnWndProc = PopoutProc;
-	popoutClass.hInstance = instance;
-	popoutClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-	popoutClass.lpszClassName = kWindowClass;
-	RegisterClassExW(&popoutClass);
+	g_instance = instance;
+	WNDCLASSEXW mainClass{ sizeof(mainClass) };
+	mainClass.lpfnWndProc = MainProc;
+	mainClass.hInstance = instance;
+	mainClass.lpszClassName = kMainClass;
+	RegisterClassExW(&mainClass);
+
+	WNDCLASSEXW windowClass{ sizeof(windowClass) };
+	windowClass.lpfnWndProc = AmpWindowProc;
+	windowClass.hInstance = instance;
+	windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+	windowClass.lpszClassName = kWindowClass;
+	RegisterClassExW(&windowClass);
 
 	WNDCLASSEXW editorClass{ sizeof(editorClass) };
 	editorClass.lpfnWndProc = DefWindowProcW;
@@ -843,20 +1004,18 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 	editorClass.lpszClassName = kEditorClass;
 	RegisterClassExW(&editorClass);
 
-	// Tool window: no taskbar button or Alt+Tab entry; the overlay drives it.
-	g_popout = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, kWindowClass, L"Rocksmith Audio Bridge",
-		WS_POPUP | WS_CLIPCHILDREN, 0, 0, 800, 600, nullptr, nullptr, instance, nullptr);
-	g_editor = CreateWindowExW(0, kEditorClass, nullptr, WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN, 0, Scale(kStripDip), 800, 600 - Scale(kStripDip),
-		g_popout, nullptr, instance, nullptr);
-	g_font = CreateFontW(-Scale(13), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-		CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+	g_main = CreateWindowExW(0, kMainClass, L"Rocksmith Audio Bridge VST host", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, instance, nullptr);
+	g_font = CreateFontW(-MulDiv(13, static_cast<int>(GetDpiForSystem()), 96), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+		OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
 
-	if (!StartAudio(g_popout)) { DestroyWindow(g_popout); g_chain.Clear(); ReleasePluginFormats(); OleUninitialize(); return 1; }
-	DWORD shown = 0;
-	ShowSlot(ReadDword(L"ShownSlot", shown) ? static_cast<int>(shown) : 0);
-	PlacePopout();
+	if (!StartAudio(g_main)) { DestroyWindow(g_main); g_chain.Clear(); ReleasePluginFormats(); OleUninitialize(); return 1; }
 
-	// Tell the overlay's Tone designer page we are here; the popout follows its "Show amp window" switch (UpdatePopout).
+	// The windows that were open last time. Before per-plugin windows there was one, showing ShownSlot.
+	DWORD openWindows = 0, shown = 0;
+	if (!ReadDword(L"OpenWindows", openWindows)) openWindows = ReadDword(L"ShownSlot", shown) ? (1u << std::min<DWORD>(shown, 31)) : 1u;
+	ReopenWindows(openWindows);
+
+	// Tell the overlay's Tone designer page we are here; the windows follow its "Show plugin windows" switch.
 	if (g_control)
 	{
 		DWORD wanted = 0;
@@ -870,11 +1029,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 		PublishState();
 		InterlockedExchange(&g_control->loading, 0);
 		InterlockedExchange(&g_control->hostPid, static_cast<LONG>(GetCurrentProcessId()));
-		Log("popout: %s", g_savedWanted ? "amp window is on" : "waiting for Show amp window on the Tone designer page");
+		Log("windows: %zu open, %s", g_windows.size(), g_savedWanted ? "shown with the overlay" : "waiting for Show plugin windows on the Tone designer page");
 	}
-	else ShowPopout();
-	SetTimer(g_popout, kHousekeepingTimer, kHousekeepingMs, nullptr);
-	SetTimer(g_popout, kKeyTimer, kKeyMs, nullptr);
+	UpdateWindows();
+	SetTimer(g_main, kHousekeepingTimer, kHousekeepingMs, nullptr);
+	SetTimer(g_main, kKeyTimer, kKeyMs, nullptr);
 
 	MSG message;
 	while (GetMessageW(&message, nullptr, 0, 0) > 0)
@@ -883,7 +1042,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 		DispatchMessageW(&message);
 	}
 
-	WriteDword(L"ShownSlot", static_cast<DWORD>(std::max(g_shown, 0)));
 	if (g_control)
 	{
 		g_control->popoutShown = 0;

@@ -12,6 +12,7 @@
 #include "PluginHost.hpp"
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -33,6 +34,10 @@ namespace VstHost
 		void Clear();
 
 		bool Prepare(int frames, std::string& error);   // every slot, for a (new) stream
+
+		// Told before each plugin loads (a heavy one takes seconds): its file, and for a tone how far it has got.
+		using LoadReporter = std::function<void(const std::wstring& path, int step, int total)>;
+		void SetLoadReporter(LoadReporter reporter) { m_report = std::move(reporter); }
 		void Suspend();
 
 		int Count() const { return static_cast<int>(m_slots.size()); }
@@ -74,6 +79,8 @@ namespace VstHost
 		bool LoadSlot(Slot& slot, const std::wstring& path, std::string& error);
 
 		std::vector<std::unique_ptr<Slot>> m_slots;
+		LoadReporter m_report;
+		int m_loadStep = 1, m_loadTotal = 1;   // LoadTone counts its plugins; one plugin otherwise
 		int m_frames = 0;
 		std::atomic<bool> m_running{ false };
 		std::atomic<bool> m_inProcess{ false };
