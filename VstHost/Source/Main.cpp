@@ -512,8 +512,6 @@ namespace
 		SetTextColor(dc, RGB(225, 225, 230));
 		const AmpWindow* window = WindowForFrame(frame);
 		DrawTextW(dc, window ? window->title.c_str() : L"", -1, &text, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-		SetTextColor(dc, RGB(140, 140, 150));
-		DrawTextW(dc, L"\\ hides", -1, &text, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 
 		RECT close{ client.right - CloseButtonWidth(frame), 0, client.right, StripHeight(frame) };
 		SetTextColor(dc, RGB(200, 200, 205));
