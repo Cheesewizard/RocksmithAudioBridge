@@ -1,6 +1,7 @@
 #include "../stdafx.h"
 #include "OverlayShell.hpp"
 #include "OverlayUi.hpp"
+#include "../Lib/ImGUI/imgui_internal.h"   // SetItemUsingMouseWheel (the pedalboard scrolls sideways)
 #include "HudLayout.hpp"
 #include "../Audio/SharedOutput.hpp"
 #include "../Audio/CableInput.hpp"
@@ -1364,6 +1365,7 @@ namespace Overlay
 				const float top = ImGui::GetCursorScreenPos().y + std::max(0.0f, (rackH - 6.0f - pedalH) * 0.5f);
 				const float midY = top + pedalH * 0.5f;
 				float x = ImGui::GetCursorScreenPos().x;
+				const ImVec2 rackStart = ImGui::GetCursorScreenPos();
 				auto cable = [&] { list->AddLine(ImVec2(x, midY), ImVec2(x + 14.0f, midY), Ink::Cable, 3.0f); x += 22.0f; };
 
 				Jack(list, ImVec2(x + 21.0f, midY - 6.0f), "In");
@@ -1382,6 +1384,7 @@ namespace Overlay
 					ImGui::PushID(i);
 					ImGui::SetCursorScreenPos(at);
 					const bool pressed = ImGui::InvisibleButton("##pedal", ImVec2(look.width, pedalH));
+					ImGui::SetItemUsingMouseWheel();   // the wheel scrolls the rack, not the page
 					const bool hovered = ImGui::IsItemHovered();
 					const ImVec2 mouse = ImGui::GetIO().MousePos;
 					const bool onSwitch = (mouse.x - footswitch.x) * (mouse.x - footswitch.x) + (mouse.y - footswitch.y) * (mouse.y - footswitch.y) < 15.0f * 15.0f;
@@ -1450,6 +1453,7 @@ namespace Overlay
 					ImGui::SetCursorScreenPos(at);
 					ImGui::BeginDisabled(vst.busy);
 					if (ImGui::InvisibleButton("##addPedal", ImVec2(addW, pedalH))) ImGui::OpenPopup("##addMenu");
+					ImGui::SetItemUsingMouseWheel();
 					const bool hovered = ImGui::IsItemHovered();
 					ImGui::EndDisabled();
 					Hint("Add a plugin at the end of the chain. The plugin browser below has search.");
@@ -1469,12 +1473,28 @@ namespace Overlay
 				}
 				Jack(list, ImVec2(x + 21.0f, midY - 6.0f), "Out");
 				x += 42.0f;
-				ImGui::SetCursorScreenPos(ImVec2(x, top + pedalH));
-				ImGui::Dummy(ImVec2(10.0f, 4.0f));   // the rack's scroll width
+				// The empty part of the board: one item behind the pedals (submitted last, so the pedals keep the
+				// hover), for its right-click menu and to claim the mouse wheel. It also sets the rack's scroll width.
+				ImGui::SetCursorScreenPos(rackStart);
+				ImGui::InvisibleButton("##board", ImVec2(x + 10.0f - rackStart.x, std::max(rackH - 6.0f, 1.0f)));
+				ImGui::SetItemUsingMouseWheel();
+				ImGui::OpenPopupOnItemClick("##boardMenu", ImGuiPopupFlags_MouseButtonRight);
+
+				// A long chain: the wheel scrolls it sideways (the page does not scroll under the rack), and a
+				// middle-button drag anywhere on it pans it. Shift+wheel and a touchpad's sideways scroll work as usual.
+				static bool panning = false;
+				const ImGuiIO& io = ImGui::GetIO();
+				if (ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem))
+				{
+					if (io.MouseWheel != 0.0f) ImGui::SetScrollX(ImGui::GetScrollX() - io.MouseWheel * 90.0f);
+					if (ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) panning = true;
+				}
+				if (!ImGui::IsMouseDown(ImGuiMouseButton_Middle)) panning = false;
+				if (panning && io.MouseDelta.x != 0.0f) ImGui::SetScrollX(ImGui::GetScrollX() - io.MouseDelta.x);
 				if (vst.loading) LoadingPanel(vst);
 
 				PushPopupPadding();
-				if (ImGui::BeginPopup("##addMenu") || ImGui::BeginPopupContextWindow("##boardMenu", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
+				if (ImGui::BeginPopup("##addMenu") || ImGui::BeginPopup("##boardMenu")) {
 					ImGui::TextDisabled("Add plugin");
 					ImGui::Separator();
 					if (count >= VstHostControl::kMaxSlots) ImGui::TextDisabled("The chain is full (8 plugins)");
@@ -1496,7 +1516,7 @@ namespace Overlay
 				ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + rackW);
 				ImGui::TextUnformatted(count == 0 ? "The chain is empty, so you hear your clean guitar. Click Add for an amp sim, then pedals before it (gate, drive) or after it (delay, reverb)."
 					: vst.chainBypassed ? "The whole chain is bypassed (Edit menu): you hear your clean guitar."
-					: "Right-click a pedal, a tone, or the board. Double-click a pedal to open its window. Click a footswitch to bypass. Drag pedals to reorder.");
+					: "Right-click a pedal, a tone, or the board. Double-click a pedal to open its window. Click a footswitch to bypass. Drag pedals to reorder; scroll or middle-drag to move along a long chain.");
 				ImGui::PopTextWrapPos();
 				ImGui::PopStyleColor();
 				ImGui::PopFont();
