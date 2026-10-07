@@ -490,10 +490,14 @@ namespace VstHostLink
 				ReadSlow([&](SlowState& slow) { slow.songKey = songKey; slow.songTone.clear(); return 0; });
 				KickSlow();
 			}
-			if (g_songKey.empty() || g_songKey == g_appliedSong || !hostRunning) return;
+			// Out of the song: the next start of any song, the same one included, applies its tone again. (Without
+			// this, a tone assigned during a song never loaded when that song was played again.)
+			if (g_songKey.empty()) { g_appliedSong.clear(); return; }
+			if (g_songKey == g_appliedSong || !hostRunning) return;
 			// Entering a song is rare: this one read stays here, so the song's tone loads without waiting a pass.
 			g_appliedSong = g_songKey;
 			const std::string tone = SongTone(g_songKey);
+			LOG_INFO("(VST HOST) song " << g_songKey << " started: " << (tone.empty() ? std::string("no tone of its own") : "its tone is '" + tone + "'") << std::endl);
 			char current[sizeof(shared->toneName) + 1]{};
 			memcpy(current, shared->toneName, sizeof(shared->toneName));
 			if (!tone.empty())
