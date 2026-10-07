@@ -220,6 +220,10 @@ namespace VstHost
 		m_editor.reset(editor);
 		m_editor->setTopLeftPosition(0, 0);
 		m_editor->addToDesktop(0, window);   // a child window of our popout's editor area
+		// The window shows only the plugin's own interface, which draws itself; JUCE 9 would draw its part with
+		// Direct2D (the GPU). Software drawing leaves the GPU to the plugin, so a crash on a graphics-driver thread
+		// is the plugin's (Main.cpp OnCrash), and JUCE's own GPU threads are out of the picture.
+		if (juce::ComponentPeer* peer = m_editor->getPeer()) peer->setCurrentRenderingEngine(0);   // 0 = software (GDI)
 		m_editor->setVisible(true);
 
 		RECT rect{};

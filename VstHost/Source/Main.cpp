@@ -68,6 +68,7 @@ namespace
 	bool g_toneModified = false;
 	float g_inputMeter = 0.0f, g_outputMeter = 0.0f;
 	wchar_t g_loadingNow[128] = {};   // the plugin loading now, for a crash report (plain buffer: read in OnCrash)
+	wchar_t g_openWindowNames[256] = {};   // plugins whose windows are open, for a crash report (OnCrash)
 
 	bool ReadDword(const wchar_t* name, DWORD& value)
 	{
@@ -396,8 +397,17 @@ namespace
 	// Topmost but not activated: the game keeps the keyboard until the player clicks a plugin.
 	void ShowFrame(HWND frame) { SetWindowPos(frame, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE); }
 
+	void RememberOpenWindowNames()
+	{
+		std::wstring names;
+		for (auto& window : g_windows)
+			if (SlotOf(window->plugin) >= 0) names += (names.empty() ? L"" : L", ") + Wide(window->plugin->Name());
+		wcsncpy_s(g_openWindowNames, names.c_str(), _TRUNCATE);
+	}
+
 	void RememberOpenWindows()
 	{
+		RememberOpenWindowNames();
 		WriteDword(L"OpenWindows", OpenWindowMask());
 		WriteDword(L"ShownSlot", static_cast<DWORD>(std::max(g_shown, 0)));
 	}
@@ -444,11 +454,14 @@ namespace
 		const auto it = std::find_if(g_windows.begin(), g_windows.end(), [&](const auto& window) { return window->plugin == plugin; });
 		if (it == g_windows.end()) return;
 		AmpWindow& window = **it;
-		if (SlotOf(plugin) >= 0) window.plugin->CloseEditor();
+		const bool inChain = SlotOf(plugin) >= 0;
+		Log("window: closing %s", inChain ? window.plugin->Name().c_str() : "a window whose plugin left the chain");
+		if (inChain) window.plugin->CloseEditor();
 		RememberPosition(window);
 		const bool hadFocus = GetForegroundWindow() == window.frame;
 		DestroyWindow(window.frame);
 		g_windows.erase(it);
+		RememberOpenWindowNames();
 		if (hadFocus) if (HWND game = FindGameWindow()) SetForegroundWindow(game);
 	}
 
@@ -958,6 +971,33 @@ namespace
 		return module;
 	}
 
+	// A graphics driver's user-mode part (AMD, NVIDIA, Intel): its worker threads serve whoever draws with the GPU,
+	// which in this process is only the plugins' own interfaces (PluginHost draws JUCE's part in software).
+	bool IsGraphicsDriver(const wchar_t* moduleName)
+	{
+		static const wchar_t* const prefixes[] = { L"amdxx", L"amdxc", L"atio", L"atidxx", L"aticfx", L"nvwgf", L"nvoglv", L"nvd3dum", L"nvldumd", L"igd", L"igc", L"igxe", L"ig9icd", L"ig11icd" };
+		for (const wchar_t* prefix : prefixes) if (_wcsnicmp(moduleName, prefix, wcslen(prefix)) == 0) return true;
+		return false;
+	}
+
+	std::wstring ModuleName(HMODULE module)
+	{
+		wchar_t path[MAX_PATH]{};
+		if (!module || !GetModuleFileNameW(module, path, MAX_PATH)) return {};
+		const wchar_t* slash = wcsrchr(path, L'\\');
+		return slash ? slash + 1 : path;
+	}
+
+	// The module that started the current thread (NtQueryInformationThread, ThreadQuerySetWin32StartAddress).
+	HMODULE ThreadStartModule()
+	{
+		using QueryThread = LONG(NTAPI*)(HANDLE, ULONG, PVOID, ULONG, PULONG);
+		auto query = reinterpret_cast<QueryThread>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryInformationThread"));
+		void* start = nullptr;
+		if (!query || query(GetCurrentThread(), 9, &start, sizeof(start), nullptr) != 0) return nullptr;
+		return ModuleAt(start);
+	}
+
 	// Which plugin a crash belongs to, when the fault itself is in Windows or the C runtime (a plugin's bad pointer
 	// often surfaces in ntdll): the first plugin frame on the crashing thread's stack, else the plugin that started
 	// the thread. Empty when neither names one; the report then says which plugin was loading, if any.
@@ -969,14 +1009,7 @@ namespace
 		const USHORT count = RtlCaptureStackBackTrace(0, 62, frames, nullptr);
 		for (USHORT i = 0; i < count && plugin.empty(); ++i) plugin = PluginOf(ModuleAt(frames[i]));
 		if (!plugin.empty()) return plugin;
-		using QueryThread = LONG(NTAPI*)(HANDLE, ULONG, PVOID, ULONG, PULONG);
-		if (auto query = reinterpret_cast<QueryThread>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryInformationThread")))
-		{
-			void* start = nullptr;
-			if (query(GetCurrentThread(), 9 /* ThreadQuerySetWin32StartAddress */, &start, sizeof(start), nullptr) == 0)
-				plugin = PluginOf(ModuleAt(start));
-		}
-		return plugin;
+		return PluginOf(ThreadStartModule());
 	}
 
 	LONG WINAPI OnCrash(EXCEPTION_POINTERS* info)
@@ -996,11 +1029,17 @@ namespace
 			windowThread ? "window (plugin editor)" : "audio or plugin worker");
 
 		const std::wstring plugin = CrashingPlugin(address);
-		Log("host: crash attributed to %ls%ls%ls", plugin.empty() ? L"no plugin" : plugin.c_str(),
-			g_loadingNow[0] ? L", while loading " : L"", g_loadingNow);
+		const std::wstring starter = ModuleName(ThreadStartModule());
+		const bool graphics = plugin.empty() && IsGraphicsDriver(starter.c_str());
+		Log("host: crash attributed to %ls%ls%ls%ls%ls", plugin.empty() ? L"no plugin" : plugin.c_str(),
+			g_loadingNow[0] ? L", while loading " : L"", g_loadingNow,
+			graphics ? L", on a graphics-driver thread; windows open: " : L"", graphics ? g_openWindowNames : L"");
 		WriteString(L"LastCrash", plugin);              // the plugin, or empty when none could be named
 		WriteString(L"LastCrashModule", moduleName);    // where the fault surfaced
 		WriteString(L"LastCrashLoading", g_loadingNow);
+		// A graphics-driver thread: the driver module, and the plugins drawing with the GPU (their windows were open).
+		WriteString(L"LastCrashGraphics", graphics ? starter : std::wstring());
+		WriteString(L"LastCrashWindows", graphics ? std::wstring(g_openWindowNames) : std::wstring());
 		WriteDword(L"LastCrashAt", static_cast<DWORD>(GetTickCount64() / 1000));   // seconds since boot, same clock in the game
 
 		const std::wstring folder = DataDirectory();

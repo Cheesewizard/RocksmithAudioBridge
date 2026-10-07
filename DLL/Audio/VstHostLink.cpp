@@ -541,9 +541,14 @@ namespace VstHostLink
 			const std::string plugin = Utf8(ReadString(L"LastCrash"));
 			const std::string module = Utf8(ReadString(L"LastCrashModule"));
 			const std::string loading = Utf8(ReadString(L"LastCrashLoading"));
+			const std::string graphics = Utf8(ReadString(L"LastCrashGraphics"));
+			const std::string windows = Utf8(ReadString(L"LastCrashWindows"));
 			WriteDword(L"LastCrashAt", 0);   // handled
 			std::string what;
 			if (!plugin.empty()) what = plugin + " crashed (a fault in that plugin's code)";
+			else if (!graphics.empty())
+				what = "Tone designer crashed in the graphics driver (" + graphics + ")" + (windows.empty() ? std::string()
+					: ", most likely from " + windows + ": " + (windows.find(',') == std::string::npos ? "its window was the only one drawing with the graphics card" : "their windows were the only ones drawing with the graphics card"));
 			else if (!loading.empty()) what = "Tone designer crashed while loading " + loading + " (the fault surfaced in " + (module.empty() ? std::string("Windows") : module) + ", so the plugin cannot be named for certain)";
 			else what = "Tone designer crashed (in " + (module.empty() ? std::string("an unknown module") : module) + ")";
 			while (!g_crashRestarts.empty() && now - g_crashRestarts.front() > kCrashWindowMs) g_crashRestarts.pop_front();
