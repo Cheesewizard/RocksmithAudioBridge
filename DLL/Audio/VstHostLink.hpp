@@ -47,6 +47,12 @@ namespace VstHostLink
 		std::string songKey;          // the song being played, empty outside songs
 		std::string songTone;         // the tone assigned to that song
 		std::string defaultTone;      // loads for songs without a tone of their own (empty: none)
+		// Fast tone changes: plugins the host keeps loaded outside the chain (a tone using them switches at once).
+		std::vector<std::wstring> spares;
+		std::string preloadingName;   // a plugin loading in the background now (starred, or the highlighted song's)
+		int keepRecent = 4;           // plugins that left the chain kept loaded
+		bool preloadStarred = false;  // starred plugins kept loaded, loaded in the background
+		std::vector<std::wstring> preloadFailed;   // starred plugins that went down while loading that way
 	};
 
 	// What a plugin is, from its VST3 sub categories (moduleinfo.json); Unknown when the bundle does not say.
@@ -93,6 +99,8 @@ namespace VstHostLink
 	void SetAutoStart(bool on);
 	void SetMuteWhileTuning(bool on);   // the chain goes quiet in the tuner screens
 	void SetPopout(bool wanted);
+	void SetKeepRecent(int count);       // 0 = unload plugins as they leave the chain
+	void SetPreloadStarred(bool on);     // also lets the ones that failed that way be tried again
 	void DismissCrashNote();
 
 	// Chain commands (queued; the host handles them in order). AddPlugin starts the host when it is not running.

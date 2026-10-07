@@ -23,6 +23,7 @@ namespace VstHostLink
 		constexpr wchar_t kHostMutex[] = L"Local\\RocksmithAudioBridge.VstHost";   // held by the running host (Main.cpp)
 		constexpr ULONGLONG kSnapshotMs = 200;
 		constexpr ULONGLONG kSongPollMs = 500;
+		constexpr ULONGLONG kPrepareDwellMs = 2000;   // a song highlighted this long gets its tone's plugins loaded
 		constexpr ULONGLONG kHungMs = 6000;
 
 		HANDLE g_mapping = nullptr;
@@ -59,6 +60,10 @@ namespace VstHostLink
 		ULONGLONG g_songPolledAt = 0;
 		std::string g_songKey;           // the song being played, empty outside songs
 		std::string g_appliedSong;       // the song whose tone was last applied
+		std::string g_highlighted;       // the song list's highlighted song (its preview plays), and since when
+		ULONGLONG g_highlightedAt = 0;
+		std::string g_preparedSong;      // the last one whose tone's plugins the host was asked to get ready
+		std::string g_lastMenu;
 		std::string g_toneBeforeSong;    // the player's tone before a song tone replaced it
 
 		VstHostControl::Shared* Shared()
@@ -154,7 +159,7 @@ namespace VstHostLink
 			// long as the process is. Opening a big plugin's window (AmpliTube) pauses it too, for a few seconds:
 			// still running up to kHungMs, after which the page offers Force close (hostHung).
 			if (HostProcessGone()) return false;
-			return shared->loading != 0 || now - g_hostBeatSeenAt <= kHungMs;
+			return shared->loading != 0 || shared->preloading != 0 || now - g_hostBeatSeenAt <= kHungMs;
 		}
 
 		void Launch(const std::wstring& plugin)
@@ -420,6 +425,9 @@ namespace VstHostLink
 			size_t songToneCount = 0;
 			std::vector<std::wstring> scanFolders;
 			std::string defaultTone;   // loads when a song without a tone of its own starts (empty: none)
+			int keepRecent = 4;
+			bool preloadStarred = false;
+			std::vector<std::wstring> preloadFailed;
 			unsigned version = 0;
 		};
 		std::mutex g_slowLock;
@@ -445,6 +453,9 @@ namespace VstHostLink
 				fresh.songToneCount = CountSongTones();
 				fresh.scanFolders = ExtraFolders();
 				fresh.defaultTone = Utf8(ReadString(L"DefaultTone"));
+				fresh.keepRecent = static_cast<int>(ReadDword(L"KeepRecentPlugins", 4));
+				fresh.preloadStarred = ReadDword(L"PreloadStarred", 0) != 0;
+				fresh.preloadFailed = ReadList(L"PreloadFailed");
 				{
 					std::lock_guard<std::mutex> lock(g_slowLock);
 					fresh.songKey = g_slow.songKey;
@@ -478,6 +489,23 @@ namespace VstHostLink
 			return read(g_slow);
 		}
 
+		// The song list's highlighted song (its preview playing gives its key): after a moment on it, the host loads
+		// the plugins its tone (or the default tone) needs as spares, while the chain plays on unchanged. Starting the
+		// song then switches at once. The key outside the song list is the last song previewed; asking again for the
+		// same song does nothing, and the host skips plugins it has loaded already.
+		void PrepareHighlighted(ULONGLONG now)
+		{
+			const std::string key = GameState::GetSongKey();
+			if (key != g_highlighted) { g_highlighted = key; g_highlightedAt = now; return; }
+			if (key.empty() || key == g_preparedSong || now - g_highlightedAt < kPrepareDwellMs) return;
+			g_preparedSong = key;
+			std::string tone = SongTone(key);
+			if (tone.empty()) tone = ReadSlow([](SlowState& slow) { return slow.defaultTone; });
+			if (tone.empty() || ReadSlow([](SlowState& slow) { return slow.keepRecent; }) <= 0) return;
+			LOG_INFO("(VST HOST) song " << key << " highlighted: getting its tone '" << tone << "' ready" << std::endl);
+			Queue(Command::PrepareTone, 0, 0, Wide(tone));
+		}
+
 		// Song tones: entering a song with an assigned tone loads it; entering one without, after a song tone was
 		// loaded, goes back to the tone the player had before.
 		void FollowSong(VstHostControl::Shared* shared, bool hostRunning)
@@ -485,7 +513,20 @@ namespace VstHostLink
 			const ULONGLONG now = GetTickCount64();
 			if (now - g_songPolledAt < kSongPollMs) return;
 			g_songPolledAt = now;
-			const std::string songKey = GameState::IsInSong() ? GameState::GetSongKey() : std::string();
+			const bool inSong = GameState::IsInSong();
+			const std::string menu = GameState::GetCurrentMenu();
+			// The tuner and calibration before a song: the song is chosen, so its tone can load now (the player tunes
+			// meanwhile). SelectionListDialog is left out: the game uses it for other lists too.
+			const bool aboutToPlay = !inSong && (menu.find("PreSongTuner") != std::string::npos || menu.find("CalibrationMeter_PreGame") != std::string::npos);
+			// The host loads starred plugins in the background only outside songs: one starting up costs CPU.
+			shared->preloadAllowed = inSong ? 0 : 1;
+			if (menu != g_lastMenu)
+			{
+				g_lastMenu = menu;
+				LOG_INFO("(VST HOST) menu " << menu << ", song key " << GameState::GetSongKey() << std::endl);
+			}
+			if (!inSong && !aboutToPlay && hostRunning) PrepareHighlighted(now);
+			const std::string songKey = inSong || aboutToPlay ? GameState::GetSongKey() : std::string();
 			if (songKey != g_songKey)
 			{
 				g_songKey = songKey;
@@ -605,6 +646,9 @@ namespace VstHostLink
 				s.exclusiveFullscreen = slow.exclusiveFullscreen;
 				s.songTone = slow.songKey == g_songKey ? slow.songTone : std::string();
 				s.defaultTone = slow.defaultTone;
+				s.keepRecent = slow.keepRecent;
+				s.preloadStarred = slow.preloadStarred;
+				s.preloadFailed = slow.preloadFailed;
 				return 0;
 			});
 			s.songKey = g_songKey;
@@ -612,7 +656,7 @@ namespace VstHostLink
 			if (shared)
 			{
 				s.hostRunning = HostAlive(shared);
-				s.hostHung = !s.hostRunning && shared->hostPid != 0 && shared->loading == 0 && !HostProcessGone()
+				s.hostHung = !s.hostRunning && shared->hostPid != 0 && shared->loading == 0 && shared->preloading == 0 && !HostProcessGone()
 					&& GetTickCount64() - g_hostBeatSeenAt > kHungMs;
 				if (s.hostRunning)
 				{
@@ -636,6 +680,13 @@ namespace VstHostLink
 					char error[sizeof(shared->loadError) + 1]{};
 					memcpy(error, shared->loadError, sizeof(shared->loadError));
 					s.loadError = error;
+					const int spares = std::clamp(static_cast<int>(shared->spareCount), 0, VstHostControl::kMaxSpares);
+					for (int i = 0; i < spares; ++i)
+					{
+						wchar_t path[VstHostControl::kPathChars + 1]{};
+						memcpy(path, const_cast<const wchar_t*>(shared->sparePaths[i]), sizeof(shared->sparePaths[i]));
+						s.spares.push_back(path);
+					}
 				}
 				s.busy = shared->loading != 0 || !g_commands.empty() || shared->commandDone != shared->commandSeq;
 				s.popoutWanted = shared->popoutWanted != 0;
@@ -698,6 +749,12 @@ namespace VstHostLink
 			s.loadingSeconds = (GetTickCount64() - loadingSince) / 1000.0f;
 		}
 		else loadingSince = 0;
+		if (shared && shared->preloading != 0)
+		{
+			char name[VstHostControl::kNameChars + 1]{};
+			memcpy(name, shared->preloadText, VstHostControl::kNameChars);
+			s.preloadingName = name;
+		}
 		return s;
 	}
 
@@ -849,6 +906,21 @@ namespace VstHostLink
 	{
 		WriteDword(L"AutoStart", on ? 1 : 0);
 		ReadSlow([&](SlowState& slow) { slow.autoStart = on; return 0; });
+		g_snapshotAt = 0;
+	}
+
+	void SetKeepRecent(int count)
+	{
+		WriteDword(L"KeepRecentPlugins", static_cast<DWORD>(std::clamp(count, 0, 16)));
+		KickSlow();
+		g_snapshotAt = 0;
+	}
+
+	void SetPreloadStarred(bool on)
+	{
+		WriteDword(L"PreloadStarred", on ? 1 : 0);
+		WriteString(L"PreloadFailed", {});   // a fresh start for plugins that failed to load in the background
+		KickSlow();
 		g_snapshotAt = 0;
 	}
 

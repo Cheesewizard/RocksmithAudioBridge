@@ -10,17 +10,18 @@
 
 namespace VstHostControl
 {
-	// v5: one window per plugin (openWindows, HideSlot). v4: slot paths, chain bypass and the Tone designer page's
+	// v6: spare plugins kept loaded (preloading, sparePaths, preloadAllowed). v5: one window per plugin (openWindows, HideSlot). v4: slot paths, chain bypass and the Tone designer page's
 	// commands. v3: plugin chains, tones, levels. A new mapping name per version, so an old host and a new overlay
 	// never meet.
-	constexpr wchar_t kMappingName[] = L"Local\\RocksmithAudioBridge.VstHost.v5";
+	constexpr wchar_t kMappingName[] = L"Local\\RocksmithAudioBridge.VstHost.v6";
 	constexpr uint32_t kMagic = 0x56424152;   // "RABV"
-	constexpr uint32_t kVersion = 5;
+	constexpr uint32_t kVersion = 6;
 	constexpr int kBeatMs = 250;              // both sides bump their beat at least this often
 	constexpr int kAliveMs = 1500;            // a side is gone when its beat stops this long
 	constexpr int kPathChars = 520;
 	constexpr int kMaxSlots = 8;
 	constexpr int kNameChars = 64;
+	constexpr int kMaxSpares = 16;
 
 	// Overlay -> host. The overlay writes op/arg/text, then bumps commandSeq; the host acts and sets commandDone
 	// to the sequence it handled. Paths and tone names are in text.
@@ -43,6 +44,7 @@ namespace VstHostControl
 		SetChainBypass = 14,// arg = 0/1: every plugin skipped (clean guitar); each slot keeps its own bypass
 		RenameTone = 15,    // text = old name, a newline, new name
 		HideSlot = 16,      // arg = slot: close its plugin window
+		PrepareTone = 17,   // text = tone name: load the plugins it needs as spares; the chain plays on unchanged
 	};
 
 	struct Slot
@@ -101,6 +103,15 @@ namespace VstHostControl
 		char loadingText[kNameChars];
 		volatile LONG loadingStep;
 		volatile LONG loadingTotal;
+
+		// Written by the host (v6): plugins kept loaded outside the chain, so tones that use them switch at once
+		// (VstHost Chain.hpp, spares). Starred plugins can be loaded in the background, one at a time.
+		volatile LONG preloading;      // 1 while one loads that way (the beat pauses meanwhile)
+		char preloadText[kNameChars];  // which (UTF-8, its file name)
+		volatile LONG spareCount;
+		wchar_t sparePaths[kMaxSpares][kPathChars];
+		// Written by the overlay (v6).
+		volatile LONG preloadAllowed;  // 0 while a song plays: a plugin starting up could cost late buffers
 	};
 
 	// Creates or opens the block. Returns nullptr on failure; `mapping` must stay open while it is used.

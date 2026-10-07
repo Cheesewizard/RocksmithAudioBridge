@@ -63,8 +63,95 @@ namespace VstHost
 		if (m_frames > 0) m_running = true;
 	}
 
+	bool Chain::HasSpare(const std::wstring& path) const
+	{
+		return std::any_of(m_spares.begin(), m_spares.end(), [&](const Spare& spare) { return _wcsicmp(spare.path.c_str(), path.c_str()) == 0; });
+	}
+
+	bool Chain::IsLoaded(const std::wstring& path) const
+	{
+		return HasSpare(path) || std::any_of(m_slots.begin(), m_slots.end(), [&](const std::unique_ptr<Slot>& slot) { return _wcsicmp(slot->path.c_str(), path.c_str()) == 0; });
+	}
+
+	// The newest spare of that plugin, taken out of the spares.
+	std::unique_ptr<PluginHost> Chain::TakeSpare(const std::wstring& path)
+	{
+		for (size_t i = m_spares.size(); i-- > 0;)
+			if (_wcsicmp(m_spares[i].path.c_str(), path.c_str()) == 0)
+			{
+				std::unique_ptr<PluginHost> plugin = std::move(m_spares[i].plugin);
+				m_spares.erase(m_spares.begin() + static_cast<std::ptrdiff_t>(i));
+				return plugin;
+			}
+		return nullptr;
+	}
+
+	// A plugin leaving the chain: its settings saved (its starting point next time), its window closed, stopped.
+	void Chain::Park(std::unique_ptr<PluginHost> plugin, const std::wstring& path)
+	{
+		if (!plugin) return;
+		plugin->SaveState();
+		plugin->CloseEditor();
+		plugin->Suspend();
+		m_spares.push_back({ std::move(plugin), path });
+		Trim();
+	}
+
+	// Keeps one spare of each `always` plugin and the newest `m_keepRecent` others; unloads the rest.
+	void Chain::Trim()
+	{
+		std::vector<bool> keep(m_spares.size(), false);
+		std::vector<std::wstring> pinned;
+		int recent = 0;
+		auto has = [](const std::vector<std::wstring>& list, const std::wstring& path) {
+			return std::any_of(list.begin(), list.end(), [&](const std::wstring& p) { return _wcsicmp(p.c_str(), path.c_str()) == 0; });
+		};
+		for (size_t i = m_spares.size(); i-- > 0;)
+		{
+			const std::wstring& path = m_spares[i].path;
+			if (has(m_keepAlways, path) && !has(pinned, path)) { keep[i] = true; pinned.push_back(path); }
+			else if (recent < m_keepRecent) { keep[i] = true; ++recent; }
+		}
+		for (size_t i = m_spares.size(); i-- > 0;)
+			if (!keep[i])
+			{
+				Log("spares: unloading %ls", m_spares[i].path.c_str());
+				m_spares.erase(m_spares.begin() + static_cast<std::ptrdiff_t>(i));
+			}
+	}
+
+	void Chain::SetKeep(int recent, std::vector<std::wstring> always)
+	{
+		recent = std::clamp(recent, 0, 16);
+		if (recent == m_keepRecent && always == m_keepAlways) return;
+		m_keepRecent = recent;
+		m_keepAlways = std::move(always);
+		Trim();
+	}
+
+	bool Chain::PreloadOne(const std::wstring& path, std::string& error, bool recent)
+	{
+		auto plugin = std::make_unique<PluginHost>();
+		if (!plugin->Load(path, error)) return false;
+		plugin->Suspend();
+		if (recent) m_spares.push_back(Spare{ std::move(plugin), path });
+		else m_spares.insert(m_spares.begin(), Spare{ std::move(plugin), path });   // oldest: Trim keeps a starred one anyway
+		Log("spares: %ls loaded in the background (%d kept)", path.c_str(), SpareCount());
+		Trim();
+		return true;
+	}
+
 	bool Chain::LoadSlot(Slot& slot, const std::wstring& path, std::string& error)
 	{
+		if (std::unique_ptr<PluginHost> spare = TakeSpare(path))
+		{
+			// Already loaded: only prepared for the stream (a fraction of a second).
+			if (m_frames > 0 && !spare->Prepare(m_frames, error)) return false;
+			slot.plugin = std::move(spare);
+			slot.path = path;
+			Log("load: %ls was kept loaded, no load needed", path.c_str());
+			return true;
+		}
 		if (m_report) m_report(path, m_loadStep, m_loadTotal);
 		auto plugin = std::make_unique<PluginHost>();
 		if (!plugin->Load(path, error)) return false;
@@ -97,7 +184,7 @@ namespace VstHost
 		std::swap(m_slots[index], slot);
 		m_structureDirty = true;
 		Resume();
-		slot->plugin->SaveState();   // the replaced plugin keeps its settings for next time
+		Park(std::move(slot->plugin), slot->path);   // keeps its settings for next time, and stays loaded a while
 		Log("chain: slot %d is now %ls", index + 1, path.c_str());
 		return true;
 	}
@@ -110,7 +197,7 @@ namespace VstHost
 		m_slots.erase(m_slots.begin() + index);
 		m_structureDirty = true;
 		Resume();
-		removed->plugin->SaveState();
+		Park(std::move(removed->plugin), removed->path);
 		Log("chain: removed slot %d", index + 1);
 	}
 
@@ -156,7 +243,17 @@ namespace VstHost
 		old.swap(m_slots);
 		m_structureDirty = true;
 		Resume();
+		for (auto& slot : old) Park(std::move(slot->plugin), slot->path);
+	}
+
+	void Chain::ReleaseAll()
+	{
+		Pause();
+		std::vector<std::unique_ptr<Slot>> old;
+		old.swap(m_slots);
 		for (auto& slot : old) slot->plugin->SaveState();
+		old.clear();
+		m_spares.clear();   // their settings were saved when they left the chain
 	}
 
 	bool Chain::Prepare(int frames, std::string& error)
@@ -278,6 +375,45 @@ namespace VstHost
 		return ok;
 	}
 
+	std::vector<std::wstring> Chain::TonePlugins(const std::wstring& file)
+	{
+		std::vector<std::wstring> paths;
+		FILE* in = nullptr;
+		if (_wfopen_s(&in, file.c_str(), L"rb") != 0 || !in) return paths;
+		char magic[sizeof(kToneMagic)]{};
+		int32_t levels[2]{};
+		uint32_t count = 0;
+		bool ok = fread(magic, 1, sizeof(magic), in) == sizeof(magic);
+		const bool v1 = ok && std::memcmp(magic, kToneMagicV1, sizeof(magic)) == 0;
+		ok = ok && (v1 || std::memcmp(magic, kToneMagic, sizeof(magic)) == 0)
+			&& fread(levels, sizeof(levels), 1, in) == 1 && fread(&count, sizeof(count), 1, in) == 1 && count <= kMaxSlots;
+		for (uint32_t i = 0; ok && i < count; ++i)
+		{
+			std::vector<char> path, skip;
+			uint8_t bypass = 0;
+			ok = ReadBlob(in, path) && fread(&bypass, 1, 1, in) == 1 && ReadBlob(in, skip) && (!v1 || ReadBlob(in, skip));
+			if (ok) paths.emplace_back(reinterpret_cast<const wchar_t*>(path.data()), path.size() / sizeof(wchar_t));
+		}
+		fclose(in);
+		return paths;
+	}
+
+	std::vector<std::wstring> Chain::NotLoaded(const std::vector<std::wstring>& plugins) const
+	{
+		std::vector<bool> slotUsed(m_slots.size(), false), spareUsed(m_spares.size(), false);
+		std::vector<std::wstring> missing;
+		for (const std::wstring& path : plugins)
+		{
+			bool covered = false;
+			for (size_t j = 0; j < m_slots.size() && !covered; ++j)
+				if (!slotUsed[j] && _wcsicmp(m_slots[j]->path.c_str(), path.c_str()) == 0) slotUsed[j] = covered = true;
+			for (size_t k = 0; k < m_spares.size() && !covered; ++k)
+				if (!spareUsed[k] && _wcsicmp(m_spares[k].path.c_str(), path.c_str()) == 0) spareUsed[k] = covered = true;
+			if (!covered) missing.push_back(path);
+		}
+		return missing;
+	}
+
 	bool Chain::LoadTone(const std::wstring& file, std::string& error, std::string& missing)
 	{
 		FILE* in = nullptr;
@@ -315,14 +451,20 @@ namespace VstHost
 		// Plugins the new tone shares with the chain playing now are kept and only get the tone's settings (a
 		// fraction of a second); loading a plugin from scratch takes seconds (AmpliTube, Helix). Each running slot
 		// is matched at most once, by plugin file, in chain order, so a tone with two copies of a plugin keeps two.
+		// Plugins kept loaded as spares are next: no load, a moment to prepare (LoadSlot takes them).
 		std::vector<int> reuse(entries.size(), -1);
 		std::vector<bool> taken(m_slots.size(), false);
+		std::vector<bool> fromSpare(entries.size(), false);
+		std::vector<bool> spareUsed(m_spares.size(), false);
 		int toLoad = 0;
 		for (size_t e = 0; e < entries.size(); ++e)
 		{
 			for (size_t j = 0; j < m_slots.size() && reuse[e] < 0; ++j)
 				if (!taken[j] && _wcsicmp(m_slots[j]->path.c_str(), entries[e].path.c_str()) == 0) { reuse[e] = static_cast<int>(j); taken[j] = true; }
-			if (reuse[e] < 0) ++toLoad;
+			if (reuse[e] >= 0) continue;
+			for (size_t k = 0; k < m_spares.size() && !fromSpare[e]; ++k)
+				if (!spareUsed[k] && _wcsicmp(m_spares[k].path.c_str(), entries[e].path.c_str()) == 0) { spareUsed[k] = true; fromSpare[e] = true; }
+			if (!fromSpare[e]) ++toLoad;
 		}
 
 		// Load the plugins that are new, while the old chain keeps playing; then swap in one step.
@@ -333,7 +475,7 @@ namespace VstHost
 		{
 			Entry& entry = entries[e];
 			if (reuse[e] >= 0) continue;
-			++m_loadStep;
+			if (!fromSpare[e]) ++m_loadStep;
 			auto slot = std::make_unique<Slot>();
 			std::string slotError;
 			if (GetFileAttributesW(entry.path.c_str()) == INVALID_FILE_ATTRIBUTES || !LoadSlot(*slot, entry.path, slotError))
@@ -365,8 +507,9 @@ namespace VstHost
 		}
 		m_slots.swap(slots);   // `slots` now holds the plugins the new tone does not use (and the kept ones' empty places)
 		Resume();
-		for (auto& old : slots) if (old) old->plugin->SaveState();
-		Log("tone: kept %d plugin(s), loaded %d", static_cast<int>(entries.size()) - toLoad, toLoad);
+		for (auto& old : slots) if (old && old->plugin) Park(std::move(old->plugin), old->path);
+		Log("tone: kept %d plugin(s) (%d of them spares), loaded %d", static_cast<int>(entries.size()) - toLoad,
+			static_cast<int>(std::count(fromSpare.begin(), fromSpare.end(), true)), toLoad);
 		SetLevels(levels[0], levels[1]);
 		m_structureDirty = false;
 		Log("tone: loaded %ls (%d plugin(s)%s%s%s)", file.c_str(), Count(), v1 ? ", converted from the pre-JUCE format" : "",

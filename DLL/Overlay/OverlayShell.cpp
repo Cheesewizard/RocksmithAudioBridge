@@ -892,6 +892,11 @@ namespace Overlay
 					[&](const VstHostLink::SlotView& slot) { return _wcsicmp(slot.path.c_str(), path.c_str()) == 0; });
 			}
 
+			bool KeptLoaded(const VstHostLink::Snapshot& vst, const std::wstring& path)
+			{
+				return std::any_of(vst.spares.begin(), vst.spares.end(), [&](const std::wstring& p) { return _wcsicmp(p.c_str(), path.c_str()) == 0; });
+			}
+
 			bool HasUnsavedChanges(const VstHostLink::Snapshot& vst) { return vst.toneModified && !vst.slots.empty(); }
 
 			// Loading a tone or starting a new one replaces the chain: ask first when it has changes that are not saved.
@@ -1050,6 +1055,29 @@ namespace Overlay
 				if (ImGui::MenuItem("Compare with the game's amp", nullptr, amp.comparing)) ExternalAmp::SetCompare(!amp.comparing);
 				if (ImGui::MenuItem("Mute while tuning", nullptr, vst.muteWhileTuning)) VstHostLink::SetMuteWhileTuning(!vst.muteWhileTuning);
 				if (ImGui::MenuItem("Start with the game", nullptr, vst.autoStart)) VstHostLink::SetAutoStart(!vst.autoStart);
+				ImGui::Separator();
+				// Fast tone changes: plugins kept loaded outside the chain (the host's spares). A tone that uses them
+				// switches in a moment; a heavy amp sim loaded from scratch takes seconds. They cost memory, not CPU.
+				if (ImGui::BeginMenu("Fast tone changes")) {
+					ImGui::TextDisabled("Plugins that leave the chain stay loaded:");
+					static const int counts[] = { 0, 2, 4, 8 };
+					for (int count : counts) {
+						const std::string label = count == 0 ? "No, unload them" : "The last " + std::to_string(count);
+						if (ImGui::MenuItem(label.c_str(), nullptr, vst.keepRecent == count)) VstHostLink::SetKeepRecent(count);
+					}
+					Hint("Switching back to a tone that uses them is then instant. Each one takes memory while loaded.");
+					ImGui::Separator();
+					if (ImGui::MenuItem("Keep starred plugins loaded", nullptr, vst.preloadStarred)) VstHostLink::SetPreloadStarred(!vst.preloadStarred);
+					Hint("Loads every plugin starred in the plugin browser in the background (outside songs), so any tone using them switches at once. Star only the ones you use.");
+					for (const std::wstring& failed : vst.preloadFailed) {
+						const size_t slash = failed.find_last_of(L"\\/");
+						const std::string name = Utf8(slash == std::wstring::npos ? failed : failed.substr(slash + 1));
+						ImGui::TextDisabled("Not loaded in the background: %s (it crashed doing that)", name.c_str());
+					}
+					ImGui::Separator();
+					ImGui::TextDisabled("The song list's highlighted song gets its tone ready too.");
+					ImGui::EndMenu();
+				}
 				ImGui::Separator();
 				if (ImGui::MenuItem("Rescan plugins")) VstHostLink::Rescan();
 				if (ImGui::MenuItem("Add plugin folder...")) VstHostLink::AddScanFolder();
@@ -1663,7 +1691,9 @@ namespace Overlay
 				DrawIcon(list, ImVec2(song.x + 8.0f, song.y + ImGui::GetFontSize() * 0.5f), Glyph::MusicNote, Ink::Soft);
 				float sx = song.x + 22.0f;
 				if (vst.songKey.empty()) {
-					Text(list, caption, ImVec2(sx, song.y + 2.0f), Ink::Dim, "Start a song to give it its own tone.");
+					const std::string note = vst.preloadingName.empty() ? std::string("Start a song to give it its own tone.")
+						: "Getting " + vst.preloadingName + " ready in the background, for fast tone changes...";
+					Text(list, caption, ImVec2(sx, song.y + 2.0f), Ink::Dim, note.c_str());
 				}
 				else {
 					list->AddText(ImVec2(sx, song.y), Ink::Soft, vst.songKey.c_str());
@@ -1740,6 +1770,7 @@ namespace Overlay
 				if (VstHostLink::FailedToLoad(plugin.path)) { text = "Failed to load"; color = Ink::Bad; }
 				else if (InChain(vst, plugin.path)) { text = "In chain"; color = Ink::Good; }
 				else if (plugin.kind == VstHostLink::Kind::Instrument) { text = "Not for guitar"; color = Ink::Amber; }
+				else if (KeptLoaded(vst, plugin.path)) { text = "Loaded"; color = Ink::Good; }
 				else { text = "Ready"; color = Ink::Good; }
 			}
 
@@ -1861,7 +1892,8 @@ namespace Overlay
 							else s.selectedPlugin = plugin.path;
 						}
 						if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && canAdd) VstHostLink::AddPlugin(plugin.path);
-						Hint("Double-click to add it to the end of the chain. Right-click for more. The star marks a favourite.");
+						Hint(vst.preloadStarred ? "Double-click to add it to the end of the chain. Right-click for more. Starred plugins are kept loaded, for fast tone changes."
+							: "Double-click to add it to the end of the chain. Right-click for more. The star marks a favourite.");
 						PushPopupPadding();
 						if (ImGui::BeginPopupContextItem("##pluginMenu")) {
 							s.selectedPlugin = plugin.path;

@@ -69,6 +69,9 @@ namespace
 	float g_inputMeter = 0.0f, g_outputMeter = 0.0f;
 	wchar_t g_loadingNow[128] = {};   // the plugin loading now, for a crash report (plain buffer: read in OnCrash)
 	wchar_t g_openWindowNames[256] = {};   // plugins whose windows are open, for a crash report (OnCrash)
+	ULONGLONG g_lastCommandAt = 0;    // the page's last command (background loading waits for a quiet moment)
+	bool g_preloadStarred = false;    // the page's "Keep starred plugins loaded"
+	std::vector<std::wstring> g_starred, g_preloadFailed;
 
 	bool ReadDword(const wchar_t* name, DWORD& value)
 	{
@@ -92,6 +95,31 @@ namespace
 	void WriteString(const wchar_t* name, const std::wstring& value)
 	{
 		RegSetKeyValueW(HKEY_CURRENT_USER, kSettingsKey, name, REG_SZ, value.c_str(), static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t)));
+	}
+
+	// A ';'-separated list (the page writes them: FavouritePlugins, PreloadFailed); any length.
+	std::vector<std::wstring> ReadList(const wchar_t* name)
+	{
+		DWORD size = 0;
+		if (RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, name, RRF_RT_REG_SZ, nullptr, nullptr, &size) != ERROR_SUCCESS || size == 0) return {};
+		std::wstring text(size / sizeof(wchar_t) + 1, L'\0');
+		if (RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, name, RRF_RT_REG_SZ, nullptr, text.data(), &size) != ERROR_SUCCESS) return {};
+		text.resize(wcslen(text.c_str()));
+		std::vector<std::wstring> items;
+		for (size_t start = 0; start < text.size();)
+		{
+			const size_t end = text.find(L';', start);
+			const std::wstring item = text.substr(start, end == std::wstring::npos ? std::wstring::npos : end - start);
+			if (!item.empty()) items.push_back(item);
+			if (end == std::wstring::npos) break;
+			start = end + 1;
+		}
+		return items;
+	}
+
+	bool ListHas(const std::vector<std::wstring>& items, const std::wstring& item)
+	{
+		return std::any_of(items.begin(), items.end(), [&](const std::wstring& i) { return _wcsicmp(i.c_str(), item.c_str()) == 0; });
 	}
 
 	std::wstring DataDirectory()
@@ -586,6 +614,14 @@ namespace
 		g_control->toneModified = g_toneModified ? 1 : 0;
 		g_control->inputTenths = g_chain.InputTenths();
 		g_control->outputTenths = g_chain.OutputTenths();
+		const int spares = std::min(g_chain.SpareCount(), VstHostControl::kMaxSpares);
+		for (int i = 0; i < VstHostControl::kMaxSpares; ++i)
+		{
+			wchar_t* destination = const_cast<wchar_t*>(g_control->sparePaths[i]);
+			memset(destination, 0, sizeof(g_control->sparePaths[i]));
+			if (i < spares) wcsncpy_s(destination, VstHostControl::kPathChars, g_chain.SparePath(i).c_str(), _TRUNCATE);
+		}
+		g_control->spareCount = spares;
 		InterlockedIncrement(&g_control->stateSeq);
 	}
 
@@ -628,6 +664,57 @@ namespace
 	}
 
 	void MarkModified() { g_toneModified = true; }
+
+	// Spares (Chain.hpp): the page's settings, read every couple of seconds. KeepRecentPlugins: how many plugins
+	// that left the chain stay loaded. PreloadStarred: the plugins starred in the browser are kept loaded too, and
+	// loaded in the background when they are not.
+	void RefreshKeepSettings()
+	{
+		DWORD recent = 4, starred = 0;
+		ReadDword(L"KeepRecentPlugins", recent);
+		ReadDword(L"PreloadStarred", starred);
+		g_preloadStarred = starred != 0;
+		g_starred = g_preloadStarred ? ReadList(L"FavouritePlugins") : std::vector<std::wstring>{};
+		g_preloadFailed = ReadList(L"PreloadFailed");
+		const int before = g_chain.SpareCount();
+		g_chain.SetKeep(static_cast<int>(recent), g_starred);
+		if (g_chain.SpareCount() != before) PublishState();
+	}
+
+	// One starred plugin that is not loaded yet, loaded as a spare. Only while no song plays (the page says so; a
+	// plugin starting up can cost the stream late buffers), with no command waiting, and a few seconds after the
+	// last one, so it never gets in the way of what the player is doing. One per call; the call comes again.
+	// PreloadingNow names it meanwhile: if it takes the host down, the next start puts it on PreloadFailed (main)
+	// and it is not tried again until the page's switch is turned off and on.
+	void PreloadStep()
+	{
+		if (!g_preloadStarred || !g_control || !g_control->preloadAllowed) return;
+		if (g_control->commandSeq != g_handledCommand || GetTickCount64() - g_lastCommandAt < 4000) return;
+		for (const std::wstring& path : g_starred)
+		{
+			if (g_chain.IsLoaded(path) || ListHas(g_preloadFailed, path) || GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) continue;
+			std::wstring name = path.substr(path.find_last_of(L"\\/") + 1);
+			if (name.size() > 5 && _wcsicmp(name.c_str() + name.size() - 5, L".vst3") == 0) name.resize(name.size() - 5);
+			Log("spares: loading %ls in the background (starred)", name.c_str());
+			WriteString(L"PreloadingNow", path);
+			wcsncpy_s(g_loadingNow, name.c_str(), _TRUNCATE);
+			CopyText(g_control->preloadText, sizeof(g_control->preloadText), Utf8(name));
+			InterlockedExchange(&g_control->preloading, 1);
+			std::string error;
+			if (!g_chain.PreloadOne(path, error))
+			{
+				Log("spares: %ls did not load (%s); not tried again", name.c_str(), error.c_str());
+				g_preloadFailed.push_back(path);
+			}
+			WriteString(L"PreloadingNow", {});
+			g_loadingNow[0] = 0;
+			InterlockedIncrement(&g_control->hostBeat);
+			InterlockedExchange(&g_control->preloading, 0);
+			CopyText(g_control->preloadText, sizeof(g_control->preloadText), {});
+			PublishState();
+			return;
+		}
+	}
 
 	// One command from the Tone designer page.
 	void RunCommand(VstHostControl::Command op, int arg, int arg2, const std::wstring& text)
@@ -762,6 +849,32 @@ namespace
 			if (_wcsicmp(g_toneName.c_str(), oldName.c_str()) == 0) { g_toneName = newName; RememberTone(); }
 			break;
 		}
+		case Command::PrepareTone:
+		{
+			// The song list's highlighted song (the page asks after a moment on it): its tone's plugins are loaded
+			// as spares while the chain plays on, so starting the song switches at once. No more than the recent
+			// limit keeps, or Trim would unload them again straight away.
+			const std::vector<std::wstring> needed = g_chain.NotLoaded(Chain::TonePlugins(ToneFile(text)));
+			int room = g_chain.KeepRecent();
+			for (const std::wstring& path : needed)
+			{
+				if (room-- <= 0) break;
+				if (ListHas(g_preloadFailed, path) || GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) continue;
+				std::wstring name = path.substr(path.find_last_of(L"\\/") + 1);
+				if (name.size() > 5 && _wcsicmp(name.c_str() + name.size() - 5, L".vst3") == 0) name.resize(name.size() - 5);
+				Log("spares: loading %ls for tone %ls (the highlighted song's)", name.c_str(), text.c_str());
+				wcsncpy_s(g_loadingNow, name.c_str(), _TRUNCATE);
+				CopyText(g_control->preloadText, sizeof(g_control->preloadText), Utf8(name));
+				InterlockedExchange(&g_control->preloading, 1);
+				std::string loadError;
+				if (!g_chain.PreloadOne(path, loadError, true)) Log("spares: %ls did not load (%s)", name.c_str(), loadError.c_str());
+				g_loadingNow[0] = 0;
+				InterlockedIncrement(&g_control->hostBeat);
+				InterlockedExchange(&g_control->preloading, 0);
+				CopyText(g_control->preloadText, sizeof(g_control->preloadText), {});
+			}
+			break;
+		}
 		case Command::ClearChain:
 			CloseAllWindows();
 			g_chain.Clear();
@@ -780,6 +893,7 @@ namespace
 	{
 		if (!g_control || g_control->commandSeq == g_handledCommand) return;
 		g_handledCommand = g_control->commandSeq;
+		g_lastCommandAt = GetTickCount64();
 		wchar_t text[VstHostControl::kPathChars]{};
 		memcpy(text, const_cast<const wchar_t*>(g_control->commandText), sizeof(text) - sizeof(wchar_t));
 		RunCommand(static_cast<VstHostControl::Command>(g_control->commandOp), g_control->commandArg, g_control->commandArg2, text);
@@ -845,6 +959,8 @@ namespace
 				return 0;
 			}
 			if (g_chain.TakeRestartRequest()) StartAudio(window);
+			if (g_ticks % 4 == 0) RefreshKeepSettings();
+			PreloadStep();
 			if (g_chain.Dirty() && !g_toneModified) { g_toneModified = true; PublishState(); }
 			if (++g_ticks >= kAutosaveTicks)
 			{
@@ -1110,7 +1226,20 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 		InterlockedExchange(&g_control->hostPid, static_cast<LONG>(GetCurrentProcessId()));
 	}
 	g_chain.SetLoadReporter(ReportLoading);
+	// A starred plugin that took the host down while it loaded in the background (PreloadStep) is not tried again.
+	if (const std::wstring crashed = ReadString(L"PreloadingNow"); !crashed.empty())
+	{
+		std::vector<std::wstring> failed = ReadList(L"PreloadFailed");
+		if (!ListHas(failed, crashed)) failed.push_back(crashed);
+		std::wstring list;
+		for (const std::wstring& item : failed) list += (list.empty() ? L"" : L";") + item;
+		WriteString(L"PreloadFailed", list);
+		WriteString(L"PreloadingNow", {});
+		Log("spares: %ls went down with the host last time while loading in the background; not tried again", crashed.c_str());
+	}
+	RefreshKeepSettings();
 	RestoreChain(plugin, fromOverlay);
+	g_lastCommandAt = GetTickCount64();
 
 	g_instance = instance;
 	WNDCLASSEXW mainClass{ sizeof(mainClass) };
@@ -1142,7 +1271,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 	{
 		if (g_control) { InterlockedExchange(&g_control->hostPid, 0); EndLoading(); }
 		DestroyWindow(g_main);
-		g_chain.Clear();
+		g_chain.ReleaseAll();
 		ReleasePluginFormats();
 		OleUninitialize();
 		return 1;
@@ -1182,7 +1311,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 		InterlockedExchange(&g_control->hostPid, 0);
 	}
 	g_audio.Close();
-	g_chain.Clear();
+	g_chain.ReleaseAll();
 	ReleasePluginFormats();
 	if (g_font) DeleteObject(g_font);
 	Log("host: closed");

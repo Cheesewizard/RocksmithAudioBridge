@@ -4,6 +4,11 @@
 // each of which can be bypassed, with an input and an output trim around it. A chain with all its plugins'
 // settings is a "tone", saved as a file (see SaveTone for the format).
 //
+// Plugins that leave the chain are kept loaded for a while as spares (stopped, not processing), so a tone that uses
+// them again switches in a fraction of a second instead of the seconds a heavy amp sim takes to start. How many:
+// the last `recent` plus, when the player asks for it, one of each starred plugin, loaded in the background
+// (PreloadOne). Every load (Add, Replace, Duplicate, LoadTone) takes a spare of the same plugin first.
+//
 // Threads: the stream thread calls Process; everything else is the main thread. A structural change (add,
 // remove, move, load a tone) pauses the stream first (it plays silence for that moment) and waits until the
 // stream thread is out of the chain, so no plugin is ever touched by both threads at once.
@@ -31,7 +36,20 @@ namespace VstHost
 		void Move(int index, int delta);
 		void SetBypass(int index, bool bypass);
 		bool Duplicate(int index, std::string& error);   // the copy, with the same settings, goes right after it
-		void Clear();
+		void Clear();         // the plugins stay loaded as spares
+		void ReleaseAll();    // the chain and the spares, for shutdown (each plugin's settings saved)
+
+		// Spares. `always` are plugin files kept loaded whatever `recent` says (one each).
+		void SetKeep(int recent, std::vector<std::wstring> always);
+		bool IsLoaded(const std::wstring& path) const;   // in the chain or a spare
+		// Loads it as a spare. `recent`: counts as just used (kept by the recent limit); else as the oldest.
+		bool PreloadOne(const std::wstring& path, std::string& error, bool recent = false);
+		// The plugins a tone file uses that neither the chain nor a spare covers (a plugin used twice needs two).
+		static std::vector<std::wstring> TonePlugins(const std::wstring& file);
+		std::vector<std::wstring> NotLoaded(const std::vector<std::wstring>& plugins) const;
+		int KeepRecent() const { return m_keepRecent; }
+		int SpareCount() const { return static_cast<int>(m_spares.size()); }
+		const std::wstring& SparePath(int index) const { return m_spares[index].path; }
 
 		bool Prepare(int frames, std::string& error);   // every slot, for a (new) stream
 
@@ -74,11 +92,24 @@ namespace VstHost
 			std::atomic<bool> bypass{ false };
 		};
 
+		struct Spare
+		{
+			std::unique_ptr<PluginHost> plugin;
+			std::wstring path;
+		};
+
 		void Pause();
 		void Resume();
 		bool LoadSlot(Slot& slot, const std::wstring& path, std::string& error);
+		bool HasSpare(const std::wstring& path) const;
+		std::unique_ptr<PluginHost> TakeSpare(const std::wstring& path);
+		void Park(std::unique_ptr<PluginHost> plugin, const std::wstring& path);   // saves its settings first
+		void Trim();
 
 		std::vector<std::unique_ptr<Slot>> m_slots;
+		std::vector<Spare> m_spares;              // oldest first
+		int m_keepRecent = 4;
+		std::vector<std::wstring> m_keepAlways;
 		LoadReporter m_report;
 		int m_loadStep = 1, m_loadTotal = 1;   // LoadTone counts its plugins; one plugin otherwise
 		int m_frames = 0;
