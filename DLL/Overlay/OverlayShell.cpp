@@ -963,9 +963,9 @@ namespace Overlay
 				const bool valid = i >= 0 && i < count;
 				const bool idle = !vst.busy;
 				const bool windowOpen = valid && vst.slots[i].windowOpen;
-				if (ImGui::MenuItem(windowOpen ? "Bring window to front" : "Open window", "Double-click", false, valid)) OpenWindow(i);
+				if (ImGui::MenuItem(windowOpen ? "Bring window to front" : "Open window", "or double-click it", false, valid)) OpenWindow(i);
 				if (windowOpen && ImGui::MenuItem("Close window")) VstHostLink::HideSlot(i);
-				if (ImGui::MenuItem(valid && vst.slots[i].bypass ? "Turn on" : "Bypass", "Footswitch", false, valid && idle))
+				if (ImGui::MenuItem(valid && vst.slots[i].bypass ? "Turn on" : "Bypass", "or click its footswitch", false, valid && idle))
 					VstHostLink::SetBypass(i, !vst.slots[i].bypass);
 				ImGui::Separator();
 				if (ImGui::BeginMenu("Replace with", valid && idle)) {
@@ -1734,7 +1734,7 @@ namespace Overlay
 							s.selectedPlugin = plugin.path;
 							ImGui::TextDisabled("%s", plugin.name.c_str());
 							ImGui::Separator();
-							if (ImGui::MenuItem("Add to chain", "Double-click", false, canAdd)) VstHostLink::AddPlugin(plugin.path);
+							if (ImGui::MenuItem("Add to chain", "or double-click it", false, canAdd)) VstHostLink::AddPlugin(plugin.path);
 							if (ImGui::MenuItem("Replace selected pedal", nullptr, false, canReplace)) VstHostLink::ReplaceSlot(s.selected, plugin.path);
 							ImGui::Separator();
 							if (ImGui::MenuItem("Favourite", nullptr, favourite)) VstHostLink::SetFavourite(plugin.path, !favourite);
