@@ -50,11 +50,13 @@
     <ClCompile Include="Source\Main.cpp" />
     <ClCompile Include="Source\BridgeAudio.cpp" />
     <ClCompile Include="Source\PluginHost.cpp" />
+    <ClCompile Include="Source\Chain.cpp" />
     <ClCompile Include="Source\HostLog.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\BridgeAudio.hpp" />
     <ClInclude Include="Source\PluginHost.hpp" />
+    <ClInclude Include="Source\Chain.hpp" />
     <ClInclude Include="Source\HostLog.hpp" />
   </ItemGroup>
   <!-- The part of Steinberg's VST3 SDK (MIT, Lib\vst3sdk\LICENSE.txt) a host needs: the interfaces plus the

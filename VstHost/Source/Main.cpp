@@ -1,25 +1,34 @@
-// Rocksmith Audio Bridge VST host: plays the guitar through a VST3 plugin (an amp sim) while Rocksmith keeps
-// the clean signal for note detection. 64-bit, because Rocksmith is 32-bit and modern plugins are 64-bit only;
-// audio goes through the bridge driver's external amp link, the same path an external amp sim uses.
+// Rocksmith Audio Bridge VST host: plays the guitar through a chain of VST3 plugins (amp sims, pedals, effects)
+// while Rocksmith keeps the clean signal for note detection. 64-bit, because Rocksmith is 32-bit and modern
+// plugins are 64-bit only; audio goes through the bridge driver's external amp link, the same path an external
+// amp sim uses.
 //
-// The plugin's editor lives in a borderless, always-on-top popout over the game that shows and hides with the
-// overlay key (backslash), so the amp can be adjusted without leaving Rocksmith. This needs Rocksmith in
-// windowed or borderless fullscreen; nothing can draw over exclusive fullscreen.
+// The overlay's External amp page drives it through a shared block (DLL/Audio/VstHostControl.hpp): build the
+// chain, pick which plugin's window shows, save and load tones, set levels. The shown plugin's editor lives in a
+// borderless, always-on-top popout over the game that shows with the overlay, so the amp can be adjusted without
+// leaving Rocksmith. That needs Rocksmith in windowed or borderless fullscreen; nothing can draw over exclusive
+// fullscreen.
 //
-// Usage: RocksmithAudioBridgeVstHost.exe ["path\to\plugin.vst3"]
-// Without a path it reopens the last plugin, or asks for one.
+// Files (%APPDATA%\RocksmithAudioBridge\VstHost): Current.rabtone (the chain as last played, restored at start),
+// Tones\<name>.rabtone (saved tones), <plugin id>.state (each plugin's own settings, its starting point when added).
+//
+// Usage: RocksmithAudioBridgeVstHost.exe [--overlay] ["path\to\plugin.vst3"]
+// Restores the last chain; a plugin path is added to it if it is not in it yet. Started by hand with nothing to
+// play, it asks for a plugin (--overlay, used when the overlay starts it, never asks).
 
 #include "BridgeAudio.hpp"
+#include "Chain.hpp"
 #include "HostLog.hpp"
-#include "PluginHost.hpp"
 
 #include "../../DLL/Audio/VstHostControl.hpp"
 #include "public.sdk/source/vst/hosting/hostclasses.h"
 
 #include <Windows.h>
+#include <ShlObj.h>
 #include <commdlg.h>
 #include <shellapi.h>
 #include <algorithm>
+#include <cmath>
 #include <string>
 
 using namespace VstHost;
@@ -37,12 +46,13 @@ namespace
 	constexpr UINT kOverlayKey = VK_OEM_5;   // backslash, the game overlay's key (DLL/dllmain.cpp)
 	constexpr int kStripDip = 26;            // drag bar above the editor
 
-	PluginHost g_plugin;
+	Chain g_chain;
 	BridgeAudio g_audio;
 	HWND g_popout = nullptr;
 	HWND g_editor = nullptr;
 	HFONT g_font = nullptr;
 	std::wstring g_title;
+	int g_shown = -1;                 // slot whose editor the popout shows
 	int g_ticks = 0;
 	bool g_keyDown = false;
 	HANDLE g_controlMapping = nullptr;
@@ -50,8 +60,10 @@ namespace
 	LONG g_lastOverlayBeat = 0;
 	ULONGLONG g_overlayBeatSeenAt = 0;
 	bool g_savedWanted = false;
-	std::wstring g_pluginPath;   // the plugin running now
-	LONG g_handledLoad = 0;      // the overlay's last plugin switch request we acted on
+	LONG g_handledCommand = 0;
+	std::wstring g_toneName;          // the tone last loaded or saved
+	bool g_toneModified = false;
+	float g_inputMeter = 0.0f, g_outputMeter = 0.0f;
 
 	int Scale(int dip) { return MulDiv(dip, g_popout ? static_cast<int>(GetDpiForWindow(g_popout)) : 96, 96); }
 	int StripHeight() { return Scale(kStripDip); }
@@ -68,18 +80,60 @@ namespace
 		RegSetKeyValueW(HKEY_CURRENT_USER, kSettingsKey, name, REG_DWORD, &value, sizeof(value));
 	}
 
-	std::wstring ReadLastPlugin()
+	std::wstring ReadString(const wchar_t* name)
 	{
 		wchar_t value[MAX_PATH * 2]{};
 		DWORD size = sizeof(value);
-		if (RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, L"LastPlugin", RRF_RT_REG_SZ, nullptr, value, &size) != ERROR_SUCCESS) return {};
+		if (RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, name, RRF_RT_REG_SZ, nullptr, value, &size) != ERROR_SUCCESS) return {};
 		return value;
 	}
 
-	void WriteLastPlugin(const std::wstring& path)
+	void WriteString(const wchar_t* name, const std::wstring& value)
 	{
-		RegSetKeyValueW(HKEY_CURRENT_USER, kSettingsKey, L"LastPlugin", REG_SZ, path.c_str(),
-			static_cast<DWORD>((path.size() + 1) * sizeof(wchar_t)));
+		RegSetKeyValueW(HKEY_CURRENT_USER, kSettingsKey, name, REG_SZ, value.c_str(), static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t)));
+	}
+
+	std::wstring DataDirectory()
+	{
+		PWSTR appData = nullptr;
+		if (FAILED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, KF_FLAG_CREATE, nullptr, &appData))) return {};
+		std::wstring dir = std::wstring(appData) + L"\\RocksmithAudioBridge\\VstHost";
+		CoTaskMemFree(appData);
+		SHCreateDirectoryExW(nullptr, (dir + L"\\Tones").c_str(), nullptr);
+		return dir;
+	}
+
+	std::wstring CurrentChainFile() { return DataDirectory() + L"\\Current.rabtone"; }
+
+	// Tone names become file names: keep them to characters every file system takes.
+	std::wstring ToneFile(const std::wstring& name)
+	{
+		std::wstring safe;
+		for (wchar_t c : name) safe += (c < 32 || wcschr(L"<>:\"/\\|?*", c)) ? L'_' : c;
+		while (!safe.empty() && (safe.back() == L' ' || safe.back() == L'.')) safe.pop_back();
+		return safe.empty() ? std::wstring() : DataDirectory() + L"\\Tones\\" + safe + L".rabtone";
+	}
+
+	std::wstring Wide(const std::string& text)
+	{
+		std::wstring out(text.size(), wchar_t{});
+		out.resize(static_cast<size_t>(MultiByteToWideChar(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), out.data(), static_cast<int>(out.size()))));
+		return out;
+	}
+
+	std::string Utf8(const std::wstring& text)
+	{
+		if (text.empty()) return {};
+		const int size = WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+		std::string out(static_cast<size_t>(size), '\0');
+		WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), out.data(), size, nullptr, nullptr);
+		return out;
+	}
+
+	void CopyText(char* destination, size_t capacity, const std::string& text)
+	{
+		memset(destination, 0, capacity);
+		memcpy(destination, text.c_str(), std::min(text.size(), capacity - 1));
 	}
 
 	std::wstring AskForPlugin()
@@ -100,6 +154,12 @@ namespace
 	{
 		Log("error: %s", text.c_str());
 		MessageBoxA(nullptr, text.c_str(), "Rocksmith Audio Bridge VST host", MB_OK | MB_ICONWARNING | MB_TOPMOST);
+	}
+
+	void SetLoadError(const std::string& text)
+	{
+		if (!text.empty()) Log("problem: %s", text.c_str());
+		if (g_control) CopyText(g_control->loadError, sizeof(g_control->loadError), text);
 	}
 
 	bool IsRocksmithProcess(DWORD pid)
@@ -141,6 +201,15 @@ namespace
 		return pid == GetCurrentProcessId();
 	}
 
+	// The screen area the amp window must fit in: the game's monitor (or the popout's when there is no game).
+	RECT WorkArea()
+	{
+		HWND anchor = FindGameWindow();
+		MONITORINFO info{ sizeof(info) };
+		GetMonitorInfoW(MonitorFromWindow(anchor ? anchor : g_popout, MONITOR_DEFAULTTOPRIMARY), &info);
+		return info.rcWork;
+	}
+
 	void PlacePopout()
 	{
 		RECT frame{};
@@ -156,11 +225,22 @@ namespace
 				return;
 			}
 		}
-		RECT area{};
-		if (HWND game = FindGameWindow()) GetWindowRect(game, &area);
-		else SystemParametersInfoW(SPI_GETWORKAREA, 0, &area, 0);
+		const RECT area = WorkArea();
 		SetWindowPos(g_popout, nullptr, area.left + (area.right - area.left - width) / 2, area.top + (area.bottom - area.top - height) / 2,
 			0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+	}
+
+	// Keeps the whole window on its monitor after it changes size (a bigger plugin can push it off the edge).
+	void KeepPopoutOnScreen()
+	{
+		RECT frame{};
+		GetWindowRect(g_popout, &frame);
+		const RECT area = WorkArea();
+		const int width = static_cast<int>(frame.right - frame.left), height = static_cast<int>(frame.bottom - frame.top);
+		int x = static_cast<int>(frame.left), y = static_cast<int>(frame.top);
+		x = std::max(static_cast<int>(area.left), std::min(x, static_cast<int>(area.right) - width));
+		y = std::max(static_cast<int>(area.top), std::min(y, static_cast<int>(area.bottom) - height));
+		if (x != frame.left || y != frame.top) SetWindowPos(g_popout, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 	}
 
 	void ShowPopout()
@@ -221,6 +301,7 @@ namespace
 		const int strip = StripHeight();
 		SetWindowPos(g_editor, nullptr, 0, strip, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
 		SetWindowPos(g_popout, nullptr, 0, 0, width, height + strip, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+		KeepPopoutOnScreen();
 		InvalidateRect(g_popout, nullptr, TRUE);
 	}
 
@@ -259,89 +340,209 @@ namespace
 		return client.y >= 0 && client.y < StripHeight() && client.x >= rect.right - CloseButtonWidth();
 	}
 
-	std::wstring Wide(const std::string& text)
+	// The chosen slot's editor in the popout, sized to it (and shrunk to fit the screen). The popout keeps its
+	// place on screen.
+	void ShowSlot(int index)
 	{
-		std::wstring out(text.size(), wchar_t{});
-		out.resize(static_cast<size_t>(MultiByteToWideChar(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), out.data(), static_cast<int>(out.size()))));
-		return out;
-	}
-
-	// The plugin's editor in the popout, sized to it; the popout keeps its place on screen.
-	void AttachEditor()
-	{
-		g_title = Wide(g_plugin.Name());
-		if (!g_plugin.OpenEditor(g_editor, FitPopoutToEditor))
+		if (PluginHost* previous = g_chain.Plugin(g_shown)) previous->CloseEditor();
+		g_shown = g_chain.Count() == 0 ? -1 : std::clamp(index, 0, g_chain.Count() - 1);
+		PluginHost* plugin = g_chain.Plugin(g_shown);
+		if (!plugin)
 		{
-			g_title += L" (this plugin has no editor)";
-			FitPopoutToEditor(Scale(420), Scale(60));
+			g_title = L"No plugins: add one on the External amp page";
+			FitPopoutToEditor(Scale(460), Scale(60));
+		}
+		else
+		{
+			const RECT area = WorkArea();
+			const int maxWidth = (area.right - area.left) * 9 / 10;
+			const int maxHeight = (area.bottom - area.top) * 9 / 10 - StripHeight();
+			g_title = std::to_wstring(g_shown + 1) + L"/" + std::to_wstring(g_chain.Count()) + L"  " + Wide(plugin->Name());
+			if (g_chain.Bypassed(g_shown)) g_title += L"  (bypassed)";
+			if (!plugin->OpenEditor(g_editor, FitPopoutToEditor, maxWidth, maxHeight))
+			{
+				g_title += L"  (no editor)";
+				FitPopoutToEditor(Scale(460), Scale(60));
+			}
 		}
 		SetWindowTextW(g_popout, (g_title + L" - Rocksmith Audio Bridge").c_str());
 		InvalidateRect(g_popout, nullptr, TRUE);
 	}
 
-	// Tells the overlay which plugin runs now.
-	void PublishPlugin()
+	// Everything the overlay shows about the chain.
+	void PublishState()
 	{
 		if (!g_control) return;
-		const std::string& plugin = g_plugin.Name();
-		memset(g_control->pluginName, 0, sizeof(g_control->pluginName));
-		memcpy(g_control->pluginName, plugin.c_str(), std::min(plugin.size(), sizeof(g_control->pluginName) - 1));
-		memset(g_control->pluginPath, 0, sizeof(g_control->pluginPath));
-		wcsncpy_s(g_control->pluginPath, g_pluginPath.c_str(), _TRUNCATE);
+		const int count = std::min(g_chain.Count(), VstHostControl::kMaxSlots);
+		for (int i = 0; i < VstHostControl::kMaxSlots; ++i)
+		{
+			PluginHost* plugin = i < count ? g_chain.Plugin(i) : nullptr;
+			CopyText(g_control->slots[i].name, sizeof(g_control->slots[i].name), plugin ? plugin->Name() : std::string());
+			g_control->slots[i].bypass = plugin && g_chain.Bypassed(i) ? 1 : 0;
+		}
+		g_control->slotCount = count;
+		g_control->shownSlot = g_shown;
+		CopyText(g_control->toneName, sizeof(g_control->toneName), Utf8(g_toneName));
+		g_control->toneModified = g_toneModified ? 1 : 0;
+		g_control->inputTenths = g_chain.InputTenths();
+		g_control->outputTenths = g_chain.OutputTenths();
+		InterlockedIncrement(&g_control->stateSeq);
 	}
 
-	void SetLoadError(const std::string& text)
+	void RememberTone()
 	{
-		if (!g_control) return;
-		memset(g_control->loadError, 0, sizeof(g_control->loadError));
-		memcpy(g_control->loadError, text.c_str(), std::min(text.size(), sizeof(g_control->loadError) - 1));
+		WriteString(L"ToneName", g_toneName);
+		WriteDword(L"ToneModified", g_toneModified ? 1 : 0);
 	}
 
-	// Plugin switch from the External amp page, inside this process: the audio link stays connected (the game
-	// hears silence for the moment the new plugin takes to load) and the popout stays where it is, so switching
-	// amps is quick. A plugin that will not load leaves the previous one running.
-	void SwapPlugin(const std::wstring& path)
+	void SaveCurrentChain()
 	{
-		if (path.empty() || _wcsicmp(path.c_str(), g_pluginPath.c_str()) == 0) return;
-		InterlockedExchange(&g_control->loading, 1);
+		g_chain.SavePluginSettings();
+		g_chain.SaveTone(CurrentChainFile());
+		RememberTone();
+	}
+
+	void BeginLoading() { if (g_control) InterlockedExchange(&g_control->loading, 1); }
+	void EndLoading() { if (g_control) { InterlockedIncrement(&g_control->hostBeat); InterlockedExchange(&g_control->loading, 0); } }
+
+	void MarkModified() { g_toneModified = true; }
+
+	// One command from the External amp page.
+	void RunCommand(VstHostControl::Command op, int arg, int arg2, const std::wstring& text)
+	{
+		using VstHostControl::Command;
 		SetLoadError({});
-		Log("switch: %ls", path.c_str());
-		g_plugin.SaveState();
-
 		std::string error;
-		bool ok = g_plugin.Load(path, error) && g_plugin.Prepare(g_audio.Frames(), error);
-		if (ok)
+		switch (op)
 		{
-			g_pluginPath = path;
-			WriteLastPlugin(path);
+		case Command::AddPlugin:
+			BeginLoading();
+			if (g_chain.Add(text, error)) { MarkModified(); ShowSlot(g_chain.Count() - 1); }
+			else SetLoadError(error.empty() ? "That plugin did not load." : error);
+			EndLoading();
+			break;
+		case Command::ReplaceSlot:
+		{
+			BeginLoading();
+			const bool shown = arg == g_shown;
+			if (shown) if (PluginHost* plugin = g_chain.Plugin(g_shown)) plugin->CloseEditor();
+			if (g_chain.Replace(arg, text, error)) MarkModified();
+			else SetLoadError(error.empty() ? "That plugin did not load." : error);
+			if (shown || g_shown < 0) ShowSlot(arg);
+			EndLoading();
+			break;
 		}
-		else
-		{
-			Log("switch: failed (%s); back to %ls", error.c_str(), g_pluginPath.c_str());
-			SetLoadError(error.empty() ? "The plugin failed to load." : error);
-			std::string again;
-			if (!g_plugin.Load(g_pluginPath, again) || !g_plugin.Prepare(g_audio.Frames(), again))
+		case Command::RemoveSlot:
+			if (PluginHost* plugin = g_chain.Plugin(g_shown)) plugin->CloseEditor();
+			g_chain.Remove(arg);
+			MarkModified();
+			ShowSlot(g_shown > arg ? g_shown - 1 : g_shown);
+			break;
+		case Command::MoveSlot:
+			if (arg + arg2 >= 0 && arg + arg2 < g_chain.Count())
 			{
-				// Nothing can run: close, so the game's amp comes back (fallback) instead of silence.
-				ShowError("Could not load the plugin, nor reopen the previous one:\n" + again);
-				InterlockedExchange(&g_control->loading, 0);
-				PostMessageW(g_popout, WM_CLOSE, 0, 0);
-				return;
+				g_chain.Move(arg, arg2);
+				if (g_shown == arg) g_shown = arg + arg2;
+				else if (g_shown == arg + arg2) g_shown = arg;
+				MarkModified();
+				ShowSlot(g_shown);
 			}
+			break;
+		case Command::SetBypass:
+			g_chain.SetBypass(arg, arg2 != 0);
+			MarkModified();
+			if (arg == g_shown) ShowSlot(g_shown);
+			break;
+		case Command::ShowSlot:
+			ShowSlot(arg);
+			break;
+		case Command::LoadTone:
+		{
+			const std::wstring file = ToneFile(text);
+			BeginLoading();
+			if (PluginHost* plugin = g_chain.Plugin(g_shown)) plugin->CloseEditor();
+			g_shown = -1;
+			std::string missing;
+			if (g_chain.LoadTone(file, error, missing))
+			{
+				g_toneName = text;
+				g_toneModified = false;
+				SaveCurrentChain();
+				if (!missing.empty()) SetLoadError("Not installed, skipped: " + missing);
+			}
+			else SetLoadError(error);
+			ShowSlot(0);
+			EndLoading();
+			break;
 		}
-		AttachEditor();
-		PublishPlugin();
-		InterlockedIncrement(&g_control->hostBeat);
-		InterlockedExchange(&g_control->loading, 0);
+		case Command::SaveTone:
+		{
+			const std::wstring file = ToneFile(text);
+			if (file.empty()) { SetLoadError("Give the tone a name."); break; }
+			g_chain.SavePluginSettings();
+			if (g_chain.SaveTone(file))
+			{
+				g_toneName = text;
+				g_toneModified = false;
+				SaveCurrentChain();
+			}
+			else SetLoadError("The tone could not be saved.");
+			break;
+		}
+		case Command::DeleteTone:
+		{
+			const std::wstring file = ToneFile(text);
+			if (!file.empty() && DeleteFileW(file.c_str()))
+			{
+				Log("tone: deleted %ls", file.c_str());
+				if (_wcsicmp(g_toneName.c_str(), text.c_str()) == 0) { g_toneName.clear(); RememberTone(); }
+			}
+			break;
+		}
+		case Command::SetLevels:
+			g_chain.SetLevels(arg, arg2);
+			MarkModified();
+			break;
+		case Command::ClearChain:
+			if (PluginHost* plugin = g_chain.Plugin(g_shown)) plugin->CloseEditor();
+			g_chain.Clear();
+			g_toneName.clear();
+			g_toneModified = false;
+			ShowSlot(-1);
+			break;
+		default:
+			break;
+		}
+		PublishState();
 	}
 
-	// Open (or reopen after the game changed its buffer size) the stream and run the plugin on it.
+	void PollCommand()
+	{
+		if (!g_control || g_control->commandSeq == g_handledCommand) return;
+		g_handledCommand = g_control->commandSeq;
+		wchar_t text[VstHostControl::kPathChars]{};
+		memcpy(text, const_cast<const wchar_t*>(g_control->commandText), sizeof(text) - sizeof(wchar_t));
+		RunCommand(static_cast<VstHostControl::Command>(g_control->commandOp), g_control->commandArg, g_control->commandArg2, text);
+		InterlockedExchange(&g_control->commandDone, g_handledCommand);
+	}
+
+	// Meters for the overlay: a peak with a short fall, in thousandths of full scale.
+	void PublishMeters()
+	{
+		if (!g_control) return;
+		g_inputMeter = std::max(g_chain.TakeInputPeak(), g_inputMeter * 0.85f);
+		g_outputMeter = std::max(g_chain.TakeOutputPeak(), g_outputMeter * 0.85f);
+		g_control->inputPeak = static_cast<LONG>(std::min(g_inputMeter, 4.0f) * 1000.0f);
+		g_control->outputPeak = static_cast<LONG>(std::min(g_outputMeter, 4.0f) * 1000.0f);
+	}
+
+	// Open (or reopen after the game changed its buffer size) the stream and run the chain on it.
 	bool StartAudio(HWND window)
 	{
 		g_audio.Stop();
-		g_plugin.Suspend();
+		g_chain.Suspend();
 		std::string error;
-		if (!g_audio.Open(window, &g_plugin, error) || !g_plugin.Prepare(g_audio.Frames(), error) || !g_audio.Start(error))
+		if (!g_audio.Open(window, &g_chain, error) || !g_chain.Prepare(g_audio.Frames(), error) || !g_audio.Start(error))
 		{
 			ShowError(error);
 			return false;
@@ -364,14 +565,8 @@ namespace
 				if (g_keyDown && !down) OnOverlayKeyReleased();
 				g_keyDown = down;
 				UpdatePopout();
-				if (g_control && g_control->loadRequest != g_handledLoad)
-				{
-					g_handledLoad = g_control->loadRequest;
-					wchar_t requested[VstHostControl::kPathChars]{};
-					memcpy(requested, const_cast<const wchar_t*>(g_control->loadPath), sizeof(requested) - sizeof(wchar_t));
-					SwapPlugin(requested);
-					InterlockedExchange(&g_control->loadDone, g_handledLoad);
-				}
+				PollCommand();
+				PublishMeters();
 				if (g_control && g_control->quitRequested)
 				{
 					InterlockedExchange(&g_control->quitRequested, 0);
@@ -381,8 +576,13 @@ namespace
 				return 0;
 			}
 			if (g_control) InterlockedIncrement(&g_control->hostBeat);
-			if (g_plugin.TakeRestartRequest()) StartAudio(window);
-			if (++g_ticks >= kAutosaveTicks) { g_ticks = 0; g_plugin.SaveIfDirty(); }
+			if (g_chain.TakeRestartRequest()) { StartAudio(window); ShowSlot(g_shown); }
+			if (g_chain.Dirty() && !g_toneModified) { g_toneModified = true; PublishState(); }
+			if (++g_ticks >= kAutosaveTicks)
+			{
+				g_ticks = 0;
+				if (g_chain.Dirty()) SaveCurrentChain();
+			}
 			return 0;
 		case WM_NCHITTEST:
 		{
@@ -395,8 +595,8 @@ namespace
 		case WM_LBUTTONUP:
 		{
 			const POINT point{ static_cast<short>(LOWORD(lParam)), static_cast<short>(HIWORD(lParam)) };
-			// The window's close button only puts the amp away (the page's "Pop out amp" brings it back); without a
-			// overlay to bring it back, it closes the host.
+			// The window's close button only puts the amp away (the page's "Pop out amp" brings it back); without
+			// an overlay to bring it back, it closes the host.
 			if (InCloseButton(window, point))
 			{
 				if (g_control && g_overlayBeatSeenAt) InterlockedExchange(&g_control->popoutWanted, 0);
@@ -421,8 +621,8 @@ namespace
 			KillTimer(window, kKeyTimer);
 			KillTimer(window, kHousekeepingTimer);
 			g_audio.Stop();
-			g_plugin.SaveState();
-			g_plugin.CloseEditor();
+			SaveCurrentChain();
+			if (PluginHost* plugin = g_chain.Plugin(g_shown)) plugin->CloseEditor();
 			DestroyWindow(window);
 			return 0;
 		case WM_DESTROY:
@@ -430,6 +630,37 @@ namespace
 			return 0;
 		}
 		return DefWindowProcW(window, message, wParam, lParam);
+	}
+
+	// The chain as last played; for an older install with only one remembered plugin, that plugin.
+	void RestoreChain(const std::wstring& extraPlugin, bool fromOverlay)
+	{
+		const std::wstring current = CurrentChainFile();
+		std::string error, missing;
+		if (GetFileAttributesW(current.c_str()) != INVALID_FILE_ATTRIBUTES && g_chain.LoadTone(current, error, missing))
+		{
+			g_toneName = ReadString(L"ToneName");
+			DWORD modified = 0;
+			g_toneModified = ReadDword(L"ToneModified", modified) && modified != 0;
+			if (!missing.empty()) SetLoadError("Not installed, skipped: " + missing);
+		}
+		else if (!error.empty()) Log("restore: %s", error.c_str());
+		else
+		{
+			const std::wstring last = ReadString(L"LastPlugin");
+			if (!last.empty() && GetFileAttributesW(last.c_str()) != INVALID_FILE_ATTRIBUTES && !g_chain.Add(last, error))
+				Log("restore: %ls did not load (%s)", last.c_str(), error.c_str());
+		}
+
+		std::wstring add = extraPlugin;
+		if (add.empty() && g_chain.Count() == 0 && !fromOverlay) add = AskForPlugin();
+		bool already = false;
+		for (int i = 0; i < g_chain.Count(); ++i) already = already || _wcsicmp(g_chain.Path(i).c_str(), add.c_str()) == 0;
+		if (!add.empty() && !already)
+		{
+			if (g_chain.Add(add, error)) { WriteString(L"LastPlugin", add); g_toneModified = true; }
+			else ShowError("Could not load the plugin:\n" + error);
+		}
 	}
 }
 
@@ -448,30 +679,26 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 
 	OleInitialize(nullptr);   // plugin editors use drag and drop and COM on this thread
 
-	std::wstring path;
+	std::wstring plugin;
+	bool fromOverlay = false;
 	int argc = 0;
 	if (LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc))
 	{
-		if (argc > 1) path = argv[1];
+		for (int i = 1; i < argc; ++i)
+		{
+			if (_wcsicmp(argv[i], L"--overlay") == 0) fromOverlay = true;
+			else plugin = argv[i];
+		}
 		LocalFree(argv);
 	}
-	if (path.empty()) path = ReadLastPlugin();
-	if (path.empty() || GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) path = AskForPlugin();
-	if (path.empty()) { OleUninitialize(); return 0; }
-	Log("host: starting with %ls", path.c_str());
+	Log("host: starting%s%s%ls", fromOverlay ? " from the overlay" : "", plugin.empty() ? "" : ", adding ", plugin.c_str());
 
 	static Steinberg::Vst::HostApplication hostApplication;
 	Steinberg::Vst::PluginContextFactory::instance().setPluginContext(&hostApplication);
 
-	std::string error;
-	if (!g_plugin.Load(path, error))
-	{
-		ShowError("Could not load the plugin:\n" + error);
-		OleUninitialize();
-		return 1;
-	}
-	WriteLastPlugin(path);
-	g_pluginPath = path;
+	g_control = VstHostControl::Open(g_controlMapping);
+	if (g_control) InterlockedExchange(&g_control->loading, 1);
+	RestoreChain(plugin, fromOverlay);
 
 	WNDCLASSEXW popoutClass{ sizeof(popoutClass) };
 	popoutClass.lpfnWndProc = PopoutProc;
@@ -488,7 +715,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 	editorClass.lpszClassName = kEditorClass;
 	RegisterClassExW(&editorClass);
 
-	// Tool window: no taskbar button or Alt+Tab entry; the overlay key and the close button drive it.
+	// Tool window: no taskbar button or Alt+Tab entry; the overlay drives it.
 	g_popout = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, kWindowClass, L"Rocksmith Audio Bridge",
 		WS_POPUP | WS_CLIPCHILDREN, 0, 0, 800, 600, nullptr, nullptr, instance, nullptr);
 	g_editor = CreateWindowExW(0, kEditorClass, nullptr, WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN, 0, Scale(kStripDip), 800, 600 - Scale(kStripDip),
@@ -496,12 +723,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 	g_font = CreateFontW(-Scale(13), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
 		CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
 
-	if (!StartAudio(g_popout)) { DestroyWindow(g_popout); g_plugin.Unload(); OleUninitialize(); return 1; }
-	AttachEditor();
+	if (!StartAudio(g_popout)) { DestroyWindow(g_popout); g_chain.Clear(); OleUninitialize(); return 1; }
+	DWORD shown = 0;
+	ShowSlot(ReadDword(L"ShownSlot", shown) ? static_cast<int>(shown) : 0);
 	PlacePopout();
 
 	// Tell the overlay's External amp page we are here; the popout follows its "Pop out amp" switch (UpdatePopout).
-	g_control = VstHostControl::Open(g_controlMapping);
 	if (g_control)
 	{
 		DWORD wanted = 0;
@@ -509,14 +736,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 		g_savedWanted = wanted != 0;
 		InterlockedExchange(&g_control->popoutWanted, g_savedWanted ? 1 : 0);
 		InterlockedExchange(&g_control->quitRequested, 0);
-		// A request from before this host started is already answered by the plugin it was started with.
-		g_handledLoad = g_control->loadRequest;
-		InterlockedExchange(&g_control->loadDone, g_handledLoad);
+		// A command from before this host started was meant for a host that is gone.
+		g_handledCommand = g_control->commandSeq;
+		InterlockedExchange(&g_control->commandDone, g_handledCommand);
+		PublishState();
 		InterlockedExchange(&g_control->loading, 0);
-		SetLoadError({});
-		PublishPlugin();
 		InterlockedExchange(&g_control->hostPid, static_cast<LONG>(GetCurrentProcessId()));
-		Log("popout: %s; it shows with the overlay once Pop out amp is on", g_savedWanted ? "Pop out amp is on" : "waiting for Pop out amp on the External amp page");
+		Log("popout: %s", g_savedWanted ? "Pop out amp is on" : "waiting for Pop out amp on the External amp page");
 	}
 	else ShowPopout();
 	SetTimer(g_popout, kHousekeepingTimer, kHousekeepingMs, nullptr);
@@ -529,6 +755,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 		DispatchMessageW(&message);
 	}
 
+	WriteDword(L"ShownSlot", static_cast<DWORD>(std::max(g_shown, 0)));
 	if (g_control)
 	{
 		g_control->popoutShown = 0;
@@ -536,7 +763,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 		InterlockedExchange(&g_control->hostPid, 0);
 	}
 	g_audio.Close();
-	g_plugin.Unload();
+	g_chain.Clear();
 	if (g_font) DeleteObject(g_font);
 	Log("host: closed");
 	OleUninitialize();

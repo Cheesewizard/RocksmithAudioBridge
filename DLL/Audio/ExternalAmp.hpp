@@ -25,6 +25,7 @@ namespace ExternalAmp
 	struct Snapshot
 	{
 		bool enabled = true;
+		bool comparing = false;        // A/B: the game's amp plays for now (not saved), the amp sim is not mixed in
 		bool fallback = true;
 		int returnTenths = 0;          // amp return level, tenths of a dB
 		bool safetyBuffer = false;     // one more buffer of link latency, fewer clicks on a busy PC
@@ -38,6 +39,7 @@ namespace ExternalAmp
 	void Start();                      // the controller thread; call once at startup
 	Snapshot GetSnapshot();
 	void SetEnabled(bool enabled);
+	void SetCompare(bool gameAmp);     // A/B against the game's own amp; not saved, the controller drops it on restart
 	void SetFallback(bool fallback);
 	void SetReturnTenths(int tenths, bool persist);
 	void SetSafetyBuffer(bool on);

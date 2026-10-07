@@ -3,19 +3,46 @@
 // Shared state between the overlay (DLL/Audio/VstHostLink.cpp) and the VST host program
 // (VstHost/Source/Main.cpp). Plain named shared memory; the layout is the same in 32 and 64 bit (only 32-bit
 // fields). The VST host does the audio and owns the amp window; the overlay tells it whether the overlay is on
-// screen and what the External amp page's buttons asked for.
+// screen, and sends the External amp page's commands (one at a time, see Command).
 
 #include <Windows.h>
 #include <cstdint>
 
 namespace VstHostControl
 {
-	constexpr wchar_t kMappingName[] = L"Local\\RocksmithAudioBridge.VstHost.v2";
+	// v3: plugin chains, tones, levels. A new mapping name per version, so an old host and a new overlay never meet.
+	constexpr wchar_t kMappingName[] = L"Local\\RocksmithAudioBridge.VstHost.v3";
 	constexpr uint32_t kMagic = 0x56424152;   // "RABV"
-	constexpr uint32_t kVersion = 2;   // v2: plugin switch inside the running host (a new mapping name, so v1 never meets it)
+	constexpr uint32_t kVersion = 3;
 	constexpr int kBeatMs = 250;              // both sides bump their beat at least this often
 	constexpr int kAliveMs = 1500;            // a side is gone when its beat stops this long
 	constexpr int kPathChars = 520;
+	constexpr int kMaxSlots = 8;
+	constexpr int kNameChars = 64;
+
+	// Overlay -> host. The overlay writes op/arg/text, then bumps commandSeq; the host acts and sets commandDone
+	// to the sequence it handled. Paths and tone names are in text.
+	enum class Command : LONG
+	{
+		None = 0,
+		AddPlugin = 1,      // text = plugin path; appended to the chain
+		ReplaceSlot = 2,    // arg = slot, text = plugin path
+		RemoveSlot = 3,     // arg = slot
+		MoveSlot = 4,       // arg = slot, arg2 = -1 (earlier) or +1 (later)
+		SetBypass = 5,      // arg = slot, arg2 = 0/1
+		ShowSlot = 6,       // arg = slot whose editor the amp window shows
+		LoadTone = 7,       // text = tone name
+		SaveTone = 8,       // text = tone name
+		DeleteTone = 9,     // text = tone name
+		SetLevels = 10,     // arg = input trim, arg2 = output trim, tenths of a dB
+		ClearChain = 11,
+	};
+
+	struct Slot
+	{
+		char name[kNameChars];   // UTF-8
+		volatile LONG bypass;
+	};
 
 	struct Shared
 	{
@@ -26,27 +53,35 @@ namespace VstHostControl
 		volatile LONG hostPid;         // 0 = not running
 		volatile LONG hostBeat;
 		volatile LONG popoutShown;     // the amp window is on screen now
-		char pluginName[64];           // UTF-8
+		volatile LONG loading;         // 1 while plugins load (the beat pauses meanwhile)
+		char loadError[128];           // UTF-8, the last command's problem; empty when it worked
+		volatile LONG stateSeq;        // bumped after the fields below change
+		volatile LONG slotCount;
+		Slot slots[kMaxSlots];
+		volatile LONG shownSlot;       // whose editor the amp window shows, -1 = none
+		char toneName[kNameChars];     // UTF-8, the tone last loaded or saved; empty = unsaved
+		volatile LONG toneModified;    // changed since that tone was loaded or saved
+		volatile LONG inputTenths;     // level trims, tenths of a dB
+		volatile LONG outputTenths;
+		volatile LONG inputPeak;       // peak since the overlay last read it, thousandths of full scale
+		volatile LONG outputPeak;
 
 		// Written by the overlay.
 		volatile LONG overlayBeat;
 		volatile LONG overlayVisible;  // the overlay is open
+		volatile LONG commandSeq;
+		volatile LONG commandOp;       // Command
+		volatile LONG commandArg;
+		volatile LONG commandArg2;
+		wchar_t commandText[kPathChars];
+
+		// Written by the host.
+		volatile LONG commandDone;
 
 		// Written by both: the page's "Pop out amp" button and the amp window's own close button. The VST host seeds
 		// it from its saved choice when it starts.
 		volatile LONG popoutWanted;
-		volatile LONG quitRequested;   // overlay -> VST host: close (saves the plugin's settings)
-
-		// Plugin switch without restarting the host: the overlay writes loadPath, then bumps loadRequest. The host
-		// saves the current plugin's settings, swaps the plugin in place (the audio link and the popout stay up),
-		// then sets loadDone to the request it handled. A plugin that fails to load leaves the previous one running
-		// and its reason in loadError.
-		wchar_t loadPath[kPathChars];
-		volatile LONG loadRequest;
-		volatile LONG loadDone;
-		volatile LONG loading;          // host: 1 while a plugin loads (its beat pauses meanwhile)
-		char loadError[128];            // UTF-8, empty when the last switch worked
-		wchar_t pluginPath[kPathChars]; // host: the plugin it runs now
+		volatile LONG quitRequested;   // overlay -> VST host: close (saves the chain)
 	};
 
 	// Creates or opens the block. Returns nullptr on failure; `mapping` must stay open while it is used.

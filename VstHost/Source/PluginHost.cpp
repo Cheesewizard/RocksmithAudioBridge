@@ -175,7 +175,7 @@ namespace VstHost
 		m_data.unprepare();
 	}
 
-	void PluginHost::Process(const float* guitar, float* left, float* right, int frames)
+	bool PluginHost::Process(const float* inLeft, const float* inRight, float* left, float* right, int frames)
 	{
 		struct InProcess
 		{
@@ -188,12 +188,14 @@ namespace VstHost
 		{
 			std::fill(left, left + frames, 0.0f);
 			std::fill(right, right + frames, 0.0f);
-			return;
+			return false;
 		}
 
+		// Stereo in: left and right to the first two input channels; a mono input takes the left (the guitar is
+		// mono, so both sides are the same until a stereo plugin earlier in the chain widens it).
 		if (m_data.numInputs > 0)
 			for (int32 ch = 0; ch < m_data.inputs[0].numChannels; ++ch)
-				std::memcpy(m_data.inputs[0].channelBuffers32[ch], guitar, sizeof(float) * frames);
+				std::memcpy(m_data.inputs[0].channelBuffers32[ch], ch == 1 ? inRight : inLeft, sizeof(float) * frames);
 
 		m_editTransfer.transferChangesTo(m_inChanges);
 		m_processor->process(m_data);
@@ -211,6 +213,7 @@ namespace VstHost
 			std::fill(left, left + frames, 0.0f);
 			std::fill(right, right + frames, 0.0f);
 		}
+		return true;
 	}
 
 	tresult PLUGIN_API PluginHost::performEdit(ParamID id, ParamValue value)
@@ -228,7 +231,7 @@ namespace VstHost
 		return kResultOk;
 	}
 
-	bool PluginHost::OpenEditor(HWND window, std::function<void(int, int)> onResized)
+	bool PluginHost::OpenEditor(HWND window, std::function<void(int, int)> onResized, int maxWidth, int maxHeight)
 	{
 		if (!m_controller) return false;
 		m_window = window;
@@ -241,11 +244,30 @@ namespace VstHost
 			return false;
 		}
 		m_view->setFrame(this);
-		if (FUnknownPtr<IPlugViewContentScaleSupport> scale = FUnknownPtr<IPlugViewContentScaleSupport>(m_view))
-			scale->setContentScaleFactor(static_cast<float>(GetDpiForWindow(window)) / 96.0f);
+		const float dpiScale = static_cast<float>(GetDpiForWindow(window)) / 96.0f;
+		FUnknownPtr<IPlugViewContentScaleSupport> scale = FUnknownPtr<IPlugViewContentScaleSupport>(m_view);
+		if (scale) scale->setContentScaleFactor(dpiScale);
 
 		ViewRect size{};
-		if (m_view->getSize(&size) == kResultOk) FitWindowTo(size);
+		if (m_view->getSize(&size) == kResultOk && maxWidth > 0 && maxHeight > 0
+			&& (size.getWidth() > maxWidth || size.getHeight() > maxHeight))
+		{
+			// Too big for the screen (AmpliTube opens at 1710x1050): shrink it. A resizable editor takes a smaller
+			// size; otherwise ask for a smaller content scale, which most plugins honour.
+			const float fit = std::min(static_cast<float>(maxWidth) / size.getWidth(), static_cast<float>(maxHeight) / size.getHeight());
+			if (m_view->canResize() == kResultTrue)
+			{
+				ViewRect smaller(0, 0, static_cast<int32>(size.getWidth() * fit), static_cast<int32>(size.getHeight() * fit));
+				if (m_view->checkSizeConstraint(&smaller) == kResultTrue) size = smaller;
+			}
+			else if (scale)
+			{
+				scale->setContentScaleFactor(dpiScale * fit);
+				m_view->getSize(&size);
+			}
+			Log("editor: scaled to fit the screen (%dx%d)", size.getWidth(), size.getHeight());
+		}
+		FitWindowTo(size);
 		if (m_view->attached(window, kPlatformTypeHWND) != kResultOk)
 		{
 			Log("editor: attach failed");
@@ -253,6 +275,7 @@ namespace VstHost
 			m_view = nullptr;
 			return false;
 		}
+		if (m_view->canResize() == kResultTrue) m_view->onSize(&size);
 		Log("editor: open, %dx%d, %s", size.getWidth(), size.getHeight(), m_view->canResize() == kResultTrue ? "resizable" : "fixed size");
 		return true;
 	}
@@ -290,27 +313,58 @@ namespace VstHost
 		return dir + L"\\" + Wide(m_classId) + L".state";
 	}
 
-	// File: magic, then the component state and the controller state, each as a uint32 length plus bytes.
-	bool PluginHost::SaveState()
+	bool PluginHost::GetStateBlobs(std::vector<char>& component, std::vector<char>& controller)
 	{
+		component.clear();
+		controller.clear();
 		if (!m_component) return false;
 		IPtr<MemoryStream> componentState = owned(new MemoryStream());
 		IPtr<MemoryStream> controllerState = owned(new MemoryStream());
-		if (m_component->getState(componentState) != kResultOk) { Log("state: the plugin would not save its settings"); return false; }
+		if (m_component->getState(componentState) != kResultOk) { Log("state: %s would not save its settings", m_name.c_str()); return false; }
 		if (m_controller) m_controller->getState(controllerState);
+		for (auto [stream, out] : { std::pair<MemoryStream*, std::vector<char>*>{ componentState.get(), &component }, { controllerState.get(), &controller } })
+		{
+			int64 used = 0;
+			stream->tell(&used);
+			out->assign(stream->getData(), stream->getData() + used);
+		}
+		return true;
+	}
+
+	bool PluginHost::SetStateBlobs(std::vector<char> component, std::vector<char> controller)
+	{
+		if (!m_component || component.empty()) return false;
+		IPtr<MemoryStream> componentState = owned(new MemoryStream(component.data(), static_cast<TSize>(component.size())));
+		if (m_component->setState(componentState) != kResultOk) { Log("state: %s refused its saved settings", m_name.c_str()); return false; }
+		if (m_controller)
+		{
+			componentState->seek(0, IBStream::kIBSeekSet, nullptr);
+			m_controller->setComponentState(componentState);
+			if (!controller.empty())
+			{
+				IPtr<MemoryStream> controllerState = owned(new MemoryStream(controller.data(), static_cast<TSize>(controller.size())));
+				m_controller->setState(controllerState);
+			}
+		}
+		return true;
+	}
+
+	// File: magic, then the component state and the controller state, each as a uint32 length plus bytes.
+	bool PluginHost::SaveState()
+	{
+		std::vector<char> parts[2];
+		if (!GetStateBlobs(parts[0], parts[1])) return false;
 
 		const std::wstring path = StatePath();
 		const std::wstring temp = path + L".tmp";
 		FILE* file = nullptr;
 		if (path.empty() || _wfopen_s(&file, temp.c_str(), L"wb") != 0 || !file) { Log("state: cannot write %ls", temp.c_str()); return false; }
 		fwrite(kStateMagic, 1, sizeof(kStateMagic), file);
-		for (MemoryStream* stream : { componentState.get(), controllerState.get() })
+		for (const auto& part : parts)
 		{
-			int64 used = 0;
-			stream->tell(&used);
-			const uint32_t size = static_cast<uint32_t>(used);
+			const uint32_t size = static_cast<uint32_t>(part.size());
 			fwrite(&size, sizeof(size), 1, file);
-			if (size) fwrite(stream->getData(), 1, size, file);
+			if (size) fwrite(part.data(), 1, size, file);
 		}
 		const bool ok = fclose(file) == 0 && MoveFileExW(temp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING);
 		if (ok) m_dirty = false;
@@ -341,19 +395,7 @@ namespace VstHost
 		}
 		fclose(file);
 		if (!ok) { Log("state: %ls is damaged, starting from the plugin's defaults", path.c_str()); return false; }
-
-		IPtr<MemoryStream> componentState = owned(new MemoryStream(parts[0].data(), static_cast<TSize>(parts[0].size())));
-		if (m_component->setState(componentState) != kResultOk) { Log("state: the plugin refused its saved settings"); return false; }
-		if (m_controller)
-		{
-			componentState->seek(0, IBStream::kIBSeekSet, nullptr);
-			m_controller->setComponentState(componentState);
-			if (!parts[1].empty())
-			{
-				IPtr<MemoryStream> controllerState = owned(new MemoryStream(parts[1].data(), static_cast<TSize>(parts[1].size())));
-				m_controller->setState(controllerState);
-			}
-		}
+		if (!SetStateBlobs(std::move(parts[0]), std::move(parts[1]))) return false;
 		Log("state: restored from %ls", path.c_str());
 		return true;
 	}

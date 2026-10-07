@@ -1,7 +1,7 @@
 #pragma once
 
-// One VST3 plugin: loads it, feeds it the guitar on the stream thread, shows its editor in a window we own,
-// and keeps its settings across sessions (saved on close and every 30 s after an edit).
+// One VST3 plugin, one slot of the chain (Chain.hpp): loads it, runs it on the stream thread, shows its editor in a
+// window we own, and keeps its own settings per plugin (the starting point when the plugin is added to a chain).
 
 #include "BridgeAudio.hpp"
 
@@ -19,17 +19,18 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace VstHost
 {
-	class PluginHost final : public AudioSink,
+	class PluginHost final :
 		public Steinberg::Vst::IComponentHandler,
 		public Steinberg::Vst::IComponentHandler2,
 		public Steinberg::IPlugFrame
 	{
 	public:
 		PluginHost();
-		~PluginHost() override;
+		~PluginHost();
 
 		bool Load(const std::wstring& path, std::string& error);
 		void Unload();
@@ -38,17 +39,23 @@ namespace VstHost
 
 		// Editor in the child window `editor`, kept at the plugin's size; `onResized` lets the owner fit its frame
 		// around it (on open and whenever the plugin resizes itself).
-		bool OpenEditor(HWND editor, std::function<void(int, int)> onResized);
+		// An editor bigger than maxWidth x maxHeight (0 = no limit) is shrunk to fit.
+		bool OpenEditor(HWND editor, std::function<void(int, int)> onResized, int maxWidth = 0, int maxHeight = 0);
 		void CloseEditor();
 
-		bool SaveState();
+		bool SaveState();   // this plugin's own settings file
+		// The plugin's full settings in memory, for tones (Chain.hpp).
+		bool GetStateBlobs(std::vector<char>& component, std::vector<char>& controller);
+		bool SetStateBlobs(std::vector<char> component, std::vector<char> controller);
+		bool IsDirty() const { return m_dirty; }
 		void SaveIfDirty();
 		bool TakeRestartRequest() { return m_restartRequested.exchange(false); }
 
 		const std::string& Name() const { return m_name; }
+		bool HasEditor() const { return m_view != nullptr; }
 
-		// AudioSink, stream thread.
-		void Process(const float* guitar, float* left, float* right, int frames) override;
+		// Stream thread. Stereo in and out; false (and silence) while the plugin is not ready.
+		bool Process(const float* inLeft, const float* inRight, float* left, float* right, int frames);
 
 		// FUnknown. Lives as long as the process; the reference count only satisfies the interface.
 		Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID iid, void** obj) override;

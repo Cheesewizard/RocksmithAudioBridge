@@ -17,6 +17,7 @@ namespace ExternalAmp
 		constexpr int kMinReturnTenths = -300, kMaxReturnTenths = 60;
 
 		std::atomic<bool> g_enabled{ true };
+		std::atomic<bool> g_compare{ false };   // A/B: the game's amp for now, not saved
 		std::atomic<bool> g_fallback{ true };
 		std::atomic<int> g_returnTenths{ 0 };
 		std::atomic<bool> g_safety{ false };
@@ -189,7 +190,7 @@ namespace ExternalAmp
 
 			while (!GameState::GameClosing)
 			{
-				const bool enabled = g_enabled.load();
+				const bool enabled = g_enabled.load() && !g_compare.load();
 				const bool fallback = g_fallback.load();
 				const int tenths = g_returnTenths.load();
 				const float gain = std::pow(10.0f, tenths / 200.0f);
@@ -255,6 +256,7 @@ namespace ExternalAmp
 		Snapshot snapshot = g_snapshot;
 		// The switches answer immediately, without waiting for the next tick.
 		snapshot.enabled = g_enabled.load();
+		snapshot.comparing = g_compare.load();
 		snapshot.fallback = g_fallback.load();
 		snapshot.returnTenths = g_returnTenths.load();
 		snapshot.safetyBuffer = g_safety.load();
@@ -262,6 +264,7 @@ namespace ExternalAmp
 	}
 
 	void SetEnabled(bool enabled) { g_enabled.store(enabled); WriteDword(L"ExternalAmp", enabled ? 1 : 0); }
+	void SetCompare(bool gameAmp) { g_compare.store(gameAmp); }
 	void SetSafetyBuffer(bool on) { g_safety.store(on); WriteDword(L"ExternalAmpSafety", on ? 1 : 0); }
 	void SetFallback(bool fallback) { g_fallback.store(fallback); WriteDword(L"ExternalAmpFallback", fallback ? 1 : 0); }
 	void SetReturnTenths(int tenths, bool persist)

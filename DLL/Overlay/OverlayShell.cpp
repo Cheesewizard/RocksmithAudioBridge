@@ -726,6 +726,199 @@ namespace Overlay
 			ImGui::PopStyleColor();
 		}
 
+		// ---- VST plugins (External amp page) --------------------------------------------------------------------
+		// The VST host plays the guitar through a chain of VST3 plugins (Audio/VstHostLink.hpp). Commands are queued
+		// to the host; the page shows the host's state a few times a second.
+		void VstChainCard(const VstHostLink::Snapshot& vst);
+		void VstTonesCard(const VstHostLink::Snapshot& vst);
+		void VstLevelsCard(const VstHostLink::Snapshot& vst);
+
+		void VstPluginCards(const ExternalAmp::Snapshot& amp)
+		{
+			const VstHostLink::Snapshot vst = VstHostLink::GetSnapshot();
+			BeginCard("VST plugins");
+			if (!vst.hostInstalled) {
+				Caption("The VST host is not installed in the game folder.");
+				EndCard();
+				return;
+			}
+
+			if (vst.hostHung) InfoRow("VST host", "Not answering", Color::Bad);
+			else if (vst.hostRunning && vst.busy) InfoRow("VST host", "Loading...", Color::Warn);
+			else if (vst.hostRunning) {
+				const std::string tone = vst.toneName.empty() ? "Unsaved chain" : vst.toneName + (vst.toneModified ? " (changed)" : "");
+				InfoRow("Tone", vst.slots.empty() ? "No plugins yet" : tone, Color::Good);
+			}
+			else Caption("Play through a chain of VST3 plugins (amp sims, pedals, effects) without opening their own apps.");
+
+			// Things that stop it working, said plainly.
+			const std::string guest = amp.link.guestName;
+			if (amp.link.guestPresent && !guest.empty() && _stricmp(guest.c_str(), "RocksmithAudioBridgeVstHost.exe") != 0)
+				WarnCaption((guest + " is connected to the amp link, so the VST host plays nothing. Close " + guest + " to use the VST host.").c_str());
+			if (vst.exclusiveFullscreen)
+				WarnCaption("Rocksmith runs in exclusive fullscreen, where no window can appear over the game, so Pop out amp cannot show. Pick non-exclusive (borderless) fullscreen in RSMods' Rocksmith settings.");
+			if (!vst.loadError.empty()) WarnCaption(vst.loadError.c_str());
+
+			if (vst.hostHung) {
+				if (Button("Force close", false, "Ends the VST host. The game's amp comes back if fallback is on; the chain is as it was at its last autosave."))
+					VstHostLink::ForceCloseHost();
+			}
+			else if (!vst.hostRunning) {
+				if (Button("Start VST host", true, "Starts the VST host with your last chain.")) VstHostLink::StartHost();
+			}
+			else {
+				if (Button(vst.popoutWanted ? "Hide amp" : "Pop out amp", !vst.popoutWanted,
+					"Shows the chosen plugin's own window over the game whenever this overlay is open. Drag its top bar to move it; the spot is remembered."))
+					VstHostLink::SetPopout(!vst.popoutWanted);
+				ImGui::SameLine();
+				if (Button("Close VST host", false, "Saves the chain and closes the VST host. The game's amp comes back if fallback is on."))
+					VstHostLink::StopHost();
+			}
+
+			bool compare = amp.comparing;
+			if (ToggleRow("Compare with the game's amp", "A/B: hear Rocksmith's own amp instead for now. Not saved.", &compare))
+				ExternalAmp::SetCompare(compare);
+			bool autoStart = vst.autoStart;
+			if (ToggleRow("Start with the game", "Starts the VST host with your last chain when Rocksmith starts.", &autoStart))
+				VstHostLink::SetAutoStart(autoStart);
+			EndCard();
+
+			if (!vst.hostRunning) return;
+			VstChainCard(vst);
+			VstTonesCard(vst);
+			VstLevelsCard(vst);
+		}
+
+		void VstChainCard(const VstHostLink::Snapshot& vst)
+		{
+			BeginCard("Chain");
+			Caption("Your guitar runs through these in order. Edit shows that plugin's window in the amp popout.");
+			for (int i = 0; i < static_cast<int>(vst.slots.size()); ++i) {
+				const VstHostLink::SlotView& slot = vst.slots[i];
+				ImGui::PushID(i);
+				const bool shown = i == vst.shownSlot;
+				const std::string label = std::to_string(i + 1) + ".  " + slot.name + (slot.bypass ? "  (bypassed)" : "");
+				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(slot.bypass ? Color::Muted : shown ? Color::Accent : Color::Text));
+				ImGui::AlignTextToFramePadding();
+				ImGui::TextUnformatted(label.c_str());
+				ImGui::PopStyleColor();
+				ImGui::BeginDisabled(vst.busy);
+				ImGui::SameLine();
+				ImGui::BeginDisabled(shown);
+				if (ImGui::SmallButton("Edit")) VstHostLink::ShowSlot(i);
+				ImGui::EndDisabled();
+				ImGui::SameLine();
+				if (ImGui::SmallButton(slot.bypass ? "Turn on" : "Bypass")) VstHostLink::SetBypass(i, !slot.bypass);
+				ImGui::SameLine();
+				ImGui::BeginDisabled(i == 0);
+				if (ImGui::SmallButton("Up")) VstHostLink::MoveSlot(i, -1);
+				ImGui::EndDisabled();
+				ImGui::SameLine();
+				ImGui::BeginDisabled(i + 1 >= static_cast<int>(vst.slots.size()));
+				if (ImGui::SmallButton("Down")) VstHostLink::MoveSlot(i, +1);
+				ImGui::EndDisabled();
+				ImGui::SameLine();
+				if (ImGui::SmallButton("Remove")) VstHostLink::RemoveSlot(i);
+				ImGui::EndDisabled();
+				ImGui::PopID();
+			}
+
+			// Add: the 64-bit VST3 plugins found on this PC.
+			const std::vector<VstHostLink::Plugin>& plugins = VstHostLink::Plugins();
+			ImGui::BeginDisabled(vst.busy || vst.slots.size() >= 8);
+			ImGui::SetNextItemWidth(RowWidth() * 0.55f);
+			if (ImGui::BeginCombo("##vstAdd", vst.slots.empty() ? "Add your first plugin" : "Add a plugin")) {
+				for (const auto& plugin : plugins)
+					if (ImGui::Selectable(plugin.name.c_str())) VstHostLink::AddPlugin(plugin.path);
+				if (plugins.empty()) ImGui::TextDisabled("No 64-bit VST3 plugins found");
+				ImGui::EndCombo();
+			}
+			ImGui::EndDisabled();
+			ImGui::SameLine();
+			if (Button("Rescan", false, "Looks for newly installed plugins.")) VstHostLink::Rescan();
+			ImGui::SameLine();
+			if (Button("Add folder", false, "Also look for plugins in another folder (opens behind the game, so alt-tab to see it)."))
+				VstHostLink::AddScanFolder();
+			EndCard();
+		}
+
+		void VstTonesCard(const VstHostLink::Snapshot& vst)
+		{
+			BeginCard("Tones");
+			Caption("A tone is the whole chain with every plugin's settings. Save one per sound you like.");
+			const std::vector<std::string>& tones = VstHostLink::Tones();
+			ImGui::BeginDisabled(vst.busy);
+			ImGui::SetNextItemWidth(RowWidth() * 0.55f);
+			if (ImGui::BeginCombo("##vstTone", tones.empty() ? "No saved tones yet" : "Load a tone")) {
+				for (const auto& tone : tones)
+					if (ImGui::Selectable(tone.c_str(), _stricmp(tone.c_str(), vst.toneName.c_str()) == 0)) VstHostLink::LoadTone(tone);
+				ImGui::EndCombo();
+			}
+			ImGui::EndDisabled();
+			ImGui::SameLine();
+			if (Button("Open folder", false, "The tone files, to back up or share (opens behind the game, so alt-tab to see it)."))
+				VstHostLink::OpenTonesFolder();
+
+			static char toneName[64] = {};
+			static std::string seededFrom;
+			if (seededFrom != vst.toneName) { strncpy_s(toneName, vst.toneName.c_str(), _TRUNCATE); seededFrom = vst.toneName; }
+			ImGui::SetNextItemWidth(RowWidth() * 0.55f);
+			ImGui::InputTextWithHint("##vstToneName", "Tone name", toneName, sizeof(toneName));
+			ImGui::SameLine();
+			ImGui::BeginDisabled(toneName[0] == '\0' || vst.busy);
+			if (Button("Save", true, "Saves the chain and every plugin's settings under this name (replaces a tone with the same name)."))
+				VstHostLink::SaveTone(toneName);
+			ImGui::EndDisabled();
+			const bool saved = std::any_of(tones.begin(), tones.end(), [&](const std::string& t) { return _stricmp(t.c_str(), toneName) == 0; });
+			if (saved) {
+				ImGui::SameLine();
+				if (Button("Delete", false, "Deletes the saved tone with this name. The chain you hear stays as it is."))
+					VstHostLink::DeleteTone(toneName);
+			}
+
+			// Per-song tones.
+			ImGui::Spacing();
+			if (vst.songKey.empty()) Caption("Start a song to give it its own tone: it then loads whenever that song starts.");
+			else {
+				InfoRow("This song", vst.songTone.empty() ? vst.songKey + ": no tone of its own" : vst.songKey + ": " + vst.songTone,
+					vst.songTone.empty() ? Color::Muted : Color::Good);
+				const bool canAssign = !vst.toneName.empty() && !vst.toneModified;
+				ImGui::BeginDisabled(!canAssign);
+				if (Button("Use this tone for this song", false, canAssign ? "Loads this tone whenever this song starts; other songs go back to your usual tone."
+					: "Save the chain as a tone first."))
+					VstHostLink::SetSongTone(vst.toneName);
+				ImGui::EndDisabled();
+				if (!vst.songTone.empty()) {
+					ImGui::SameLine();
+					if (Button("Forget", false, "This song stops loading its own tone.")) VstHostLink::ClearSongTone();
+				}
+			}
+			EndCard();
+		}
+
+		void VstLevelsCard(const VstHostLink::Snapshot& vst)
+		{
+			BeginCard("VST levels");
+			// Trims around the chain. Dragging sends the new level as it moves (the host coalesces them).
+			static float inputDb = 0.0f, outputDb = 0.0f;
+			static bool dragging = false;
+			if (!dragging) { inputDb = vst.inputTenths / 10.0f; outputDb = vst.outputTenths / 10.0f; }
+			bool inputDone = false, outputDone = false;
+			const bool inputMoved = SliderRow("Into the chain", &inputDb, -24.0f, 24.0f, "%+.1f dB", &inputDone,
+				"Level of your guitar going into the first plugin. Amp sims expect a real guitar's level; raise it if they sound thin.");
+			const bool outputMoved = SliderRow("Out of the chain", &outputDb, -24.0f, 24.0f, "%+.1f dB", &outputDone,
+				"Level of the whole chain going to the game.");
+			if (inputMoved || outputMoved) {
+				dragging = true;
+				VstHostLink::SetLevels(static_cast<int>(std::lround(inputDb * 10.0f)), static_cast<int>(std::lround(outputDb * 10.0f)));
+			}
+			if (inputDone || outputDone) dragging = false;
+			Meter("Into the chain", MeterFraction(vst.inputPeak), "After the input trim.");
+			Meter("Out of the chain", MeterFraction(vst.outputPeak), "After the output trim, before the game's mix.");
+			if (vst.outputPeak > 1.0f) WarnCaption("The chain's output is clipping. Lower the output trim or the last plugin's volume.");
+			EndCard();
+		}
+
 		void ExternalAmpPage()
 		{
 			const ExternalAmp::Snapshot amp = ExternalAmp::GetSnapshot();
@@ -742,63 +935,9 @@ namespace Overlay
 				ExternalAmp::SetEnabled(enabled);
 			EndCard();
 
-			// VST host (VstHost/): the amp plugin runs in its own 64-bit program; its window can pop out over the game
-			// while this overlay is open.
-			const VstHostLink::Snapshot vst = VstHostLink::GetSnapshot();
-			BeginCard("VST plugin");
-			if (!vst.hostInstalled) {
-				Caption("The VST host is not installed in the game folder.");
-			}
-			else {
-				if (vst.switching) InfoRow("Plugin", "Loading...", Color::Warn);
-				else if (vst.hostRunning) InfoRow("Plugin", vst.pluginName.empty() ? "Loading..." : vst.pluginName, Color::Good);
-				else Caption("Play through a VST3 amp sim (AmpliTube 5, Helix Native...) without opening its own app.");
-
-				// Plugin picker: the 64-bit VST3 plugins installed in Common Files\VST3. While the host runs, picking one
-				// switches to it straight away inside the host (the current plugin's settings are saved first, each
-				// plugin keeps its own, and the popout stays up). Without a host, the pick is what Start opens.
-				const std::vector<VstHostLink::Plugin>& plugins = VstHostLink::Plugins();
-				static std::wstring picked;
-				if (vst.hostRunning && !vst.switching && !vst.currentPlugin.empty()) picked = vst.currentPlugin;
-				if (picked.empty()) picked = vst.lastPlugin;
-				std::string pickedName = "Choose a plugin";
-				for (const auto& plugin : plugins) if (_wcsicmp(plugin.path.c_str(), picked.c_str()) == 0) pickedName = plugin.name;
-				ImGui::SetNextItemWidth(RowWidth() * 0.6f);
-				ImGui::BeginDisabled(vst.switching);
-				if (ImGui::BeginCombo("##vstPlugin", pickedName.c_str())) {
-					for (const auto& plugin : plugins) {
-						const bool selected = _wcsicmp(plugin.path.c_str(), picked.c_str()) == 0;
-						if (ImGui::Selectable(plugin.name.c_str(), selected) && !selected) {
-							picked = plugin.path;
-							if (vst.hostRunning) VstHostLink::LoadPlugin(picked);
-						}
-						if (selected) ImGui::SetItemDefaultFocus();
-					}
-					if (plugins.empty()) ImGui::TextDisabled("No 64-bit VST3 plugins found");
-					ImGui::EndCombo();
-				}
-				ImGui::EndDisabled();
-				ImGui::SameLine();
-				if (Button("Rescan", false, "Looks for newly installed plugins.")) VstHostLink::Rescan();
-
-				if (!vst.hostRunning) {
-					ImGui::BeginDisabled(picked.empty() || vst.switching);
-					if (Button("Start VST host", true, "Starts the VST host with this plugin."))
-						VstHostLink::LoadPlugin(picked);
-					ImGui::EndDisabled();
-				}
-				else {
-					if (Button(vst.popoutWanted ? "Hide amp" : "Pop out amp", !vst.popoutWanted,
-						"Shows the plugin's own window over the game whenever this overlay is open. Drag its top bar to move it; the spot is remembered."))
-						VstHostLink::SetPopout(!vst.popoutWanted);
-					ImGui::SameLine();
-					if (Button("Close VST host", false, "Saves the plugin's settings and closes it. The game's amp comes back if fallback is on."))
-						VstHostLink::StopHost();
-				}
-				if (!vst.switching && !vst.loadError.empty())
-					WarnCaption(("That plugin did not load (" + vst.loadError + "); the previous one is still playing.").c_str());
-			}
-			EndCard();
+			// VST host (VstHost/): a chain of VST3 plugins in its own 64-bit program; the chosen plugin's window can
+			// pop out over the game while this overlay is open.
+			VstPluginCards(amp);
 
 			BeginCard("Connection");
 			if (!amp.proxyLoaded) {
