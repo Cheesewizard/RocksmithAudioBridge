@@ -15,6 +15,7 @@ namespace ExternalAmp
 		constexpr wchar_t kKey[] = L"Software\\RSMods\\AsioProxy";
 		constexpr unsigned kPlayer1Channel = 1;   // VolumeControl channel index of Mixer_Player1
 		constexpr int kMinReturnTenths = -300, kMaxReturnTenths = 60;
+		constexpr char kToneDesignerGuest[] = "RocksmithAudioBridgeVstHost.exe";
 
 		std::atomic<bool> g_enabled{ true };
 		std::atomic<bool> g_compare{ false };   // A/B: the game's amp for now, not saved
@@ -190,13 +191,18 @@ namespace ExternalAmp
 
 			while (!GameState::GameClosing)
 			{
-				const bool enabled = g_enabled.load() && !g_compare.load();
-				const bool fallback = g_fallback.load();
-				const int tenths = g_returnTenths.load();
-				const float gain = std::pow(10.0f, tenths / 200.0f);
-
 				AmpLink::Status link{};
 				const bool proxyLoaded = ReadLinkStatus(link);
+
+				// Two features share the link: an external app (this page's switch) and Tone designer (the VST host,
+				// its own page). Tone designer plays whenever it is the one connected; the switch is for other apps.
+				const bool toneDesigner = link.guestPresent && _stricmp(link.guestName, kToneDesignerGuest) == 0;
+				// The External amp page's settings (switch, return level, fallback) are for external apps only: Tone
+				// designer has its own output trim, and the game's amp always comes back if it stops.
+				const bool enabled = (g_enabled.load() || toneDesigner) && !g_compare.load();
+				const bool fallback = toneDesigner || g_fallback.load();
+				const int tenths = toneDesigner ? 0 : g_returnTenths.load();
+				const float gain = std::pow(10.0f, tenths / 200.0f);
 				if (proxyLoaded != lastProxyLoaded)
 				{
 					lastProxyLoaded = proxyLoaded;
@@ -218,7 +224,7 @@ namespace ExternalAmp
 				if (Wwise::SoundEngine::IsInitialized())
 				{
 					if (wantMute) mute.Hold();
-					else mute.Release(!enabled ? "external amp switched off" : "amp sim disconnected");
+					else mute.Release(!enabled ? "external amp switched off" : "amp sim disconnected");   // the switch is ignored for Tone designer
 				}
 
 				const ULONGLONG now = GetTickCount64();
@@ -227,6 +233,7 @@ namespace ExternalAmp
 				{
 					std::lock_guard<std::mutex> lock(g_snapshotMutex);
 					g_snapshot.enabled = enabled;
+					g_snapshot.toneDesigner = toneDesigner;
 					g_snapshot.fallback = fallback;
 					g_snapshot.returnTenths = tenths;
 					g_snapshot.proxyLoaded = proxyLoaded;

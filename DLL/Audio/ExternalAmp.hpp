@@ -24,7 +24,9 @@ namespace ExternalAmp
 {
 	struct Snapshot
 	{
-		bool enabled = true;
+		bool enabled = true;           // the External amp switch: mix in an external app
+		bool toneDesigner = false;     // the link's guest is Tone designer (the VST host): mixed in whatever the switch,
+		                               // at 0 dB (it has its own trims), always falling back to the game's amp
 		bool comparing = false;        // A/B: the game's amp plays for now (not saved), the amp sim is not mixed in
 		bool fallback = true;
 		int returnTenths = 0;          // amp return level, tenths of a dB

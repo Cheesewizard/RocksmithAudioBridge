@@ -300,8 +300,8 @@ namespace VstHostLink
 			return std::any_of(items.begin(), items.end(), [&](const std::wstring& i) { return _wcsicmp(i.c_str(), item.c_str()) == 0; });
 		}
 
-		std::vector<std::wstring> g_favourites, g_recent;
-		bool g_favouritesRead = false, g_recentRead = false;
+		std::vector<std::wstring> g_favourites, g_recent, g_favouriteTones;
+		bool g_favouritesRead = false, g_recentRead = false, g_favouriteTonesRead = false;
 
 		void RememberRecent(const std::wstring& path)
 		{
@@ -567,6 +567,34 @@ namespace VstHostLink
 		return songs;
 	}
 
+	size_t SongToneCount()
+	{
+		static size_t count = 0;
+		static ULONGLONG readAt = 0;
+		if (readAt != 0 && GetTickCount64() - readAt < 1000) return count;
+		readAt = GetTickCount64();
+		std::vector<wchar_t> section(32768);
+		const DWORD size = GetPrivateProfileSectionW(L"Songs", section.data(), static_cast<DWORD>(section.size()), SongTonesFile().c_str());
+		count = 0;
+		for (const wchar_t* line = section.data(); line < section.data() + size && *line; line += wcslen(line) + 1) ++count;
+		return count;
+	}
+
+	bool IsFavouriteTone(const std::string& tone)
+	{
+		if (!g_favouriteTonesRead) { g_favouriteTones = ReadList(L"FavouriteTones"); g_favouriteTonesRead = true; }
+		return ListHas(g_favouriteTones, Wide(tone));
+	}
+
+	void SetFavouriteTone(const std::string& tone, bool favourite)
+	{
+		IsFavouriteTone(tone);
+		const std::wstring name = Wide(tone);
+		g_favouriteTones.erase(std::remove_if(g_favouriteTones.begin(), g_favouriteTones.end(), [&](const std::wstring& t) { return _wcsicmp(t.c_str(), name.c_str()) == 0; }), g_favouriteTones.end());
+		if (favourite) g_favouriteTones.push_back(name);
+		WriteList(L"FavouriteTones", g_favouriteTones);
+	}
+
 	unsigned SectionsOpen(unsigned fallback) { return ReadDword(L"ToneDesignerSections", fallback); }
 	void SetSectionsOpen(unsigned bits) { WriteDword(L"ToneDesignerSections", bits); }
 
@@ -678,6 +706,7 @@ namespace VstHostLink
 		for (const std::string& song : SongsUsingTone(from))
 			WritePrivateProfileStringW(L"Songs", Wide(song).c_str(), Wide(to).c_str(), SongTonesFile().c_str());
 		if (_stricmp(g_toneBeforeSong.c_str(), from.c_str()) == 0) g_toneBeforeSong = to;
+		if (IsFavouriteTone(from)) { SetFavouriteTone(from, false); SetFavouriteTone(to, true); }
 		g_tonesReadAt = 0;
 		g_snapshotAt = 0;
 	}

@@ -74,6 +74,9 @@ namespace VstHostLink
 	const std::vector<std::string>& Tones();
 	void OpenTonesFolder();
 	std::vector<std::string> SongsUsingTone(const std::string& tone);   // song keys from SongTones.ini
+	size_t SongToneCount();              // songs with a tone of their own
+	bool IsFavouriteTone(const std::string& tone);
+	void SetFavouriteTone(const std::string& tone, bool favourite);
 
 	// Host.
 	void StartHost();

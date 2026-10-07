@@ -729,24 +729,81 @@ namespace Overlay
 
 		// ---- Tone designer --------------------------------------------------------------------------------
 		// The VST host (VstHost/, Audio/VstHostLink.hpp) plays the guitar through a chain of VST3 plugins and shows the
-		// selected pedal's own window over the game. This page drives it like a small chain loader: File, Edit and
-		// View menus, the pedalboard (click a pedal to show it, double-click to bypass, right-click for its actions,
-		// drag to reorder), the tone library and the plugin browser, each a section that folds away. Commands are
-		// queued to the host; the page shows its state a few times a second.
-		// It shares the amp link with the External amp page, which carries one app at a time: each page says when
-		// the other one has it.
+		// selected pedal's own window over the game. This page is laid out like a chain loader, in one framed panel:
+		//   - a bar: File / Edit / View, the tone's name between previous / next arrows (amber dot = unsaved),
+		//     VST | Game amp (A/B), the amp window and power buttons;
+		//   - the tone library on the left (favourites, all tones, song tones);
+		//   - the pedalboard: In jack, cables, one pedal per plugin coloured by kind (LED, knobs, footswitch), Add,
+		//     Out jack. Click selects, double-click opens the plugin's window, the footswitch bypasses, drag
+		//     reorders, right-click a pedal, a tone, the board or the song strip for its actions;
+		//   - a strip with the in / out meters, latency, and the current song's tone;
+		//   - the plugin browser under it.
+		// View shows or hides the library, the browser and the meters (remembered). Commands are queued to the host;
+		// the page shows its state a few times a second. It shares the amp link with the External amp page, which
+		// carries one app at a time: each page says when the other one has it.
 		namespace ToneDesigner
 		{
-			enum Section : unsigned { Pedalboard = 1, Library = 2, Browser = 4, Levels = 8 };
-			enum class Dialog { None, SaveAs, Rename, Delete, NewTone, Discard };
+			enum Section : unsigned { Library = 2, Browser = 4, Meters = 8 };
+			enum class Dialog { None, SaveAs, Rename, Delete, NewTone, Discard, Levels };
 			enum Filter { All, Favourites, Amps, Effects, Dynamics, Instruments, Recent, FilterCount };
+
+			// The panel's own colours (the mockup's): neutral greys, so it reads as a separate app inside the overlay.
+			namespace Ink
+			{
+				constexpr ImU32 App = IM_COL32(21, 23, 28, 255);
+				constexpr ImU32 Edge = IM_COL32(42, 46, 55, 255);
+				constexpr ImU32 Bar = IM_COL32(28, 31, 38, 255);
+				constexpr ImU32 Field = IM_COL32(14, 16, 20, 255);
+				constexpr ImU32 FieldEdge = IM_COL32(52, 57, 71, 255);
+				constexpr ImU32 Text = IM_COL32(217, 220, 227, 255);
+				constexpr ImU32 Soft = IM_COL32(184, 189, 200, 255);
+				constexpr ImU32 Muted = IM_COL32(138, 144, 158, 255);
+				constexpr ImU32 Dim = IM_COL32(125, 132, 148, 255);
+				constexpr ImU32 Blue = IM_COL32(47, 111, 208, 255);
+				constexpr ImU32 Amber = IM_COL32(240, 180, 41, 255);
+				constexpr ImU32 Library = IM_COL32(24, 26, 32, 255);
+				constexpr ImU32 RowHover = IM_COL32(34, 38, 46, 255);
+				constexpr ImU32 RowSelected = IM_COL32(36, 58, 92, 255);
+				constexpr ImU32 Rack = IM_COL32(15, 17, 21, 255);
+				constexpr ImU32 RackEdge = IM_COL32(38, 42, 51, 255);
+				constexpr ImU32 Jack = IM_COL32(74, 80, 96, 255);
+				constexpr ImU32 Cable = IM_COL32(58, 64, 77, 255);
+				constexpr ImU32 Outline = IM_COL32(79, 143, 240, 255);
+				constexpr ImU32 Led = IM_COL32(229, 72, 77, 255);
+				constexpr ImU32 LedOff = IM_COL32(61, 37, 38, 255);
+				constexpr ImU32 Sub = IM_COL32(154, 161, 176, 255);
+				constexpr ImU32 Knob = IM_COL32(20, 23, 29, 255);
+				constexpr ImU32 KnobEdge = IM_COL32(92, 100, 117, 255);
+				constexpr ImU32 Switch = IM_COL32(155, 163, 179, 255);
+				constexpr ImU32 SwitchEdge = IM_COL32(98, 106, 122, 255);
+				constexpr ImU32 AddText = IM_COL32(122, 167, 245, 255);
+				constexpr ImU32 Meter = IM_COL32(48, 164, 108, 255);
+				constexpr ImU32 Tag = IM_COL32(36, 58, 92, 255);
+				constexpr ImU32 TagText = IM_COL32(156, 194, 255, 255);
+				constexpr ImU32 Good = IM_COL32(74, 199, 132, 255);
+				constexpr ImU32 Bad = IM_COL32(229, 72, 77, 255);
+			}
+
+			// Pedal body and edge by kind: dynamics teal, amps brown and wider, effects purple, others slate.
+			struct PedalLook { ImU32 body, edge; float width; int knobs; };
+			PedalLook LookFor(VstHostLink::Kind kind)
+			{
+				switch (kind) {
+				case VstHostLink::Kind::Amp: return { IM_COL32(58, 42, 34, 255), IM_COL32(90, 64, 51, 255), 150.0f, 5 };
+				case VstHostLink::Kind::Dynamics: return { IM_COL32(38, 53, 58, 255), IM_COL32(53, 80, 88, 255), 96.0f, 2 };
+				case VstHostLink::Kind::Effect: return { IM_COL32(44, 43, 68, 255), IM_COL32(69, 67, 106, 255), 96.0f, 2 };
+				default: return { IM_COL32(43, 50, 64, 255), IM_COL32(60, 69, 87, 255), 96.0f, 3 };
+				}
+			}
 
 			struct State
 			{
 				bool loaded = false;
 				unsigned open = 0;              // Section bits, remembered
+				int selected = -1;              // the pedal selected on the board (not necessarily in the amp window)
 				std::wstring selectedPlugin;    // the browser's selected row
 				char search[64] = {};
+				char toneSearch[48] = {};
 				int filter = All;
 				Dialog dialog = Dialog::None;
 				bool openDialog = false;
@@ -757,16 +814,16 @@ namespace Overlay
 			State& S()
 			{
 				static State state;
-				if (!state.loaded) { state.open = VstHostLink::SectionsOpen(Pedalboard | Library | Browser | Levels); state.loaded = true; }
+				if (!state.loaded) { state.open = VstHostLink::SectionsOpen(Library | Browser | Meters); state.loaded = true; }
 				return state;
 			}
 
 			bool IsOpen(Section section) { return (S().open & section) != 0; }
 
-			void SetOpen(Section section, bool open)
+			void Toggle(Section section)
 			{
 				State& s = S();
-				s.open = open ? (s.open | section) : (s.open & ~static_cast<unsigned>(section));
+				s.open ^= section;
 				VstHostLink::SetSectionsOpen(s.open);
 			}
 
@@ -781,14 +838,31 @@ namespace Overlay
 				strncpy_s(s.name, tone.c_str(), _TRUNCATE);
 			}
 
+			const VstHostLink::Plugin* FindPlugin(const std::wstring& path)
+			{
+				for (const VstHostLink::Plugin& plugin : VstHostLink::Plugins())
+					if (_wcsicmp(plugin.path.c_str(), path.c_str()) == 0) return &plugin;
+				return nullptr;
+			}
+
 			const char* KindName(VstHostLink::Kind kind)
 			{
 				switch (kind) {
-				case VstHostLink::Kind::Amp: return "Amp / drive";
+				case VstHostLink::Kind::Amp: return "Amp";
 				case VstHostLink::Kind::Effect: return "Effect";
 				case VstHostLink::Kind::Dynamics: return "Dynamics";
 				case VstHostLink::Kind::Instrument: return "Instrument";
 				default: return "Plugin";
+				}
+			}
+
+			ImU32 KindColor(VstHostLink::Kind kind)
+			{
+				switch (kind) {
+				case VstHostLink::Kind::Amp: return IM_COL32(230, 160, 120, 255);
+				case VstHostLink::Kind::Effect: return IM_COL32(170, 160, 240, 255);
+				case VstHostLink::Kind::Dynamics: return IM_COL32(120, 200, 210, 255);
+				default: return Ink::Muted;
 				}
 			}
 
@@ -819,15 +893,44 @@ namespace Overlay
 				else VstHostLink::SaveTone(vst.toneName);
 			}
 
+			// The previous or next saved tone (the arrows beside the tone's name), wrapping around.
+			void StepTone(const VstHostLink::Snapshot& vst, int delta)
+			{
+				const std::vector<std::string>& tones = VstHostLink::Tones();
+				if (tones.empty()) return;
+				int index = -1;
+				for (int i = 0; i < static_cast<int>(tones.size()); ++i)
+					if (_stricmp(tones[i].c_str(), vst.toneName.c_str()) == 0) index = i;
+				const int count = static_cast<int>(tones.size());
+				const int next = index < 0 ? (delta > 0 ? 0 : count - 1) : ((index + delta) % count + count) % count;
+				if (next != index) RequestLoad(vst, tones[next]);
+			}
+
 			// The host moves a pedal one place at a time; a drag across several is queued as adjacent swaps.
 			void MovePedal(int from, int to)
 			{
 				for (int i = from; i < to; ++i) VstHostLink::MoveSlot(i, +1);
 				for (int i = from; i > to; --i) VstHostLink::MoveSlot(i, -1);
+				S().selected = to;
+			}
+
+			void OpenWindow(int slot)
+			{
+				VstHostLink::ShowSlot(slot);
+				VstHostLink::SetPopout(true);
 			}
 
 			// Popups and menus get room around their items (the overlay's windows have no padding of their own).
 			void PushPopupPadding() { ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10, 8)); }
+
+			ImFont* CaptionFont() { return GetFonts().caption ? GetFonts().caption : ImGui::GetFont(); }
+
+			void Text(ImDrawList* list, ImFont* font, ImVec2 at, ImU32 color, const char* text)
+			{
+				list->AddText(font, font->FontSize, at, color, text);
+			}
+
+			float TextWidth(ImFont* font, const char* text) { return font->CalcTextSizeA(font->FontSize, FLT_MAX, 0.0f, text).x; }
 
 			// The plugins as menu items, vendor on the right. Instruments are left out (they make no sound from a
 			// guitar); the browser still lists them.
@@ -842,27 +945,26 @@ namespace Overlay
 			}
 
 			// One pedal's actions: the pedal's right-click menu, and Edit for the selected pedal.
-			void PedalActions(const VstHostLink::Snapshot& vst, int i, bool withShow)
+			void PedalActions(const VstHostLink::Snapshot& vst, int i)
 			{
 				const int count = static_cast<int>(vst.slots.size());
 				const bool valid = i >= 0 && i < count;
 				const bool idle = !vst.busy;
-				if (withShow && ImGui::MenuItem("Show in amp window", nullptr, valid && i == vst.shownSlot && vst.popoutWanted, valid)) {
-					VstHostLink::ShowSlot(i);
-					VstHostLink::SetPopout(true);
-				}
-				if (ImGui::MenuItem(valid && vst.slots[i].bypass ? "Turn pedal on" : "Bypass pedal", nullptr, false, valid && idle))
+				if (ImGui::MenuItem("Open window", "Double-click", false, valid)) OpenWindow(i);
+				if (ImGui::MenuItem(valid && vst.slots[i].bypass ? "Turn on" : "Bypass", "Footswitch", false, valid && idle))
 					VstHostLink::SetBypass(i, !vst.slots[i].bypass);
-				if (ImGui::MenuItem("Duplicate", nullptr, false, valid && idle && count < VstHostControl::kMaxSlots)) VstHostLink::DuplicateSlot(i);
+				ImGui::Separator();
 				if (ImGui::BeginMenu("Replace with", valid && idle)) {
 					PluginMenuItems([&](const VstHostLink::Plugin& plugin) { VstHostLink::ReplaceSlot(i, plugin.path); });
 					ImGui::EndMenu();
 				}
+				if (ImGui::MenuItem("Duplicate", nullptr, false, valid && idle && count < VstHostControl::kMaxSlots)) VstHostLink::DuplicateSlot(i);
+				if (ImGui::MenuItem("Move left", nullptr, false, valid && idle && i > 0)) { VstHostLink::MoveSlot(i, -1); S().selected = i - 1; }
+				if (ImGui::MenuItem("Move right", nullptr, false, valid && idle && i + 1 < count)) { VstHostLink::MoveSlot(i, +1); S().selected = i + 1; }
 				ImGui::Separator();
-				if (ImGui::MenuItem("Move left", nullptr, false, valid && idle && i > 0)) VstHostLink::MoveSlot(i, -1);
-				if (ImGui::MenuItem("Move right", nullptr, false, valid && idle && i + 1 < count)) VstHostLink::MoveSlot(i, +1);
-				ImGui::Separator();
+				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Bad));
 				if (ImGui::MenuItem("Remove", nullptr, false, valid && idle)) VstHostLink::RemoveSlot(i);
+				ImGui::PopStyleColor();
 			}
 
 			void FileMenu(const VstHostLink::Snapshot& vst)
@@ -881,9 +983,8 @@ namespace Overlay
 				if (ImGui::MenuItem("Save", nullptr, false, idle && (vst.toneName.empty() || vst.toneModified))) Save(vst);
 				if (ImGui::MenuItem("Save as...", nullptr, false, idle)) Ask(Dialog::SaveAs, vst.toneName);
 				if (ImGui::MenuItem("Revert to saved", nullptr, false, idle && !vst.toneName.empty() && vst.toneModified)) VstHostLink::LoadTone(vst.toneName);
+				if (ImGui::MenuItem("Rename...", nullptr, false, idle && !vst.toneName.empty())) Ask(Dialog::Rename, vst.toneName);
 				ImGui::Separator();
-				if (ImGui::MenuItem("Rename tone...", nullptr, false, idle && !vst.toneName.empty())) Ask(Dialog::Rename, vst.toneName);
-				if (ImGui::MenuItem("Delete tone...", nullptr, false, idle && !vst.toneName.empty())) Ask(Dialog::Delete, vst.toneName);
 				if (ImGui::MenuItem("Show tones folder")) VstHostLink::OpenTonesFolder();
 				ImGui::Separator();
 				if (ImGui::MenuItem("Close Tone designer")) VstHostLink::StopHost();
@@ -893,13 +994,16 @@ namespace Overlay
 			void EditMenu(const VstHostLink::Snapshot& vst)
 			{
 				if (!ImGui::BeginMenu("Edit")) return;
-				const bool selected = vst.shownSlot >= 0 && vst.shownSlot < static_cast<int>(vst.slots.size());
-				ImGui::TextDisabled("%s", selected ? ("Selected pedal: " + vst.slots[vst.shownSlot].name).c_str() : "No pedal selected");
+				const int selected = S().selected;
+				const bool valid = selected >= 0 && selected < static_cast<int>(vst.slots.size());
+				ImGui::TextDisabled("%s", valid ? vst.slots[selected].name.c_str() : "No pedal selected");
 				ImGui::Separator();
-				PedalActions(vst, vst.shownSlot, false);
+				PedalActions(vst, selected);
 				ImGui::Separator();
 				if (ImGui::MenuItem("Bypass whole chain", nullptr, vst.chainBypassed, !vst.slots.empty()))
 					VstHostLink::SetChainBypass(!vst.chainBypassed);
+				ImGui::Separator();
+				if (ImGui::MenuItem("Levels...")) Ask(Dialog::Levels);
 				ImGui::EndMenu();
 			}
 
@@ -907,121 +1011,319 @@ namespace Overlay
 			{
 				if (!ImGui::BeginMenu("View")) return;
 				if (ImGui::MenuItem("Amp window", nullptr, vst.popoutWanted)) VstHostLink::SetPopout(!vst.popoutWanted);
-				ImGui::Separator();
-				struct Item { const char* label; Section section; };
-				static const Item items[] = {
-					{ "Pedalboard", Pedalboard }, { "Tone library", Library }, { "Plugin browser", Browser }, { "Levels and meters", Levels },
-				};
-				for (const Item& item : items)
-					if (ImGui::MenuItem(item.label, nullptr, IsOpen(item.section))) SetOpen(item.section, !IsOpen(item.section));
+				if (ImGui::MenuItem("Tone library", nullptr, IsOpen(Library))) Toggle(Library);
+				if (ImGui::MenuItem("Plugin browser", nullptr, IsOpen(Browser))) Toggle(Browser);
+				if (ImGui::MenuItem("Meters", nullptr, IsOpen(Meters))) Toggle(Meters);
 				ImGui::Separator();
 				if (ImGui::MenuItem("Compare with the game's amp", nullptr, amp.comparing)) ExternalAmp::SetCompare(!amp.comparing);
 				if (ImGui::MenuItem("Mute while tuning", nullptr, vst.muteWhileTuning)) VstHostLink::SetMuteWhileTuning(!vst.muteWhileTuning);
 				if (ImGui::MenuItem("Start with the game", nullptr, vst.autoStart)) VstHostLink::SetAutoStart(!vst.autoStart);
+				// The link's latency, shared with external apps (one setting: it is the same link).
+				if (ImGui::MenuItem("Extra safety buffer", nullptr, amp.safetyBuffer)) ExternalAmp::SetSafetyBuffer(!amp.safetyBuffer);
 				ImGui::Separator();
 				if (ImGui::MenuItem("Rescan plugins")) VstHostLink::Rescan();
 				if (ImGui::MenuItem("Add plugin folder...")) VstHostLink::AddScanFolder();
 				ImGui::EndMenu();
 			}
 
-			// File / Edit / View on a strip, with the tone's name and state on the right.
-			void MenuBar(const VstHostLink::Snapshot& vst, const ExternalAmp::Snapshot& amp)
+			// A square icon button drawn on the bar; `on` lights it blue.
+			bool IconSquare(const char* id, unsigned glyph, bool on, const char* hint, float size)
 			{
-				const float height = ImGui::GetFontSize() + ImGui::GetStyle().FramePadding.y * 2.0f;
-				const float width = ImGui::GetContentRegionAvail().x;
-				const ImVec2 start = ImGui::GetCursorScreenPos();
+				const ImVec2 at = ImGui::GetCursorScreenPos();
+				const bool pressed = ImGui::InvisibleButton(id, ImVec2(size, size));
+				const bool hovered = ImGui::IsItemHovered();
 				ImDrawList* list = ImGui::GetWindowDrawList();
-				list->AddRectFilled(start, ImVec2(start.x + width, start.y + height), Color::Card, 6.0f);
-				list->AddRect(start, ImVec2(start.x + width, start.y + height), Color::CardEdge, 6.0f);
+				const ImVec2 end(at.x + size, at.y + size);
+				if (on) list->AddRectFilled(at, end, Ink::Blue, 6.0f);
+				else if (hovered) list->AddRectFilled(at, end, Ink::Edge, 6.0f);
+				list->AddRect(at, end, on ? Ink::Blue : Ink::FieldEdge, 6.0f);
+				DrawIcon(list, ImVec2(at.x + size * 0.5f, at.y + size * 0.5f), glyph, on || hovered ? IM_COL32_WHITE : Ink::Soft);
+				Hint(hint);
+				return pressed;
+			}
 
+			// The bar: menus, the tone's name between arrows, A/B, the amp window and power.
+			void Bar(const VstHostLink::Snapshot& vst, const ExternalAmp::Snapshot& amp, float width, float height)
+			{
 				ImGui::PushStyleColor(ImGuiCol_MenuBarBg, ImVec4(0, 0, 0, 0));
-				ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6, 0));
-				ImGui::BeginChild("##toneMenu", ImVec2(width, height), false,
+				ImGui::PushStyleColor(ImGuiCol_Header, ImGui::ColorConvertU32ToFloat4(Ink::Edge));
+				ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImGui::ColorConvertU32ToFloat4(Ink::Edge));
+				// The bar's height and its labels' vertical place both come from FramePadding (Begin, BeginMenuBar);
+				// it is popped right after, so the menus' popups keep normal item heights.
+				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(9, (height - ImGui::GetFontSize()) * 0.5f));
+				ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 0));
+				ImGui::BeginChild("##toneBar", ImVec2(width, height), false,
 					ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 				ImGui::PopStyleVar();
+				const bool bar = ImGui::BeginMenuBar();
+				ImGui::PopStyleVar();
 				PushPopupPadding();
-				if (ImGui::BeginMenuBar()) {
+				if (bar) {
 					FileMenu(vst);
 					EditMenu(vst);
 					ViewMenu(vst, amp);
+					const float menusEnd = ImGui::GetCursorPosX();
+					ImDrawList* list = ImGui::GetWindowDrawList();
+					const ImVec2 origin = ImGui::GetWindowPos();
+					const float button = height - 12.0f;
+					const float y = (height - button) * 0.5f;
 
-					std::string tone = vst.toneName.empty() ? (vst.slots.empty() ? "New tone" : "Unsaved tone") : vst.toneName;
-					if (HasUnsavedChanges(vst) && !vst.toneName.empty()) tone += " (changed)";
-					const char* state = vst.busy ? "Loading" : vst.chainBypassed ? "Bypassed" : amp.comparing ? "Comparing" : "Playing";
-					const ImU32 stateColor = vst.busy ? Color::Warn : vst.chainBypassed || amp.comparing ? Color::Muted : Color::Good;
-					const float toneW = ImGui::CalcTextSize(tone.c_str()).x, stateW = ImGui::CalcTextSize(state).x;
-					ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX() + 20.0f, ImGui::GetWindowWidth() - toneW - stateW - 44.0f));
-					ImGui::TextUnformatted(tone.c_str());
-					ImGui::SameLine(0.0f, 16.0f);
-					const ImVec2 dot = ImGui::GetCursorScreenPos();
-					ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(dot.x + 4.0f, dot.y + ImGui::GetFontSize() * 0.5f + 1.0f), 4.0f, stateColor, 12);
-					ImGui::SetCursorScreenPos(ImVec2(dot.x + 12.0f, dot.y));
-					ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(stateColor));
-					ImGui::TextUnformatted(state);
-					ImGui::PopStyleColor();
+					// Right: VST | Game amp, the amp window, power.
+					ImFont* caption = CaptionFont();
+					const char* sides[2] = { "VST", "Game amp" };
+					const float sideW[2] = { TextWidth(caption, sides[0]) + 18.0f, TextWidth(caption, sides[1]) + 18.0f };
+					float x = width - 10.0f - button - 6.0f - button - 10.0f - sideW[0] - sideW[1];
+					const ImVec2 ab(origin.x + x, origin.y + y);
+					list->AddRect(ab, ImVec2(ab.x + sideW[0] + sideW[1], ab.y + button), Ink::FieldEdge, 6.0f);
+					for (int side = 0; side < 2; ++side) {
+						const bool on = (side == 1) == amp.comparing;
+						const ImVec2 at(ab.x + (side ? sideW[0] : 0.0f), ab.y);
+						ImGui::SetCursorScreenPos(at);
+						ImGui::PushID(side);
+						if (ImGui::InvisibleButton("##ab", ImVec2(sideW[side], button)) && !on) ExternalAmp::SetCompare(side == 1);
+						ImGui::PopID();
+						Hint("A/B: hear Tone designer, or Rocksmith's own amp for now (not saved).");
+						if (on) list->AddRectFilled(at, ImVec2(at.x + sideW[side], at.y + button), Ink::Blue, 6.0f,
+							side ? ImDrawFlags_RoundCornersRight : ImDrawFlags_RoundCornersLeft);
+						Text(list, caption, ImVec2(at.x + 9.0f, at.y + (button - caption->FontSize) * 0.5f), on ? IM_COL32_WHITE : Ink::Muted, sides[side]);
+					}
+					x += sideW[0] + sideW[1] + 10.0f;
+					ImGui::SetCursorScreenPos(ImVec2(origin.x + x, origin.y + y));
+					if (IconSquare("##ampWindow", Glyph::NewWindow, vst.popoutWanted,
+						vst.popoutWanted ? "Hide the amp window." : "Show the selected pedal's own window over the game whenever this overlay is open. Drag its top bar to move it.", button))
+						VstHostLink::SetPopout(!vst.popoutWanted);
+					x += button + 6.0f;
+					ImGui::SetCursorScreenPos(ImVec2(origin.x + x, origin.y + y));
+					if (IconSquare("##power", Glyph::Power, false, "Close Tone designer (saves the chain). The game's amp comes back.", button))
+						VstHostLink::StopHost();
+
+					// Middle: < tone name >, centred in the space between the menus and A/B.
+					const float left = menusEnd + 12.0f, right = ab.x - origin.x - 12.0f;
+					const float nameW = std::clamp(right - left - 2.0f * (button + 6.0f), 80.0f, 240.0f);
+					const float groupW = nameW + 2.0f * (button + 6.0f);
+					float gx = left + std::max(0.0f, (right - left - groupW) * 0.5f);
+					ImGui::SetCursorScreenPos(ImVec2(origin.x + gx, origin.y + y));
+					if (IconSquare("##prevTone", Glyph::ChevronLeft, false, "Previous saved tone.", button) && !vst.busy) StepTone(vst, -1);
+					gx += button + 6.0f;
+					const ImVec2 box(origin.x + gx, origin.y + y);
+					ImGui::SetCursorScreenPos(box);
+					if (ImGui::InvisibleButton("##toneName", ImVec2(nameW, button))) ImGui::OpenPopup("##toneList");
+					Hint("Your tones. Click to pick one; File has Save and Save as.");
+					list->AddRectFilled(box, ImVec2(box.x + nameW, box.y + button), Ink::Field, 6.0f);
+					list->AddRect(box, ImVec2(box.x + nameW, box.y + button), Ink::FieldEdge, 6.0f);
+					const std::string name = vst.busy ? "Loading..." : vst.toneName.empty() ? (vst.slots.empty() ? "New tone" : "Unsaved tone") : vst.toneName;
+					const bool dot = HasUnsavedChanges(vst);
+					const float textW = ImGui::CalcTextSize(name.c_str()).x + (dot ? 13.0f : 0.0f);
+					const float tx = box.x + std::max(8.0f, (nameW - textW) * 0.5f);
+					const float ty = box.y + (button - ImGui::GetFontSize()) * 0.5f;
+					list->PushClipRect(box, ImVec2(box.x + nameW - 6.0f, box.y + button), true);
+					list->AddText(ImVec2(tx, ty), IM_COL32_WHITE, name.c_str());
+					list->PopClipRect();
+					if (dot) list->AddCircleFilled(ImVec2(std::min(tx + textW - 3.5f, box.x + nameW - 8.0f), ty + ImGui::GetFontSize() * 0.55f), 3.5f, Ink::Amber, 12);
+					gx += nameW + 6.0f;
+					ImGui::SetCursorScreenPos(ImVec2(origin.x + gx, origin.y + y));
+					if (IconSquare("##nextTone", Glyph::ChevronRight, false, "Next saved tone.", button) && !vst.busy) StepTone(vst, +1);
+					if (ImGui::BeginPopup("##toneList")) {
+						const std::vector<std::string>& tones = VstHostLink::Tones();
+						if (tones.empty()) ImGui::TextDisabled("No saved tones yet");
+						for (const std::string& tone : tones)
+							if (ImGui::MenuItem(tone.c_str(), nullptr, _stricmp(tone.c_str(), vst.toneName.c_str()) == 0) && !vst.busy) RequestLoad(vst, tone);
+						ImGui::Separator();
+						if (ImGui::MenuItem("Save as...", nullptr, false, !vst.busy)) Ask(Dialog::SaveAs, vst.toneName);
+						ImGui::EndPopup();
+					}
 					ImGui::EndMenuBar();
 				}
 				ImGui::PopStyleVar();
 				ImGui::EndChild();
-				ImGui::PopStyleColor();
+				ImGui::PopStyleColor(3);
 			}
 
-			// A card whose title row folds it away. Returns true when open; the caller then fills it and calls EndCard.
-			bool SectionCard(const char* title, Section section, const std::string& note = {})
+			// One row of the tone library: click loads, the star marks a favourite, right-click for the rest.
+			void ToneRow(const VstHostLink::Snapshot& vst, const std::string& tone, float width)
 			{
-				BeginCard();
-				ImGui::PushID(title);
-				const float width = RowWidth();
-				const float height = ImGui::GetFontSize() + 2.0f;
-				const ImVec2 start = ImGui::GetCursorScreenPos();
-				if (ImGui::InvisibleButton("##fold", ImVec2(width, height))) SetOpen(section, !IsOpen(section));
+				ImGui::PushID(tone.c_str());
+				const bool current = _stricmp(tone.c_str(), vst.toneName.c_str()) == 0;
+				const bool favourite = VstHostLink::IsFavouriteTone(tone);
+				const float height = ImGui::GetFontSize() + 10.0f;
+				const ImVec2 at = ImGui::GetCursorScreenPos();
+				const bool pressed = ImGui::InvisibleButton("##tone", ImVec2(width, height));
 				const bool hovered = ImGui::IsItemHovered();
-				const bool open = IsOpen(section);
-				ImDrawList* list = ImGui::GetWindowDrawList();
-				const ImU32 color = hovered ? Color::Text : Color::Muted;
-				const float cx = start.x + 5.0f, cy = start.y + height * 0.5f;
-				if (open) list->AddTriangleFilled(ImVec2(cx - 4.5f, cy - 2.5f), ImVec2(cx + 4.5f, cy - 2.5f), ImVec2(cx, cy + 3.0f), color);
-				else list->AddTriangleFilled(ImVec2(cx - 2.5f, cy - 4.5f), ImVec2(cx + 3.0f, cy), ImVec2(cx - 2.5f, cy + 4.5f), color);
-				std::string upper(title);
-				for (char& c : upper) c = static_cast<char>(toupper(static_cast<unsigned char>(c)));
-				ImFont* caption = GetFonts().caption ? GetFonts().caption : ImGui::GetFont();
-				const float captionSize = caption->FontSize;
-				list->AddText(caption, captionSize, ImVec2(start.x + 18.0f, start.y + (height - captionSize) * 0.5f), color, upper.c_str());
-				if (!note.empty()) {
-					const float noteW = caption->CalcTextSizeA(captionSize, FLT_MAX, 0.0f, note.c_str()).x;
-					list->AddText(caption, captionSize, ImVec2(start.x + width - noteW, start.y + (height - captionSize) * 0.5f), Color::Faint, note.c_str());
+				const bool onStar = ImGui::GetIO().MousePos.x > at.x + width - 24.0f;
+				if (pressed) {
+					if (onStar) VstHostLink::SetFavouriteTone(tone, !favourite);
+					else if (!current && !vst.busy) RequestLoad(vst, tone);
 				}
-				Hint(open ? "Click to fold this section away (View menu brings it back too)." : "Click to open this section.");
+				Hint("Click to load it. Right-click for more. The star keeps it at the top.");
+				ImDrawList* list = ImGui::GetWindowDrawList();
+				const ImVec2 end(at.x + width, at.y + height);
+				if (current) list->AddRectFilled(at, end, Ink::RowSelected, 5.0f);
+				else if (hovered) list->AddRectFilled(at, end, Ink::RowHover, 5.0f);
+				list->PushClipRect(at, ImVec2(end.x - 24.0f, end.y), true);
+				list->AddText(ImVec2(at.x + 7.0f, at.y + 5.0f), current ? IM_COL32_WHITE : IM_COL32(195, 200, 210, 255), tone.c_str());
+				list->PopClipRect();
+				if (favourite || hovered)
+					DrawIcon(list, ImVec2(end.x - 12.0f, at.y + height * 0.5f), favourite ? Glyph::StarFilled : Glyph::Star, favourite ? Ink::Amber : Ink::Dim);
+
+				PushPopupPadding();
+				if (ImGui::BeginPopupContextItem("##toneMenu")) {
+					ImGui::TextDisabled("%s", tone.c_str());
+					ImGui::Separator();
+					if (ImGui::MenuItem("Load", nullptr, false, !current && !vst.busy)) RequestLoad(vst, tone);
+					if (ImGui::MenuItem("Favourite", nullptr, favourite)) VstHostLink::SetFavouriteTone(tone, !favourite);
+					const bool songTone = _stricmp(vst.songTone.c_str(), tone.c_str()) == 0;
+					if (ImGui::MenuItem("Use for the current song", nullptr, songTone, !vst.songKey.empty() && !songTone && !vst.busy)) {
+						VstHostLink::SetSongTone(tone);
+						if (!current) RequestLoad(vst, tone);
+					}
+					ImGui::Separator();
+					if (ImGui::MenuItem("Rename...", nullptr, false, !vst.busy)) Ask(Dialog::Rename, tone);
+					if (ImGui::MenuItem("Show in folder")) VstHostLink::OpenTonesFolder();
+					ImGui::Separator();
+					ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Bad));
+					if (ImGui::MenuItem("Delete...", nullptr, false, !vst.busy)) Ask(Dialog::Delete, tone);
+					ImGui::PopStyleColor();
+					ImGui::EndPopup();
+				}
+				ImGui::PopStyleVar();
 				ImGui::PopID();
-				if (!open) { EndCard(); return false; }
-				ImGui::Dummy(ImVec2(0, 2));
-				return true;
 			}
 
-			// The chain as pedals, left to right in the order the guitar goes through them.
-			void PedalboardSection(const VstHostLink::Snapshot& vst)
+			void FoldLabel(const char* text)
 			{
-				const int count = static_cast<int>(vst.slots.size());
-				const float tileW = 128.0f, tileH = 86.0f, gap = 10.0f;
-				const float left = ImGui::GetCursorScreenPos().x;
-				const float right = left + RowWidth();
-				ImVec2 pos = ImGui::GetCursorScreenPos();
-				float bottom = pos.y;
-				ImDrawList* list = ImGui::GetWindowDrawList();
-				ImFont* caption = GetFonts().caption ? GetFonts().caption : ImGui::GetFont();
-				auto place = [&] { if (pos.x > left && pos.x + tileW > right) { pos.x = left; pos.y += tileH + gap; } };
+				ImGui::Dummy(ImVec2(0, 2));
+				ImGui::PushFont(CaptionFont());
+				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Dim));
+				ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 4.0f);
+				ImGui::TextUnformatted(text);
+				ImGui::PopStyleColor();
+				ImGui::PopFont();
+			}
 
+			// Left column: search, favourites, all tones, song tones.
+			void LibraryColumn(const VstHostLink::Snapshot& vst, float width, float height)
+			{
+				State& s = S();
+				ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 10));
+				ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(6, 2));
+				ImGui::PushStyleColor(ImGuiCol_FrameBg, ImGui::ColorConvertU32ToFloat4(Ink::Field));
+				ImGui::BeginChild("##toneLibrary", ImVec2(width, height), false, ImGuiWindowFlags_AlwaysUseWindowPadding);
+				ImGui::PopStyleColor();
+				const float rowW = ImGui::GetContentRegionAvail().x;
+				ImGui::SetNextItemWidth(rowW);
+				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8, 4));
+				ImGui::InputTextWithHint("##toneSearch", "Search tones", s.toneSearch, sizeof(s.toneSearch));
+				ImGui::PopStyleVar();
+
+				const std::vector<std::string>& tones = VstHostLink::Tones();
+				auto matches = [&](const std::string& tone) {
+					if (!s.toneSearch[0]) return true;
+					const char* needle = s.toneSearch;
+					return std::search(tone.begin(), tone.end(), needle, needle + strlen(needle),
+						[](char a, char b) { return tolower(static_cast<unsigned char>(a)) == tolower(static_cast<unsigned char>(b)); }) != tone.end();
+				};
+				bool anyFavourite = false;
+				for (const std::string& tone : tones) if (VstHostLink::IsFavouriteTone(tone) && matches(tone)) { anyFavourite = true; break; }
+				if (anyFavourite) {
+					FoldLabel("Favourites");
+					for (const std::string& tone : tones) if (VstHostLink::IsFavouriteTone(tone) && matches(tone)) ToneRow(vst, tone, rowW);
+				}
+				FoldLabel("All tones");
+				if (tones.empty()) {
+					ImGui::PushFont(CaptionFont());
+					ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Muted));
+					ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + rowW);
+					ImGui::TextUnformatted("None yet. File, Save as keeps the chain with every plugin's settings.");
+					ImGui::PopTextWrapPos();
+					ImGui::PopStyleColor();
+					ImGui::PopFont();
+				}
+				for (const std::string& tone : tones) if (matches(tone)) ToneRow(vst, tone, rowW);
+				FoldLabel("Song tones");
+				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Muted));
+				const size_t songs = VstHostLink::SongToneCount();
+				ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 6.0f);
+				ImGui::TextUnformatted(songs == 0 ? "None yet" : songs == 1 ? "1 song" : (std::to_string(songs) + " songs").c_str());
+				Hint("Songs that load their own tone when they start. Right-click the song strip below, during a song, to set one.");
+				ImGui::PopStyleColor();
+
+				// Right-click on the empty part of the column.
+				PushPopupPadding();
+				if (ImGui::BeginPopupContextWindow("##libraryMenu", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
+					ImGui::TextDisabled("Tones");
+					ImGui::Separator();
+					if (ImGui::MenuItem("New tone", nullptr, false, !vst.busy)) RequestNew(vst);
+					if (ImGui::MenuItem("Save current as...", nullptr, false, !vst.busy)) Ask(Dialog::SaveAs, vst.toneName);
+					if (ImGui::MenuItem("Open tones folder")) VstHostLink::OpenTonesFolder();
+					ImGui::EndPopup();
+				}
+				ImGui::PopStyleVar();
+				ImGui::EndChild();
+				ImGui::PopStyleVar(2);
+			}
+
+			void Jack(ImDrawList* list, ImVec2 center, const char* label)
+			{
+				list->AddCircle(center, 7.0f, Ink::Jack, 16, 3.0f);
+				ImFont* caption = CaptionFont();
+				Text(list, caption, ImVec2(center.x - TextWidth(caption, label) * 0.5f, center.y + 12.0f), Ink::Dim, label);
+			}
+
+			// The rack: In, the pedals joined by cables, Add, Out. Scrolls sideways when the chain is longer than the panel.
+			void Board(const VstHostLink::Snapshot& vst, float width, float height)
+			{
+				State& s = S();
+				const int count = static_cast<int>(vst.slots.size());
+				if (s.selected >= count) s.selected = count - 1;
+				if (s.selected < 0 && vst.shownSlot >= 0 && vst.shownSlot < count) s.selected = vst.shownSlot;
+
+				ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14, 14));
+				ImGui::BeginChild("##board", ImVec2(width, height), false, ImGuiWindowFlags_AlwaysUseWindowPadding | ImGuiWindowFlags_NoScrollbar);
+				const float hintH = CaptionFont()->FontSize * 2.0f + 8.0f;
+				const float rackW = ImGui::GetContentRegionAvail().x;
+				const float rackH = std::max(150.0f, ImGui::GetContentRegionAvail().y - hintH);
+				const ImVec2 rack = ImGui::GetCursorScreenPos();
+				ImDrawList* outer = ImGui::GetWindowDrawList();
+				outer->AddRectFilled(rack, ImVec2(rack.x + rackW, rack.y + rackH), Ink::Rack, 10.0f);
+				outer->AddRect(rack, ImVec2(rack.x + rackW, rack.y + rackH), Ink::RackEdge, 10.0f);
+
+				ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10, 0));
+				ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, 6.0f);
+				ImGui::BeginChild("##rack", ImVec2(rackW, rackH), false, ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_AlwaysUseWindowPadding);
+				ImDrawList* list = ImGui::GetWindowDrawList();
+				ImFont* caption = CaptionFont();
+				const float pedalH = 124.0f;
+				const float top = ImGui::GetCursorScreenPos().y + std::max(0.0f, (rackH - 6.0f - pedalH) * 0.5f);
+				const float midY = top + pedalH * 0.5f;
+				float x = ImGui::GetCursorScreenPos().x;
+				auto cable = [&] { list->AddLine(ImVec2(x, midY), ImVec2(x + 14.0f, midY), Ink::Cable, 3.0f); x += 22.0f; };
+
+				Jack(list, ImVec2(x + 21.0f, midY - 6.0f), "In");
+				x += 42.0f + 8.0f;
+				cable();
 				for (int i = 0; i < count; ++i) {
 					const VstHostLink::SlotView& slot = vst.slots[i];
-					place();
+					const VstHostLink::Plugin* plugin = FindPlugin(slot.path);
+					const PedalLook look = LookFor(plugin ? plugin->kind : VstHostLink::Kind::Unknown);
+					const bool playing = !slot.bypass && !vst.chainBypassed;
+					const bool selected = i == s.selected;
+					const ImVec2 at(x, top);
+					const ImVec2 end(x + look.width, top + pedalH);
+					const ImVec2 footswitch(x + look.width * 0.5f, end.y - 20.0f);
+
 					ImGui::PushID(i);
-					ImGui::SetCursorScreenPos(pos);
-					const bool pressed = ImGui::InvisibleButton("##pedal", ImVec2(tileW, tileH));
+					ImGui::SetCursorScreenPos(at);
+					const bool pressed = ImGui::InvisibleButton("##pedal", ImVec2(look.width, pedalH));
 					const bool hovered = ImGui::IsItemHovered();
-					const bool shown = i == vst.shownSlot;
-					if (pressed && !shown && !vst.busy) VstHostLink::ShowSlot(i);
-					if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && !vst.busy) VstHostLink::SetBypass(i, !slot.bypass);
-					Hint("Click to show it in the amp window. Double-click to bypass it. Right-click for more. Drag to move it.");
+					const ImVec2 mouse = ImGui::GetIO().MousePos;
+					const bool onSwitch = (mouse.x - footswitch.x) * (mouse.x - footswitch.x) + (mouse.y - footswitch.y) * (mouse.y - footswitch.y) < 15.0f * 15.0f;
+					if (pressed) {
+						if (onSwitch) { if (!vst.busy) VstHostLink::SetBypass(i, !slot.bypass); }
+						else s.selected = i;
+					}
+					if (hovered && !onSwitch && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) OpenWindow(i);
+					Hint(onSwitch ? (slot.bypass ? "Footswitch: turn it on." : "Footswitch: bypass it.")
+						: "Double-click to open its window. Right-click for more. Drag to move it.");
 					if (ImGui::BeginDragDropSource()) {
 						ImGui::SetDragDropPayload("RAB_PEDAL", &i, sizeof(i));
 						ImGui::TextUnformatted(slot.name.c_str());
@@ -1036,139 +1338,184 @@ namespace Overlay
 					}
 					PushPopupPadding();
 					if (ImGui::BeginPopupContextItem("##pedalMenu")) {
-						ImGui::TextDisabled("%d. %s", i + 1, slot.name.c_str());
+						s.selected = i;
+						ImGui::TextDisabled("%s", slot.name.c_str());
 						ImGui::Separator();
-						PedalActions(vst, i, true);
+						PedalActions(vst, i);
 						ImGui::EndPopup();
 					}
 					ImGui::PopStyleVar();
 
-					const bool playing = !slot.bypass && !vst.chainBypassed;
-					const ImVec2 end(pos.x + tileW, pos.y + tileH);
-					list->AddRectFilled(pos, end, playing ? (hovered ? Color::Hover : Color::Track) : Color::Sidebar, 6.0f);
-					list->AddRect(pos, end, shown ? Color::AccentHi : Color::CardEdge, 6.0f, 0, shown ? 2.0f : 1.0f);
-					list->AddCircleFilled(ImVec2(pos.x + 14.0f, pos.y + 14.0f), 4.5f, playing ? Color::Good : Color::Faint, 12);
-					char number[8];
-					sprintf_s(number, "%d", i + 1);
-					const float numberW = caption->CalcTextSizeA(caption->FontSize, FLT_MAX, 0.0f, number).x;
-					list->AddText(caption, caption->FontSize, ImVec2(end.x - 10.0f - numberW, pos.y + 7.0f), Color::Faint, number);
-					list->PushClipRect(ImVec2(pos.x + 8.0f, pos.y + 24.0f), ImVec2(end.x - 8.0f, end.y - 20.0f), true);
-					list->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2(pos.x + 10.0f, pos.y + 26.0f), playing ? Color::Text : Color::Muted,
-						slot.name.c_str(), nullptr, tileW - 20.0f);
+					// A bypassed pedal is drawn faded into the rack.
+					auto fade = [&](ImU32 color) { return playing ? color : Mix(Ink::Rack, color, 0.55f); };
+					if (selected) list->AddRect(ImVec2(at.x - 3.0f, at.y - 3.0f), ImVec2(end.x + 3.0f, end.y + 3.0f), Ink::Outline, 11.0f, 0, 2.0f);
+					list->AddRectFilled(at, end, fade(hovered ? Mix(look.body, IM_COL32_WHITE, 0.06f) : look.body), 9.0f);
+					list->AddRect(at, end, fade(look.edge), 9.0f);
+					list->AddCircleFilled(ImVec2(x + look.width * 0.5f, at.y + 12.0f), 4.0f, playing ? Ink::Led : Ink::LedOff, 12);
+					list->PushClipRect(ImVec2(at.x + 4.0f, at.y), ImVec2(end.x - 4.0f, end.y), true);
+					const float nameW = ImGui::CalcTextSize(slot.name.c_str()).x;
+					list->AddText(ImVec2(x + std::max(5.0f, (look.width - nameW) * 0.5f), at.y + 22.0f), fade(IM_COL32_WHITE), slot.name.c_str());
+					const std::string sub = plugin && !plugin->vendor.empty() ? plugin->vendor : (slot.bypass ? "bypassed" : "");
+					const float subW = TextWidth(caption, sub.c_str());
+					Text(list, caption, ImVec2(x + std::max(5.0f, (look.width - subW) * 0.5f), at.y + 24.0f + ImGui::GetFontSize()), fade(Ink::Sub), sub.c_str());
 					list->PopClipRect();
-					const char* footer = slot.bypass ? "Bypassed" : shown ? (vst.popoutWanted ? "In amp window" : "Selected") : "";
-					list->AddText(caption, caption->FontSize, ImVec2(pos.x + 10.0f, end.y - 18.0f), shown && !slot.bypass ? Color::AccentHi : Color::Muted, footer);
+					const float knobsW = look.knobs * 16.0f + (look.knobs - 1) * 7.0f;
+					for (int k = 0; k < look.knobs; ++k) {
+						const ImVec2 knob(x + (look.width - knobsW) * 0.5f + 8.0f + k * 23.0f, at.y + 68.0f);
+						list->AddCircleFilled(knob, 8.0f, fade(Ink::Knob), 16);
+						list->AddCircle(knob, 8.0f, fade(Ink::KnobEdge), 16, 2.0f);
+						list->AddLine(knob, ImVec2(knob.x - 3.0f, knob.y - 5.0f), fade(Ink::KnobEdge), 1.5f);
+					}
+					list->AddCircleFilled(footswitch, 12.0f, fade(hovered && onSwitch ? IM_COL32(190, 198, 212, 255) : Ink::Switch), 20);
+					list->AddCircle(footswitch, 12.0f, fade(Ink::SwitchEdge), 20, 2.0f);
 					ImGui::PopID();
-					bottom = std::max(bottom, end.y);
-					pos.x += tileW + gap;
+					x = end.x + 8.0f;
+					cable();
 				}
 
-				// The last tile adds a plugin at the end of the chain.
+				// Add: a dashed tile, opening the plugin list.
 				if (count < VstHostControl::kMaxSlots) {
-					place();
-					ImGui::SetCursorScreenPos(pos);
+					const float addW = 70.0f;
+					const ImVec2 at(x, top), end(x + addW, top + pedalH);
+					ImGui::SetCursorScreenPos(at);
 					ImGui::BeginDisabled(vst.busy);
-					if (ImGui::InvisibleButton("##addPedal", ImVec2(tileW, tileH))) ImGui::OpenPopup("##addPedalMenu");
+					if (ImGui::InvisibleButton("##addPedal", ImVec2(addW, pedalH))) ImGui::OpenPopup("##addMenu");
 					const bool hovered = ImGui::IsItemHovered();
 					ImGui::EndDisabled();
-					Hint("Adds a plugin at the end of the chain. The plugin browser below has every plugin, with search.");
-					PushPopupPadding();
-					if (ImGui::BeginPopup("##addPedalMenu")) {
-						PluginMenuItems([](const VstHostLink::Plugin& plugin) { VstHostLink::AddPlugin(plugin.path); });
-						ImGui::EndPopup();
+					Hint("Add a plugin at the end of the chain. The plugin browser below has search.");
+					const ImU32 dash = hovered ? Ink::AddText : Ink::Jack;
+					for (float d = at.x + 9.0f; d < end.x - 9.0f; d += 8.0f) {
+						list->AddLine(ImVec2(d, at.y), ImVec2(std::min(d + 4.0f, end.x - 9.0f), at.y), dash);
+						list->AddLine(ImVec2(d, end.y), ImVec2(std::min(d + 4.0f, end.x - 9.0f), end.y), dash);
 					}
-					ImGui::PopStyleVar();
-					const ImVec2 end(pos.x + tileW, pos.y + tileH);
-					const ImU32 color = vst.busy ? Color::Faint : hovered ? Color::AccentHi : Color::Muted;
-					list->AddRect(pos, end, hovered ? Color::AccentHi : Color::Track, 6.0f, 0, 1.5f);
-					const char* label = "+  Add plugin";
-					const ImVec2 size = ImGui::CalcTextSize(label);
-					list->AddText(ImVec2(pos.x + (tileW - size.x) * 0.5f, pos.y + (tileH - size.y) * 0.5f), color, label);
-					bottom = std::max(bottom, end.y);
+					for (float d = at.y + 9.0f; d < end.y - 9.0f; d += 8.0f) {
+						list->AddLine(ImVec2(at.x, d), ImVec2(at.x, std::min(d + 4.0f, end.y - 9.0f)), dash);
+						list->AddLine(ImVec2(end.x, d), ImVec2(end.x, std::min(d + 4.0f, end.y - 9.0f)), dash);
+					}
+					DrawIcon(list, ImVec2(at.x + addW * 0.5f, midY - 8.0f), Glyph::Add, Ink::AddText);
+					Text(list, caption, ImVec2(at.x + (addW - TextWidth(caption, "Add")) * 0.5f, midY + 6.0f), Ink::AddText, "Add");
+					x = end.x + 8.0f;
+					cable();
 				}
-				ImGui::SetCursorScreenPos(ImVec2(left, bottom + 6.0f));
-				ImGui::Dummy(ImVec2(0, 0));
-				if (count == 0) Caption("The chain is empty, so you hear your clean guitar. Start with an amp sim, then add pedals before it (gate, drive) or after it (delay, reverb).");
-				else if (vst.chainBypassed) Caption("The whole chain is bypassed (Edit menu): you hear your clean guitar.");
+				Jack(list, ImVec2(x + 21.0f, midY - 6.0f), "Out");
+				x += 42.0f;
+				ImGui::SetCursorScreenPos(ImVec2(x, top + pedalH));
+				ImGui::Dummy(ImVec2(10.0f, 4.0f));   // the rack's scroll width
+
+				PushPopupPadding();
+				if (ImGui::BeginPopup("##addMenu") || ImGui::BeginPopupContextWindow("##boardMenu", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
+					ImGui::TextDisabled("Add plugin");
+					ImGui::Separator();
+					if (count >= VstHostControl::kMaxSlots) ImGui::TextDisabled("The chain is full (8 plugins)");
+					else PluginMenuItems([](const VstHostLink::Plugin& plugin) { VstHostLink::AddPlugin(plugin.path); });
+					ImGui::Separator();
+					if (ImGui::MenuItem("Bypass whole chain", nullptr, vst.chainBypassed, count > 0)) VstHostLink::SetChainBypass(!vst.chainBypassed);
+					ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Bad));
+					if (ImGui::MenuItem("Clear chain", nullptr, false, count > 0 && !vst.busy)) RequestNew(vst);
+					ImGui::PopStyleColor();
+					ImGui::EndPopup();
+				}
+				ImGui::PopStyleVar();
+				ImGui::EndChild();
+				ImGui::PopStyleVar(2);
+
+				// Under the rack: what to do, or why it is quiet.
+				ImGui::PushFont(caption);
+				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Dim));
+				ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + rackW);
+				ImGui::TextUnformatted(count == 0 ? "The chain is empty, so you hear your clean guitar. Click Add for an amp sim, then pedals before it (gate, drive) or after it (delay, reverb)."
+					: vst.chainBypassed ? "The whole chain is bypassed (Edit menu): you hear your clean guitar."
+					: "Right-click a pedal, a tone, or the board. Double-click a pedal to open its window. Click a footswitch to bypass. Drag pedals to reorder.");
+				ImGui::PopTextWrapPos();
+				ImGui::PopStyleColor();
+				ImGui::PopFont();
+				ImGui::EndChild();
+				ImGui::PopStyleVar();
 			}
 
-			void LibrarySection(const VstHostLink::Snapshot& vst)
+			void MeterBar(ImDrawList* list, ImVec2 at, float width, float peak)
 			{
-				if (!vst.songKey.empty()) {
-					InfoRow("This song", vst.songTone.empty() ? vst.songKey + ": your usual tone" : vst.songKey + ": " + vst.songTone,
-						vst.songTone.empty() ? Color::Muted : Color::Good);
-					const bool canAssign = !vst.toneName.empty() && !vst.toneModified;
-					ImGui::BeginDisabled(!canAssign || _stricmp(vst.songTone.c_str(), vst.toneName.c_str()) == 0);
-					if (Button("Use the current tone for this song", false, canAssign
-						? "Loads this tone whenever this song starts; other songs go back to your usual tone."
-						: "Save the tone first (File, Save)."))
-						VstHostLink::SetSongTone(vst.toneName);
-					ImGui::EndDisabled();
-					if (!vst.songTone.empty()) {
-						ImGui::SameLine();
-						if (Button("Forget", false, "This song stops loading its own tone.")) VstHostLink::ClearSongTone();
-					}
-				}
-				else Caption("Start a song to give it its own tone: it then loads whenever that song starts. Right-click a tone for more.");
+				const float height = 7.0f;
+				list->AddRectFilled(at, ImVec2(at.x + width, at.y + height), Ink::Field, 4.0f);
+				const float fill = MeterFraction(peak);
+				if (fill > 0.0f) list->AddRectFilled(at, ImVec2(at.x + width * fill, at.y + height), peak > 1.0f ? Ink::Bad : Ink::Meter, 4.0f);
+			}
 
-				const std::vector<std::string>& tones = VstHostLink::Tones();
-				if (tones.empty()) Caption("No saved tones yet. File, Save as keeps the chain and every plugin's settings as a tone.");
+			// The strip: IN and OUT meters, the link's latency and late buffers, and the current song's tone.
+			void Strip(const VstHostLink::Snapshot& vst, const ExternalAmp::Snapshot& amp, float width)
+			{
+				ImDrawList* list = ImGui::GetWindowDrawList();
+				ImFont* caption = CaptionFont();
+				const ImVec2 at = ImGui::GetCursorScreenPos();
+				const float rowH = caption->FontSize + 6.0f;
+				const float pad = 14.0f;
+				char latency[64];
+				sprintf_s(latency, "%.1f ms", amp.link.frames * (amp.link.latencyBlocks > 1 ? 2 : 1) * 1000.0 / AmpLink::kSampleRate);
+				char late[32];
+				sprintf_s(late, "%u late", amp.link.lateBlocks);
+				const float lateW = TextWidth(caption, late), latencyW = TextWidth(caption, latency) + 14.0f;
+				const float labelsW = TextWidth(caption, "IN") + TextWidth(caption, "OUT") + 4.0f * 10.0f;
+				const float meterW = std::max(40.0f, (width - 2.0f * pad - labelsW - latencyW - lateW - 10.0f) * 0.5f);
+				float x = at.x + pad;
+				const float y = at.y + 9.0f;
+				Text(list, caption, ImVec2(x, y), Ink::Muted, "IN");
+				x += TextWidth(caption, "IN") + 10.0f;
+				MeterBar(list, ImVec2(x, y + (caption->FontSize - 7.0f) * 0.5f), meterW, vst.inputPeak);
+				x += meterW + 10.0f;
+				Text(list, caption, ImVec2(x, y), Ink::Muted, "OUT");
+				x += TextWidth(caption, "OUT") + 10.0f;
+				MeterBar(list, ImVec2(x, y + (caption->FontSize - 7.0f) * 0.5f), meterW, vst.outputPeak);
+				x += meterW + 10.0f;
+				Text(list, caption, ImVec2(x, y), Ink::Muted, latency);
+				x += latencyW;
+				Text(list, caption, ImVec2(x, y), amp.link.lateBlocks > 0 ? Ink::Amber : Ink::Muted, late);
+				ImGui::SetCursorScreenPos(at);
+				ImGui::InvisibleButton("##levels", ImVec2(width, rowH + 6.0f));
+				Hint(vst.outputPeak > 1.0f ? "The chain's output is clipping. Click to lower the output trim, or lower the last plugin's volume."
+					: "Your guitar into the chain and the chain's output. Click for the levels. Late buffers are clicks: try View, Extra safety buffer, or fewer plugins.");
+				if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) Ask(Dialog::Levels);
+
+				// Song row.
+				const ImVec2 song(at.x + pad, at.y + rowH + 12.0f);
+				ImGui::SetCursorScreenPos(ImVec2(at.x, song.y - 4.0f));
+				ImGui::InvisibleButton("##song", ImVec2(width, ImGui::GetFontSize() + 10.0f));
+				DrawIcon(list, ImVec2(song.x + 8.0f, song.y + ImGui::GetFontSize() * 0.5f), Glyph::MusicNote, Ink::Soft);
+				float sx = song.x + 22.0f;
+				if (vst.songKey.empty()) {
+					Text(list, caption, ImVec2(sx, song.y + 2.0f), Ink::Dim, "Start a song to give it its own tone.");
+				}
 				else {
-					const float rowH = ImGui::GetFrameHeight();
-					const float width = RowWidth();
-					const int shownRows = std::min(static_cast<int>(tones.size()), 8);
-					ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(10, 2));
-					ImGui::BeginChild("##tones", ImVec2(width, shownRows * (rowH + 2.0f)), false);
-					ImDrawList* list = ImGui::GetWindowDrawList();
-					ImFont* caption = GetFonts().caption ? GetFonts().caption : ImGui::GetFont();
-					for (const std::string& tone : tones) {
-						ImGui::PushID(tone.c_str());
-						const bool current = _stricmp(tone.c_str(), vst.toneName.c_str()) == 0;
-						const ImVec2 start = ImGui::GetCursorScreenPos();
-						const float rowW = ImGui::GetContentRegionAvail().x;
-						if (ImGui::Selectable("##tone", current, ImGuiSelectableFlags_None, ImVec2(rowW, rowH)) && !current && !vst.busy)
-							RequestLoad(vst, tone);
-						Hint(current ? "The tone you hear. Right-click for more." : "Click to load it. Right-click for more.");
-						PushPopupPadding();
-						if (ImGui::BeginPopupContextItem("##toneMenu")) {
-							ImGui::TextDisabled("%s", tone.c_str());
-							ImGui::Separator();
-							if (ImGui::MenuItem("Load", nullptr, false, !current && !vst.busy)) RequestLoad(vst, tone);
-							const bool songTone = _stricmp(vst.songTone.c_str(), tone.c_str()) == 0;
-							if (ImGui::MenuItem("Use for this song", nullptr, songTone, !vst.songKey.empty() && !songTone && !vst.busy)) {
-								VstHostLink::SetSongTone(tone);
-								if (!current) RequestLoad(vst, tone);
-							}
-							ImGui::Separator();
-							if (ImGui::MenuItem("Rename...", nullptr, false, !vst.busy)) Ask(Dialog::Rename, tone);
-							if (ImGui::MenuItem("Delete...", nullptr, false, !vst.busy)) Ask(Dialog::Delete, tone);
-							ImGui::EndPopup();
-						}
-						ImGui::PopStyleVar();
-						const float textY = start.y + (rowH - ImGui::GetFontSize()) * 0.5f;
-						list->AddText(ImVec2(start.x + 10.0f, textY), current ? Color::Text : Color::Muted, tone.c_str());
-						const char* note = current && HasUnsavedChanges(vst) ? "changed" : _stricmp(vst.songTone.c_str(), tone.c_str()) == 0 ? "this song"
-							: current ? "playing" : "";
-						if (note[0]) {
-							const float noteW = caption->CalcTextSizeA(caption->FontSize, FLT_MAX, 0.0f, note).x;
-							list->AddText(caption, caption->FontSize, ImVec2(start.x + rowW - noteW - 10.0f, start.y + (rowH - caption->FontSize) * 0.5f),
-								current && HasUnsavedChanges(vst) ? Color::Warn : Color::Good, note);
-						}
-						ImGui::PopID();
-					}
-					ImGui::EndChild();
-					ImGui::PopStyleVar();
+					list->AddText(ImVec2(sx, song.y), Ink::Soft, vst.songKey.c_str());
+					sx += ImGui::CalcTextSize(vst.songKey.c_str()).x + 10.0f;
+					const std::string tag = vst.songTone.empty() ? "your usual tone" : vst.songTone;
+					const float tagW = TextWidth(caption, tag.c_str()) + 16.0f;
+					list->AddRectFilled(ImVec2(sx, song.y - 1.0f), ImVec2(sx + tagW, song.y + ImGui::GetFontSize() + 1.0f), Ink::Tag, 5.0f);
+					Text(list, caption, ImVec2(sx + 8.0f, song.y + (ImGui::GetFontSize() - caption->FontSize) * 0.5f), Ink::TagText, tag.c_str());
+					sx += tagW + 10.0f;
+					Text(list, caption, ImVec2(sx, song.y + 2.0f), Ink::Dim, "right-click to change");
 				}
-
-				ImGui::BeginDisabled(vst.busy);
-				if (Button("Save", HasUnsavedChanges(vst), vst.toneName.empty() ? "Saves the chain as a new tone." : "Saves your changes to this tone."))
-					Save(vst);
-				ImGui::SameLine();
-				if (Button("Save as...", false, "Saves the chain and every plugin's settings under a new name.")) Ask(Dialog::SaveAs, vst.toneName);
-				ImGui::EndDisabled();
-				ImGui::SameLine();
-				if (Button("Show folder", false, "The tone files, to back up or share (opens behind the game, so alt-tab to see it)."))
-					VstHostLink::OpenTonesFolder();
+				PushPopupPadding();
+				if (ImGui::BeginPopupContextItem("##songMenu")) {
+					ImGui::TextDisabled("%s", vst.songKey.empty() ? "No song playing" : vst.songKey.c_str());
+					ImGui::Separator();
+					const bool canAssign = !vst.songKey.empty() && !vst.toneName.empty() && !vst.toneModified
+						&& _stricmp(vst.songTone.c_str(), vst.toneName.c_str()) != 0;
+					if (ImGui::MenuItem(vst.toneName.empty() || vst.toneModified ? "Use current tone (save it first)" : ("Use \"" + vst.toneName + "\"").c_str(),
+						nullptr, false, canAssign))
+						VstHostLink::SetSongTone(vst.toneName);
+					if (ImGui::BeginMenu("Use a saved tone", !vst.songKey.empty() && !vst.busy)) {
+						for (const std::string& tone : VstHostLink::Tones())
+							if (ImGui::MenuItem(tone.c_str(), nullptr, _stricmp(tone.c_str(), vst.songTone.c_str()) == 0)) {
+								VstHostLink::SetSongTone(tone);
+								if (_stricmp(tone.c_str(), vst.toneName.c_str()) != 0) RequestLoad(vst, tone);
+							}
+						ImGui::EndMenu();
+					}
+					if (ImGui::MenuItem("Forget (use your usual tone)", nullptr, false, !vst.songTone.empty())) VstHostLink::ClearSongTone();
+					ImGui::EndPopup();
+				}
+				ImGui::PopStyleVar();
+				ImGui::SetCursorScreenPos(ImVec2(at.x, song.y + ImGui::GetFontSize() + 10.0f));
 			}
 
 			bool MatchesSearch(const VstHostLink::Plugin& plugin, const char* search)
@@ -1196,98 +1543,138 @@ namespace Overlay
 			// Status: what happens if it is added.
 			void PluginStatus(const VstHostLink::Snapshot& vst, const VstHostLink::Plugin& plugin, const char*& text, ImU32& color)
 			{
-				if (VstHostLink::FailedToLoad(plugin.path)) { text = "Failed to load"; color = Color::Bad; }
-				else if (InChain(vst, plugin.path)) { text = "In chain"; color = Color::Good; }
-				else if (plugin.kind == VstHostLink::Kind::Instrument) { text = "Not for guitar"; color = Color::Warn; }
-				else { text = "Ready"; color = Color::Muted; }
+				if (VstHostLink::FailedToLoad(plugin.path)) { text = "Failed to load"; color = Ink::Bad; }
+				else if (InChain(vst, plugin.path)) { text = "In chain"; color = Ink::Good; }
+				else if (plugin.kind == VstHostLink::Kind::Instrument) { text = "Not for guitar"; color = Ink::Amber; }
+				else { text = "Ready"; color = Ink::Good; }
 			}
 
-			void BrowserSection(const VstHostLink::Snapshot& vst)
+			bool Chip(const char* label, bool on)
+			{
+				ImGui::PushStyleColor(ImGuiCol_Button, ImGui::ColorConvertU32ToFloat4(on ? Ink::Blue : Ink::RowHover));
+				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImGui::ColorConvertU32ToFloat4(on ? Ink::Blue : Ink::Edge));
+				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(on ? IM_COL32_WHITE : Ink::Soft));
+				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10, 3));
+				ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
+				const bool pressed = ImGui::Button(label);
+				ImGui::PopStyleVar(2);
+				ImGui::PopStyleColor(3);
+				return pressed;
+			}
+
+			// Under the board: every plugin found, with search, filters, type and status.
+			void PluginBrowser(const VstHostLink::Snapshot& vst, float width)
 			{
 				State& s = S();
 				const std::vector<VstHostLink::Plugin>& plugins = VstHostLink::Plugins();
 				const bool canAdd = !vst.busy && vst.slots.size() < static_cast<size_t>(VstHostControl::kMaxSlots);
-				const bool canReplace = !vst.busy && vst.shownSlot >= 0 && vst.shownSlot < static_cast<int>(vst.slots.size());
+				const bool canReplace = !vst.busy && s.selected >= 0 && s.selected < static_cast<int>(vst.slots.size());
+				ImFont* caption = CaptionFont();
+				const float pad = 14.0f;
+				const float left = ImGui::GetCursorPosX() + pad;
+				const float inner = width - 2.0f * pad;
+				ImGui::Dummy(ImVec2(0, 4));
 
-				// Search and filter chips, wrapping onto a second line when the window is narrow.
-				const float left = ImGui::GetCursorPosX();
-				const float right = left + RowWidth();
-				ImGui::SetNextItemWidth(std::min(240.0f, RowWidth() * 0.4f));
-				ImGui::InputTextWithHint("##pluginSearch", "Search name or vendor", s.search, sizeof(s.search));
-				static const char* const chips[FilterCount] = { "All", "Favourites", "Amps", "Effects", "Dynamics", "Instruments", "Recent" };
-				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10, 4));
-				for (int c = 0; c < FilterCount; ++c) {
-					const float chipW = ImGui::CalcTextSize(chips[c]).x + 20.0f;
-					ImGui::SameLine(0.0f, 6.0f);
-					if (ImGui::GetCursorPosX() + chipW > right) ImGui::NewLine();
-					const bool active = s.filter == c;
-					ImGui::PushStyleColor(ImGuiCol_Button, ImGui::ColorConvertU32ToFloat4(active ? Color::Accent : Color::Track));
-					ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImGui::ColorConvertU32ToFloat4(active ? Color::AccentHi : Color::Hover));
-					if (ImGui::Button(chips[c])) s.filter = c;
-					ImGui::PopStyleColor(2);
-				}
+				// Title, count and search on one line.
+				ImGui::SetCursorPosX(left);
+				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(IM_COL32_WHITE));
+				ImGui::AlignTextToFramePadding();
+				ImGui::TextUnformatted("Plugin browser");
+				ImGui::PopStyleColor();
+				ImGui::SameLine(0.0f, 10.0f);
+				const size_t folders = VstHostLink::ScanFolders().size() + 1;
+				const std::string count = std::to_string(plugins.size()) + " found, " + std::to_string(folders) + (folders == 1 ? " folder" : " folders");
+				ImGui::PushFont(caption);
+				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Dim));
+				ImGui::AlignTextToFramePadding();
+				ImGui::TextUnformatted(count.c_str());
+				ImGui::PopStyleColor();
+				ImGui::PopFont();
+				const float searchW = std::min(240.0f, inner * 0.4f);
+				ImGui::SameLine(left + inner - searchW);
+				ImGui::SetNextItemWidth(searchW);
+				ImGui::PushStyleColor(ImGuiCol_FrameBg, ImGui::ColorConvertU32ToFloat4(Ink::Field));
+				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8, 4));
+				ImGui::InputTextWithHint("##pluginSearch", "Search plugins or vendors", s.search, sizeof(s.search));
 				ImGui::PopStyleVar();
+				ImGui::PopStyleColor();
+
+				// Filter chips.
+				static const char* const chips[FilterCount] = { "All", "Favourites", "Amps", "Effects", "Dynamics", "Instruments", "Recent" };
+				ImGui::SetCursorPosX(left);
+				for (int c = 0; c < FilterCount; ++c) {
+					if (c > 0) {
+						ImGui::SameLine(0.0f, 6.0f);
+						if (ImGui::GetCursorPosX() + ImGui::CalcTextSize(chips[c]).x + 20.0f > left + inner) { ImGui::NewLine(); ImGui::SetCursorPosX(left); }
+					}
+					if (Chip(chips[c], s.filter == c)) s.filter = c;
+				}
 
 				std::vector<const VstHostLink::Plugin*> rows;
 				if (s.filter == Recent) {
 					for (const std::wstring& path : VstHostLink::RecentPlugins())
-						for (const VstHostLink::Plugin& plugin : plugins)
-							if (_wcsicmp(plugin.path.c_str(), path.c_str()) == 0 && MatchesSearch(plugin, s.search)) rows.push_back(&plugin);
+						if (const VstHostLink::Plugin* plugin = FindPlugin(path))
+							if (MatchesSearch(*plugin, s.search)) rows.push_back(plugin);
 				}
 				else {
 					for (const VstHostLink::Plugin& plugin : plugins)
 						if (MatchesFilter(plugin, s.filter) && MatchesSearch(plugin, s.search)) rows.push_back(&plugin);
 				}
 
-				// Column header.
-				const float width = RowWidth();
-				const float nameX = 30.0f, vendorX = width * 0.42f, kindX = width * 0.66f;
-				ImFont* caption = GetFonts().caption ? GetFonts().caption : ImGui::GetFont();
+				// Table.
+				const float nameX = 28.0f, vendorX = inner * 0.40f, kindX = inner * 0.66f;
+				ImDrawList* list = ImGui::GetWindowDrawList();
+				ImGui::SetCursorPosX(left);
 				{
-					const ImVec2 start = ImGui::GetCursorScreenPos();
-					ImDrawList* list = ImGui::GetWindowDrawList();
-					list->AddText(caption, caption->FontSize, ImVec2(start.x + nameX, start.y), Color::Faint, "NAME");
-					list->AddText(caption, caption->FontSize, ImVec2(start.x + vendorX, start.y), Color::Faint, "VENDOR");
-					list->AddText(caption, caption->FontSize, ImVec2(start.x + kindX, start.y), Color::Faint, "TYPE");
-					const float statusW = caption->CalcTextSizeA(caption->FontSize, FLT_MAX, 0.0f, "STATUS").x;
-					list->AddText(caption, caption->FontSize, ImVec2(start.x + width - statusW - 10.0f, start.y), Color::Faint, "STATUS");
-					ImGui::Dummy(ImVec2(width, caption->FontSize));
+					const ImVec2 at = ImGui::GetCursorScreenPos();
+					Text(list, caption, ImVec2(at.x + nameX, at.y), Ink::Dim, "Plugin");
+					Text(list, caption, ImVec2(at.x + vendorX, at.y), Ink::Dim, "Vendor");
+					Text(list, caption, ImVec2(at.x + kindX, at.y), Ink::Dim, "Type");
+					Text(list, caption, ImVec2(at.x + inner - TextWidth(caption, "Status") - 10.0f, at.y), Ink::Dim, "Status");
+					ImGui::Dummy(ImVec2(inner, caption->FontSize + 2.0f));
+					list->AddLine(ImVec2(at.x, at.y + caption->FontSize + 4.0f), ImVec2(at.x + inner, at.y + caption->FontSize + 4.0f), Ink::Edge);
 				}
-
-				const float rowH = ImGui::GetFrameHeight();
+				const float rowH = ImGui::GetFontSize() + 10.0f;
 				if (rows.empty()) {
-					Caption(plugins.empty() ? "No 64-bit VST3 plugins found. Install some, or View, Add plugin folder if they are somewhere else."
+					ImGui::SetCursorPosX(left);
+					ImGui::PushFont(caption);
+					ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Muted));
+					ImGui::TextUnformatted(plugins.empty() ? "No 64-bit VST3 plugins found. Install some, or View, Add plugin folder if they are somewhere else."
 						: s.filter == Favourites ? "No favourites yet: click the star next to a plugin."
 						: s.filter == Recent ? "Plugins you add show here."
 						: "Nothing matches.");
+					ImGui::PopStyleColor();
+					ImGui::PopFont();
 				}
 				else {
-					const int shownRows = std::min(static_cast<int>(rows.size()), 8);
-					ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(10, 2));
-					ImGui::BeginChild("##plugins", ImVec2(width, shownRows * (rowH + 2.0f)), false);
-					ImDrawList* list = ImGui::GetWindowDrawList();
+					const int shownRows = std::min(static_cast<int>(rows.size()), 7);
+					ImGui::SetCursorPosX(left);
+					ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
+					ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, 6.0f);
+					ImGui::BeginChild("##plugins", ImVec2(inner, shownRows * rowH), false);
+					ImDrawList* rowsList = ImGui::GetWindowDrawList();
 					const float rowW = ImGui::GetContentRegionAvail().x;
 					for (size_t r = 0; r < rows.size(); ++r) {
 						const VstHostLink::Plugin& plugin = *rows[r];
 						ImGui::PushID(static_cast<int>(r));
 						const bool selected = _wcsicmp(s.selectedPlugin.c_str(), plugin.path.c_str()) == 0;
 						const bool favourite = VstHostLink::IsFavourite(plugin.path);
-						const ImVec2 start = ImGui::GetCursorScreenPos();
-						if (ImGui::Selectable("##plugin", selected, ImGuiSelectableFlags_AllowDoubleClick, ImVec2(rowW, rowH))) {
-							if (ImGui::GetIO().MousePos.x < start.x + nameX - 4.0f) VstHostLink::SetFavourite(plugin.path, !favourite);
-							else {
-								s.selectedPlugin = plugin.path;
-								if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && canAdd) VstHostLink::AddPlugin(plugin.path);
-							}
+						const ImVec2 at = ImGui::GetCursorScreenPos();
+						const bool pressed = ImGui::InvisibleButton("##plugin", ImVec2(rowW, rowH));
+						const bool hovered = ImGui::IsItemHovered();
+						if (pressed) {
+							if (ImGui::GetIO().MousePos.x < at.x + nameX - 4.0f) VstHostLink::SetFavourite(plugin.path, !favourite);
+							else s.selectedPlugin = plugin.path;
 						}
+						if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && canAdd) VstHostLink::AddPlugin(plugin.path);
 						Hint("Double-click to add it to the end of the chain. Right-click for more. The star marks a favourite.");
 						PushPopupPadding();
 						if (ImGui::BeginPopupContextItem("##pluginMenu")) {
 							s.selectedPlugin = plugin.path;
 							ImGui::TextDisabled("%s", plugin.name.c_str());
 							ImGui::Separator();
-							if (ImGui::MenuItem("Add to chain", nullptr, false, canAdd)) VstHostLink::AddPlugin(plugin.path);
-							if (ImGui::MenuItem("Replace selected pedal", nullptr, false, canReplace)) VstHostLink::ReplaceSlot(vst.shownSlot, plugin.path);
+							if (ImGui::MenuItem("Add to chain", "Double-click", false, canAdd)) VstHostLink::AddPlugin(plugin.path);
+							if (ImGui::MenuItem("Replace selected pedal", nullptr, false, canReplace)) VstHostLink::ReplaceSlot(s.selected, plugin.path);
 							ImGui::Separator();
 							if (ImGui::MenuItem("Favourite", nullptr, favourite)) VstHostLink::SetFavourite(plugin.path, !favourite);
 							if (ImGui::MenuItem("Show the file")) VstHostLink::ShowPluginFile(plugin.path);
@@ -1295,55 +1682,65 @@ namespace Overlay
 						}
 						ImGui::PopStyleVar();
 
-						const float textY = start.y + (rowH - ImGui::GetFontSize()) * 0.5f;
-						const float captionY = start.y + (rowH - caption->FontSize) * 0.5f;
-						DrawIcon(list, ImVec2(start.x + 14.0f, start.y + rowH * 0.5f), favourite ? Glyph::StarFilled : Glyph::Star, favourite ? Color::Warn : Color::Faint);
-						list->PushClipRect(ImVec2(start.x + nameX, start.y), ImVec2(start.x + vendorX - 8.0f, start.y + rowH), true);
-						list->AddText(ImVec2(start.x + nameX, textY), Color::Text, plugin.name.c_str());
-						list->PopClipRect();
-						list->PushClipRect(ImVec2(start.x + vendorX, start.y), ImVec2(start.x + kindX - 8.0f, start.y + rowH), true);
-						list->AddText(caption, caption->FontSize, ImVec2(start.x + vendorX, captionY), Color::Muted, plugin.vendor.c_str());
-						list->PopClipRect();
-						list->AddText(caption, caption->FontSize, ImVec2(start.x + kindX, captionY), Color::Muted, KindName(plugin.kind));
+						const ImVec2 end(at.x + rowW, at.y + rowH);
+						if (selected) rowsList->AddRectFilled(at, end, Ink::RowSelected, 5.0f);
+						else if (hovered) rowsList->AddRectFilled(at, end, Ink::RowHover, 5.0f);
+						const float textY = at.y + (rowH - ImGui::GetFontSize()) * 0.5f;
+						const float captionY = at.y + (rowH - caption->FontSize) * 0.5f;
+						DrawIcon(rowsList, ImVec2(at.x + 13.0f, at.y + rowH * 0.5f), favourite ? Glyph::StarFilled : Glyph::Star, favourite ? Ink::Amber : Ink::Jack);
+						rowsList->PushClipRect(ImVec2(at.x + nameX, at.y), ImVec2(at.x + vendorX - 8.0f, end.y), true);
+						rowsList->AddText(ImVec2(at.x + nameX, textY), IM_COL32_WHITE, plugin.name.c_str());
+						rowsList->PopClipRect();
+						rowsList->PushClipRect(ImVec2(at.x + vendorX, at.y), ImVec2(at.x + kindX - 8.0f, end.y), true);
+						Text(rowsList, caption, ImVec2(at.x + vendorX, captionY), Ink::Muted, plugin.vendor.empty() ? "-" : plugin.vendor.c_str());
+						rowsList->PopClipRect();
+						Text(rowsList, caption, ImVec2(at.x + kindX, captionY), KindColor(plugin.kind), KindName(plugin.kind));
 						const char* status = nullptr;
-						ImU32 statusColor = Color::Muted;
+						ImU32 statusColor = Ink::Muted;
 						PluginStatus(vst, plugin, status, statusColor);
-						const float statusW = caption->CalcTextSizeA(caption->FontSize, FLT_MAX, 0.0f, status).x;
-						list->AddText(caption, caption->FontSize, ImVec2(start.x + rowW - statusW - 10.0f, captionY), statusColor, status);
+						Text(rowsList, caption, ImVec2(end.x - TextWidth(caption, status) - 10.0f, captionY), statusColor, status);
 						ImGui::PopID();
 					}
 					ImGui::EndChild();
-					ImGui::PopStyleVar();
+					ImGui::PopStyleVar(2);
 				}
 
 				// The selected plugin, and what can be done with it.
-				const VstHostLink::Plugin* selected = nullptr;
-				for (const VstHostLink::Plugin& plugin : plugins)
-					if (_wcsicmp(plugin.path.c_str(), s.selectedPlugin.c_str()) == 0) selected = &plugin;
-				if (selected) {
-					std::string line = selected->name;
-					if (!selected->vendor.empty()) line += "  by " + selected->vendor;
-					if (!selected->version.empty()) line += "  " + selected->version;
-					ImGui::TextUnformatted(line.c_str());
-					Caption(Utf8(selected->path).c_str());
-					if (selected->kind == VstHostLink::Kind::Instrument)
-						WarnCaption("This is an instrument: it makes its own sound from MIDI notes and does nothing with a guitar.");
-				}
+				const VstHostLink::Plugin* selected = FindPlugin(s.selectedPlugin);
+				ImGui::Dummy(ImVec2(0, 2));
+				ImGui::SetCursorPosX(left);
 				ImGui::BeginDisabled(!selected || !canAdd);
-				if (Button("Add to chain", selected != nullptr, "Adds it at the end of the chain.")) VstHostLink::AddPlugin(selected->path);
+				if (Button("Add to chain", selected != nullptr && canAdd, "Adds it at the end of the chain.")) VstHostLink::AddPlugin(selected->path);
 				ImGui::EndDisabled();
 				ImGui::SameLine();
 				ImGui::BeginDisabled(!selected || !canReplace);
-				if (Button("Replace selected pedal", false, "Puts it in place of the pedal shown in the amp window.")) VstHostLink::ReplaceSlot(vst.shownSlot, selected->path);
+				if (Button("Replace selected pedal", false, "Puts it in place of the pedal selected on the board.")) VstHostLink::ReplaceSlot(s.selected, selected->path);
 				ImGui::EndDisabled();
 				ImGui::SameLine();
 				if (Button("Rescan", false, "Looks for newly installed plugins, and tries plugins that failed to load again.")) VstHostLink::Rescan();
 				ImGui::SameLine();
-				if (Button("Add folder", false, "Also look for plugins in another folder (opens behind the game, so alt-tab to see it)."))
+				if (Button("Plugin folders...", false, "Also look for plugins in another folder (opens behind the game, so alt-tab to see it)."))
 					VstHostLink::AddScanFolder();
+				if (selected) {
+					ImGui::SetCursorPosX(left);
+					std::string line = selected->name + (selected->vendor.empty() ? "" : ", " + selected->vendor) + (selected->version.empty() ? "" : " " + selected->version)
+						+ ":  " + Utf8(selected->path);
+					ImGui::PushFont(caption);
+					ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Dim));
+					ImGui::PushTextWrapPos(left + inner);
+					ImGui::TextUnformatted(line.c_str());
+					ImGui::PopTextWrapPos();
+					ImGui::PopStyleColor();
+					ImGui::PopFont();
+					if (selected->kind == VstHostLink::Kind::Instrument) {
+						ImGui::SetCursorPosX(left);
+						WarnCaption("This is an instrument: it makes its own sound from MIDI notes and does nothing with a guitar.");
+					}
+				}
+				ImGui::Dummy(ImVec2(0, 6));
 			}
 
-			void LevelsSection(const VstHostLink::Snapshot& vst)
+			void LevelsDialogBody(const VstHostLink::Snapshot& vst)
 			{
 				// Trims around the chain. Dragging sends the new level as it moves (the overlay coalesces them).
 				static float inputDb = 0.0f, outputDb = 0.0f;
@@ -1359,8 +1756,8 @@ namespace Overlay
 					VstHostLink::SetLevels(static_cast<int>(std::lround(inputDb * 10.0f)), static_cast<int>(std::lround(outputDb * 10.0f)));
 				}
 				if (inputDone || outputDone) dragging = false;
-				Meter("Into the chain", MeterFraction(vst.inputPeak), "After the input trim.");
-				Meter("Out of the chain", MeterFraction(vst.outputPeak), "After the output trim, before the game's mix.");
+				Meter("Input", MeterFraction(vst.inputPeak), "After the input trim.");
+				Meter("Output", MeterFraction(vst.outputPeak), "After the output trim, before the game's mix.");
 				if (vst.outputPeak > 1.0f) WarnCaption("The chain's output is clipping. Lower the output trim or the last plugin's volume.");
 			}
 
@@ -1382,13 +1779,13 @@ namespace Overlay
 				return pressed;
 			}
 
-			// Save as, Rename, Delete and the "changes are not saved" questions, as one modal at page level.
+			// Save as, Rename, Delete, Levels and the "changes are not saved" questions, as one modal at page level.
 			void Dialogs(const VstHostLink::Snapshot& vst)
 			{
 				State& s = S();
 				const char* id = "##toneDialog";
 				if (s.openDialog) { ImGui::OpenPopup(id); s.openDialog = false; }
-				ImGui::SetNextWindowSize(ImVec2(440.0f, 0.0f), ImGuiCond_Always);
+				ImGui::SetNextWindowSize(ImVec2(s.dialog == Dialog::Levels ? 520.0f : 440.0f, 0.0f), ImGuiCond_Always);
 				ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
 				ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(22, 18));
 				if (ImGui::BeginPopupModal(id, nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize)) {
@@ -1453,6 +1850,11 @@ namespace Overlay
 						if (Button("Cancel")) close = true;
 						break;
 					}
+					case Dialog::Levels:
+						heading("Levels");
+						LevelsDialogBody(vst);
+						if (Button("Done", true)) close = true;
+						break;
 					default:
 						close = true;
 						break;
@@ -1461,6 +1863,56 @@ namespace Overlay
 					ImGui::EndPopup();
 				}
 				ImGui::PopStyleVar();
+			}
+
+			// The framed panel: bar, library + board, strip, browser. Backgrounds are drawn on the page's draw list
+			// first; the parts are child windows on top.
+			void Panel(const VstHostLink::Snapshot& vst, const ExternalAmp::Snapshot& amp)
+			{
+				const float width = ImGui::GetContentRegionAvail().x;
+				const float barH = ImGui::GetFontSize() + 20.0f;
+				const float mainH = 250.0f;
+				const float stripH = IsOpen(Meters) ? CaptionFont()->FontSize + ImGui::GetFontSize() + 34.0f : 0.0f;
+				const float libraryW = IsOpen(Library) ? std::min(190.0f, width * 0.28f) : 0.0f;
+				const ImVec2 at = ImGui::GetCursorScreenPos();
+				ImDrawList* list = ImGui::GetWindowDrawList();
+				// The browser's height is only known after it is drawn: split the draw list so the panel's background
+				// (channel 0) goes under everything drawn after it (channel 1).
+				list->ChannelsSplit(2);
+				list->ChannelsSetCurrent(1);
+
+				Bar(vst, amp, width, barH);
+				ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + barH));
+				if (libraryW > 0.0f) {
+					LibraryColumn(vst, libraryW, mainH);
+					ImGui::SameLine(0.0f, 0.0f);
+				}
+				Board(vst, width - libraryW, mainH);
+				ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + barH + mainH));
+				if (stripH > 0.0f) Strip(vst, amp, width);
+				const float browserTop = ImGui::GetCursorScreenPos().y;
+				if (IsOpen(Browser)) PluginBrowser(vst, width);
+				const float bottom = std::max(ImGui::GetCursorScreenPos().y, browserTop);
+
+				list->ChannelsSetCurrent(0);
+				const ImVec2 end(at.x + width, bottom);
+				list->AddRectFilled(at, end, Ink::App, 12.0f);
+				list->AddRectFilled(at, ImVec2(end.x, at.y + barH), Ink::Bar, 12.0f, ImDrawFlags_RoundCornersTop);
+				list->AddLine(ImVec2(at.x, at.y + barH), ImVec2(end.x, at.y + barH), Ink::Edge);
+				if (libraryW > 0.0f) {
+					list->AddRectFilled(ImVec2(at.x, at.y + barH + 1.0f), ImVec2(at.x + libraryW, at.y + barH + mainH), Ink::Library);
+					list->AddLine(ImVec2(at.x + libraryW, at.y + barH), ImVec2(at.x + libraryW, at.y + barH + mainH), Ink::Edge);
+				}
+				if (stripH > 0.0f) {
+					list->AddRectFilled(ImVec2(at.x, at.y + barH + mainH), ImVec2(end.x, at.y + barH + mainH + stripH), Ink::Bar,
+						IsOpen(Browser) ? 0.0f : 12.0f, IsOpen(Browser) ? 0 : ImDrawFlags_RoundCornersBottom);
+					list->AddLine(ImVec2(at.x, at.y + barH + mainH), ImVec2(end.x, at.y + barH + mainH), Ink::Edge);
+				}
+				if (IsOpen(Browser)) list->AddLine(ImVec2(at.x, browserTop), ImVec2(end.x, browserTop), Ink::Edge);
+				list->AddRect(at, end, Ink::Edge, 12.0f);
+				list->ChannelsMerge();
+				ImGui::SetCursorScreenPos(ImVec2(at.x, bottom + 6.0f));
+				ImGui::Dummy(ImVec2(0, 0));
 			}
 		}
 
@@ -1496,8 +1948,7 @@ namespace Overlay
 				BeginCard();
 				Caption("Tone designer is off. Starting it brings back the chain you had last.");
 				if (otherApp) WarnCaption(otherAppText.c_str());
-				if (vst.busy) Caption("Starting...");
-				else if (Button("Start Tone designer", true, "Starts the VST host in its own 64-bit program; your guitar plays through it once it connects."))
+				if (Button("Start Tone designer", true, "Starts the VST host in its own 64-bit program; your guitar plays through it once it connects."))
 					VstHostLink::StartHost();
 				bool autoStart = vst.autoStart;
 				if (ToggleRow("Start with the game", "Starts Tone designer with your last chain when Rocksmith starts.", &autoStart))
@@ -1506,47 +1957,17 @@ namespace Overlay
 				return;
 			}
 
-			MenuBar(vst, amp);
-			ImGui::Dummy(ImVec2(0, 2));
-
-			// What stops it being heard, each with its way out.
-			if (otherApp || !amp.enabled || amp.comparing || vst.exclusiveFullscreen || !vst.loadError.empty()) {
+			// What stops it being heard or seen, each said plainly.
+			if (otherApp || vst.exclusiveFullscreen || !vst.loadError.empty()) {
 				BeginCard();
 				if (otherApp) WarnCaption(otherAppText.c_str());
-				if (!amp.enabled) {
-					WarnCaption("The amp link is off, so you hear the game's amp.");
-					if (Button("Turn the amp link on", true, "The same switch as Use external amp on the External amp page.")) ExternalAmp::SetEnabled(true);
-				}
-				if (amp.comparing) {
-					Caption("Comparing: you hear the game's amp for now.");
-					if (Button("Back to Tone designer", true)) ExternalAmp::SetCompare(false);
-				}
 				if (vst.exclusiveFullscreen)
-					WarnCaption("Rocksmith runs in exclusive fullscreen, where no window can appear over the game, so the amp window cannot show. Pick non-exclusive (borderless) fullscreen in RSMods' Rocksmith settings.");
+					WarnCaption("Rocksmith runs in exclusive fullscreen, where no window can appear over the game, so plugin windows cannot show. Pick non-exclusive (borderless) fullscreen in RSMods' Rocksmith settings.");
 				if (!vst.loadError.empty()) WarnCaption(vst.loadError.c_str());
 				EndCard();
 			}
 
-			const int slotCount = static_cast<int>(vst.slots.size());
-			if (SectionCard("Pedalboard", Pedalboard, std::to_string(slotCount) + " of " + std::to_string(VstHostControl::kMaxSlots))) {
-				if (Button(vst.popoutWanted ? "Hide amp window" : "Show amp window", !vst.popoutWanted,
-					"Shows the selected pedal's own window over the game whenever this overlay is open. Drag its top bar to move it; the spot is remembered."))
-					VstHostLink::SetPopout(!vst.popoutWanted);
-				PedalboardSection(vst);
-				EndCard();
-			}
-			if (SectionCard("Tone library", Library, std::to_string(VstHostLink::Tones().size()) + " saved")) {
-				LibrarySection(vst);
-				EndCard();
-			}
-			if (SectionCard("Plugin browser", Browser, std::to_string(VstHostLink::Plugins().size()) + " found")) {
-				BrowserSection(vst);
-				EndCard();
-			}
-			if (SectionCard("Levels and meters", Levels)) {
-				LevelsSection(vst);
-				EndCard();
-			}
+			Panel(vst, amp);
 			Dialogs(vst);
 		}
 
@@ -1557,6 +1978,18 @@ namespace Overlay
 			PageHeader("External amp", "Play through an app connected to Rocksmith Audio Bridge ASIO (AmpliTube, TONE3000, a DAW). Rocksmith keeps reading your clean signal.");
 			// The amp link carries one app at a time. Tone designer (the VST host) is one such app, with its own page.
 			const bool toneDesigner = link.guestPresent && VstHostLink::IsHostGuest(link.guestName);
+
+			// While Tone designer holds the link, nothing on this page applies to it (it has its own page, trims and
+			// fallback), so the page says only that.
+			if (toneDesigner) {
+				BeginCard();
+				InfoRow("Amp link", "In use by Tone designer", Color::Good);
+				Caption("You are playing through Tone designer; its settings are on its own page. External apps (AmpliTube, TONE3000, a DAW) can connect once it is closed.");
+				if (Button("Stop Tone designer", false, "Saves its chain and closes it. Start it again from the Tone designer page."))
+					VstHostLink::StopHost();
+				EndCard();
+				return;
+			}
 
 			BeginCard();
 			bool enabled = amp.enabled;
@@ -1573,7 +2006,7 @@ namespace Overlay
 				WarnCaption("Needs Rocksmith Audio Bridge ASIO as the game's audio driver. It is not loaded in this session.");
 			}
 			else {
-				const std::string name = toneDesigner ? "Tone designer" : link.guestName[0] ? link.guestName : "an amp sim";
+				const std::string name = link.guestName[0] ? link.guestName : "an amp sim";
 				if (link.connected) InfoRow("Connected app", name, Color::Good);
 				else if (link.guestPresent) InfoRow("Connected app", name + " (audio stopped)", Color::Warn);
 				else InfoRow("Connected app", "None", Color::Muted);
@@ -1596,11 +2029,6 @@ namespace Overlay
 				}
 				if (link.lateBlocks > 0)
 					Caption("Late buffers are blocks the amp sim did not finish in time; each one is a click. Try the extra safety buffer below, a lighter preset, or a bigger game buffer.");
-				if (toneDesigner) {
-					Caption("Tone designer is using the amp link. Stop it to connect another app.");
-					if (Button("Stop Tone designer", false, "Saves its chain and closes it. Start it again from the Tone designer page."))
-						VstHostLink::StopHost();
-				}
 			}
 			if (!amp.guest64Registered)
 				WarnCaption("64-bit amp sims (AmpliTube 5) cannot see the driver yet. In the Rocksmith Audio Bridge window, press Repair next to the driver (one admin prompt).");
