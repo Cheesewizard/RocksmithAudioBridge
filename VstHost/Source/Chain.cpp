@@ -312,12 +312,27 @@ namespace VstHost
 		fclose(in);
 		if (!ok) { error = "The tone file is damaged."; return false; }
 
-		// Load the new plugins first, while the old chain keeps playing; then swap in one step.
-		std::vector<std::unique_ptr<Slot>> slots;
-		m_loadTotal = std::max(1, static_cast<int>(entries.size()));
-		m_loadStep = 0;
-		for (Entry& entry : entries)
+		// Plugins the new tone shares with the chain playing now are kept and only get the tone's settings (a
+		// fraction of a second); loading a plugin from scratch takes seconds (AmpliTube, Helix). Each running slot
+		// is matched at most once, by plugin file, in chain order, so a tone with two copies of a plugin keeps two.
+		std::vector<int> reuse(entries.size(), -1);
+		std::vector<bool> taken(m_slots.size(), false);
+		int toLoad = 0;
+		for (size_t e = 0; e < entries.size(); ++e)
 		{
+			for (size_t j = 0; j < m_slots.size() && reuse[e] < 0; ++j)
+				if (!taken[j] && _wcsicmp(m_slots[j]->path.c_str(), entries[e].path.c_str()) == 0) { reuse[e] = static_cast<int>(j); taken[j] = true; }
+			if (reuse[e] < 0) ++toLoad;
+		}
+
+		// Load the plugins that are new, while the old chain keeps playing; then swap in one step.
+		std::vector<std::unique_ptr<Slot>> loaded(entries.size());
+		m_loadTotal = std::max(1, toLoad);
+		m_loadStep = 0;
+		for (size_t e = 0; e < entries.size(); ++e)
+		{
+			Entry& entry = entries[e];
+			if (reuse[e] >= 0) continue;
 			++m_loadStep;
 			auto slot = std::make_unique<Slot>();
 			std::string slotError;
@@ -329,15 +344,29 @@ namespace VstHost
 			}
 			slot->plugin->SetState(entry.state);
 			slot->bypass = entry.bypass;
-			slots.push_back(std::move(slot));
+			loaded[e] = std::move(slot);
 		}
-
 		m_loadStep = m_loadTotal = 1;
 
+		// Kept plugins take the tone's settings while they play (JUCE keeps state calls and processing apart).
+		for (size_t e = 0; e < entries.size(); ++e)
+			if (reuse[e] >= 0) m_slots[reuse[e]]->plugin->SetState(entries[e].state);
+
 		Pause();
-		m_slots.swap(slots);
+		std::vector<std::unique_ptr<Slot>> slots;
+		for (size_t e = 0; e < entries.size(); ++e)
+		{
+			if (reuse[e] >= 0)
+			{
+				m_slots[reuse[e]]->bypass = entries[e].bypass;
+				slots.push_back(std::move(m_slots[reuse[e]]));
+			}
+			else if (loaded[e]) slots.push_back(std::move(loaded[e]));
+		}
+		m_slots.swap(slots);   // `slots` now holds the plugins the new tone does not use (and the kept ones' empty places)
 		Resume();
-		for (auto& old : slots) old->plugin->SaveState();
+		for (auto& old : slots) if (old) old->plugin->SaveState();
+		Log("tone: kept %d plugin(s), loaded %d", static_cast<int>(entries.size()) - toLoad, toLoad);
 		SetLevels(levels[0], levels[1]);
 		m_structureDirty = false;
 		Log("tone: loaded %ls (%d plugin(s)%s%s%s)", file.c_str(), Count(), v1 ? ", converted from the pre-JUCE format" : "",

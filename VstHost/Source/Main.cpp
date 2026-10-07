@@ -646,13 +646,17 @@ namespace
 		{
 			const std::wstring file = ToneFile(text);
 			BeginLoading();
-			CloseAllWindows();   // before the plugins go; reopened for the same slots below
+			// Plugins the tone shares with the chain are kept (Chain::LoadTone), and so are their windows; windows
+			// of plugins that go close in SyncWindows, and slots that had a window get one for their new plugin.
 			std::string missing;
 			if (g_chain.LoadTone(file, error, missing))
 			{
 				g_toneName = text;
 				g_toneModified = false;
-				SaveCurrentChain();
+				// The tone file is the chain as it now plays: copy it rather than asking every plugin for its
+				// settings again (TONE3000's are close to a megabyte).
+				if (!CopyFileW(file.c_str(), CurrentChainFile().c_str(), FALSE)) SaveCurrentChain();
+				else RememberTone();
 				if (!missing.empty()) SetLoadError("Not installed, skipped: " + missing);
 			}
 			else SetLoadError(error);
