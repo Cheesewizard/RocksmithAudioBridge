@@ -806,6 +806,7 @@ namespace Overlay
 				std::wstring selectedPlugin;    // the browser's selected row
 				char search[64] = {};
 				char toneSearch[48] = {};
+				std::string selectedTone;       // the library's selected row (double-click or Load loads it)
 				int filter = All;
 				Dialog dialog = Dialog::None;
 				bool openDialog = false;
@@ -1164,26 +1165,33 @@ namespace Overlay
 				const bool pressed = ImGui::InvisibleButton("##tone", ImVec2(width, height));
 				const bool hovered = ImGui::IsItemHovered();
 				const bool onStar = ImGui::GetIO().MousePos.x > at.x + width - 24.0f;
+				// Click selects, double-click loads (like the plugin browser); the star toggles a favourite.
+				State& s = S();
 				if (pressed) {
 					if (onStar) VstHostLink::SetFavouriteTone(tone, !favourite);
-					else if (!current && !vst.busy) RequestLoad(vst, tone);
+					else s.selectedTone = tone;
 				}
-				Hint("Click to load it. Right-click for more. The star keeps it at the top.");
+				if (hovered && !onStar && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && !current && !vst.busy) RequestLoad(vst, tone);
+				const bool selected = _stricmp(s.selectedTone.c_str(), tone.c_str()) == 0;
+				Hint(current ? "The tone playing now. Right-click for more." : "Double-click to load it. Right-click for more. The star keeps it at the top.");
 				ImDrawList* list = ImGui::GetWindowDrawList();
 				const ImVec2 end(at.x + width, at.y + height);
-				if (current) list->AddRectFilled(at, end, Ink::RowSelected, 5.0f);
+				if (selected) list->AddRectFilled(at, end, Ink::RowSelected, 5.0f);
 				else if (hovered) list->AddRectFilled(at, end, Ink::RowHover, 5.0f);
+				// The tone playing now: a green dot before its name.
+				if (current) list->AddCircleFilled(ImVec2(at.x + 9.0f, at.y + height * 0.5f), 3.5f, Ink::Good, 12);
 				list->PushClipRect(at, ImVec2(end.x - 24.0f, end.y), true);
-				list->AddText(ImVec2(at.x + 7.0f, at.y + 5.0f), current ? IM_COL32_WHITE : IM_COL32(195, 200, 210, 255), tone.c_str());
+				list->AddText(ImVec2(at.x + 18.0f, at.y + 5.0f), current || selected ? IM_COL32_WHITE : IM_COL32(195, 200, 210, 255), tone.c_str());
 				list->PopClipRect();
 				if (favourite || hovered)
 					DrawIcon(list, ImVec2(end.x - 12.0f, at.y + height * 0.5f), favourite ? Glyph::StarFilled : Glyph::Star, favourite ? Ink::Amber : Ink::Dim);
 
 				PushPopupPadding();
 				if (ImGui::BeginPopupContextItem("##toneMenu")) {
+					s.selectedTone = tone;
 					ImGui::TextDisabled("%s", tone.c_str());
 					ImGui::Separator();
-					if (ImGui::MenuItem("Load", nullptr, false, !current && !vst.busy)) RequestLoad(vst, tone);
+					if (ImGui::MenuItem("Load", "or double-click it", false, !current && !vst.busy)) RequestLoad(vst, tone);
 					if (ImGui::MenuItem("Favourite", nullptr, favourite)) VstHostLink::SetFavouriteTone(tone, !favourite);
 					const bool songTone = _stricmp(vst.songTone.c_str(), tone.c_str()) == 0;
 					if (ImGui::MenuItem("Use for the current song", nullptr, songTone, !vst.songKey.empty() && !songTone && !vst.busy)) {
