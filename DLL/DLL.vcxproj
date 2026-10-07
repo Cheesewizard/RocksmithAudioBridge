@@ -33,6 +33,9 @@
     <ClCompile Include="Audio\OutputTap.cpp" />
     <ClCompile Include="Audio\ExternalAmp.cpp" />
     <ClCompile Include="Audio\VstHostLink.cpp" />
+    <ClCompile Include="Audio\RsModsHelper.cpp" />
+    <ClCompile Include="Audio\SongLibrary.cpp" />
+    <ClCompile Include="Audio\ToneBackup.cpp" />
     <ClCompile Include="Audio\GameAudioRecorder.cpp" />
     <ClCompile Include="Audio\DelayLinePitchShifter.cpp" />
     <ClCompile Include="Audio\SongShift\WwiseMusicHook.cpp">
@@ -341,6 +344,9 @@
     <ClInclude Include="Audio\OutputTap.hpp" />
     <ClInclude Include="Audio\ExternalAmp.hpp" />
     <ClInclude Include="Audio\VstHostLink.hpp" />
+    <ClInclude Include="Audio\RsModsHelper.hpp" />
+    <ClInclude Include="Audio\SongLibrary.hpp" />
+    <ClInclude Include="Audio\ToneBackup.hpp" />
     <ClInclude Include="Audio\VstHostControl.hpp" />
     <ClInclude Include="Audio\GameAudioRecorder.hpp" />
     <ClInclude Include="Audio\DrySignalRecording.hpp" />

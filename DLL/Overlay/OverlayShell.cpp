@@ -12,6 +12,8 @@
 #include "../Audio/ExternalAmp.hpp"
 #include "../Audio/VstHostLink.hpp"
 #include "../Audio/VstHostControl.hpp"
+#include "../Audio/SongLibrary.hpp"
+#include "../Audio/ToneBackup.hpp"
 #include "../Extensions.hpp"
 #include "../Research/ResearchBridge.hpp"
 #include "../Mods/DropPedal/DropPedal.hpp"
@@ -746,7 +748,7 @@ namespace Overlay
 		namespace ToneDesigner
 		{
 			enum Section : unsigned { Library = 2, Browser = 4, Meters = 8 };
-			enum class Dialog { None, SaveAs, Rename, Delete, NewTone, Discard, Levels, NewFolder };
+			enum class Dialog { None, SaveAs, Rename, Delete, NewTone, Discard, Levels, NewFolder, DeleteTones, Restore };
 			enum Filter { All, Favourites, Amps, Effects, Dynamics, Instruments, Recent, FilterCount };
 
 			// The panel's own colours (the mockup's): neutral greys, so it reads as a separate app inside the overlay.
@@ -812,6 +814,20 @@ namespace Overlay
 				Dialog dialog = Dialog::None;
 				bool openDialog = false;
 				std::string dialogTone;         // the tone a dialog is about
+				std::vector<std::string> dialogTones;   // a batch dialog's tones (New folder, Delete for a selection)
+				std::wstring dialogPath;        // Restore: the backup
+				// The library's selection: Ctrl+click adds or takes one away, Shift+click takes the range from the
+				// anchor (in the order the rows were drawn last frame). Right-click on a selection gives batch actions.
+				std::vector<std::string> selectedTones;
+				std::string toneAnchor;
+				std::vector<std::string> toneOrder, toneOrderNext;
+				// The browser under the board: 0 plugins, 1 songs.
+				int browserTab = 0;
+				char songSearch[64] = {};
+				int songFilter = 0;
+				std::vector<std::string> selectedSongs;   // song keys, chosen the same way as tones
+				std::string songAnchor;
+				std::vector<ToneBackup::Entry> backups;   // File, Backups: listed when the menu opens
 				size_t dialogSongs = 0;         // Delete: songs that use it (read once, when the dialog opens)
 				char name[64] = {};
 			};
@@ -838,6 +854,37 @@ namespace Overlay
 				return slash == std::string::npos ? tone : tone.substr(slash + 1);
 			}
 
+			bool InList(const std::vector<std::string>& list, const std::string& item)
+			{
+				return std::any_of(list.begin(), list.end(), [&](const std::string& i) { return _stricmp(i.c_str(), item.c_str()) == 0; });
+			}
+
+			// A click in a list with a selection: Ctrl toggles the row, Shift takes the range from the anchor (in
+			// `order`, the rows as shown), a plain click selects only that row and makes it the anchor.
+			void SelectClick(std::vector<std::string>& selection, std::string& anchor, const std::vector<std::string>& order, const std::string& item)
+			{
+				const ImGuiIO& io = ImGui::GetIO();
+				if (io.KeyCtrl) {
+					const auto it = std::find_if(selection.begin(), selection.end(), [&](const std::string& i) { return _stricmp(i.c_str(), item.c_str()) == 0; });
+					if (it != selection.end()) selection.erase(it);
+					else selection.push_back(item);
+					anchor = item;
+					return;
+				}
+				auto indexOf = [&](const std::string& value) {
+					for (size_t i = 0; i < order.size(); ++i) if (_stricmp(order[i].c_str(), value.c_str()) == 0) return static_cast<int>(i);
+					return -1;
+				};
+				const int from = indexOf(anchor), to = indexOf(item);
+				if (io.KeyShift && from >= 0 && to >= 0) {
+					selection.clear();
+					for (int i = std::min(from, to); i <= std::max(from, to); ++i) selection.push_back(order[static_cast<size_t>(i)]);
+					return;
+				}
+				selection = { item };
+				anchor = item;
+			}
+
 
 			void Toggle(Section section)
 			{
@@ -854,6 +901,7 @@ namespace Overlay
 				s.dialog = dialog;
 				s.openDialog = true;
 				s.dialogTone = tone;
+				s.dialogTones.clear();
 				s.dialogSongs = dialog == Dialog::Delete ? VstHostLink::SongsUsingTone(tone).size() : 0;
 				strncpy_s(s.name, (dialog == Dialog::Rename ? BaseName(tone) : dialog == Dialog::NewFolder ? std::string() : tone).c_str(), _TRUNCATE);
 			}
@@ -1034,6 +1082,23 @@ namespace Overlay
 				if (ImGui::MenuItem("Rename...", nullptr, false, idle && !vst.toneName.empty())) Ask(Dialog::Rename, vst.toneName);
 				ImGui::Separator();
 				if (ImGui::MenuItem("Show tones folder")) VstHostLink::OpenTonesFolder();
+				// Backups: one zip with tones, song tones, plugin settings and settings (ToneBackup.hpp).
+				if (ImGui::BeginMenu("Backups")) {
+					State& s = S();
+					if (ImGui::IsWindowAppearing()) s.backups = ToneBackup::List();
+					if (ImGui::MenuItem("Back up now", nullptr, false, !ToneBackup::Busy())) ToneBackup::BackupNow();
+					Hint("Your tones, song tones, plugin settings and Tone designer settings in one zip. One is also made each day on its own; the last 7 of those are kept.");
+					ImGui::Separator();
+					ImGui::TextDisabled(s.backups.empty() ? "No backups yet" : "Restore");
+					for (size_t i = 0; i < s.backups.size() && i < 14; ++i)
+						if (ImGui::MenuItem(s.backups[i].name.c_str(), nullptr, false, !ToneBackup::Busy())) {
+							Ask(Dialog::Restore, s.backups[i].name);
+							s.dialogPath = s.backups[i].path;
+						}
+					ImGui::Separator();
+					if (ImGui::MenuItem("Open backups folder")) ToneBackup::OpenFolder();
+					ImGui::EndMenu();
+				}
 				ImGui::Separator();
 				if (ImGui::MenuItem("Close Tone designer")) VstHostLink::StopHost();
 				ImGui::EndMenu();
@@ -1060,7 +1125,7 @@ namespace Overlay
 				if (!ImGui::BeginMenu("View")) return;
 				if (ImGui::MenuItem("Plugin windows", nullptr, vst.popoutWanted)) ToggleWindows(vst);
 				if (ImGui::MenuItem("Tone library", nullptr, IsOpen(Library))) Toggle(Library);
-				if (ImGui::MenuItem("Plugin browser", nullptr, IsOpen(Browser))) Toggle(Browser);
+				if (ImGui::MenuItem("Plugin and song browser", nullptr, IsOpen(Browser))) Toggle(Browser);
 				if (ImGui::MenuItem("Meters", nullptr, IsOpen(Meters))) Toggle(Meters);
 				ImGui::Separator();
 				if (ImGui::MenuItem("Compare with the game's amp", nullptr, amp.comparing)) ExternalAmp::SetCompare(!amp.comparing);
@@ -1223,7 +1288,39 @@ namespace Overlay
 			{
 				const std::string to = folder.empty() ? BaseName(tone) : folder + "/" + BaseName(tone);
 				if (to != tone) VstHostLink::RenameTone(tone, to);
-				if (_stricmp(S().selectedTone.c_str(), tone.c_str()) == 0) S().selectedTone = to;
+				State& s = S();
+				if (_stricmp(s.selectedTone.c_str(), tone.c_str()) == 0) s.selectedTone = to;
+				for (std::string& selected : s.selectedTones) if (_stricmp(selected.c_str(), tone.c_str()) == 0) selected = to;
+				if (_stricmp(s.toneAnchor.c_str(), tone.c_str()) == 0) s.toneAnchor = to;
+			}
+
+			// Right-click on a selection of several tones.
+			void BatchToneMenu(const VstHostLink::Snapshot& vst)
+			{
+				State& s = S();
+				const std::vector<std::string> batch = s.selectedTones;
+				ImGui::TextDisabled("%d tones", static_cast<int>(batch.size()));
+				ImGui::Separator();
+				if (ImGui::BeginMenu("Move to folder", !vst.busy)) {
+					if (ImGui::MenuItem("No folder")) for (const std::string& t : batch) MoveToFolder(t, {});
+					ImGui::Separator();
+					for (const std::string& folder : ToneFolders(VstHostLink::Tones()))
+						if (ImGui::MenuItem(folder.c_str())) for (const std::string& t : batch) MoveToFolder(t, folder);
+					ImGui::Separator();
+					if (ImGui::MenuItem("New folder...")) { Ask(Dialog::NewFolder); s.dialogTones = batch; }
+					ImGui::EndMenu();
+				}
+				bool allFavourite = true;
+				for (const std::string& t : batch) allFavourite = allFavourite && VstHostLink::IsFavouriteTone(t);
+				if (ImGui::MenuItem("Favourite", nullptr, allFavourite)) for (const std::string& t : batch) VstHostLink::SetFavouriteTone(t, !allFavourite);
+				if (ImGui::MenuItem("Select none")) { s.selectedTones.clear(); s.toneAnchor.clear(); }
+				ImGui::Separator();
+				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Bad));
+				if (ImGui::MenuItem(("Delete " + std::to_string(batch.size()) + " tones...").c_str(), nullptr, false, !vst.busy)) {
+					Ask(Dialog::DeleteTones);
+					s.dialogTones = batch;
+				}
+				ImGui::PopStyleColor();
 			}
 
 			// One row of the tone library: click loads, the star marks a favourite, right-click for the rest.
@@ -1242,13 +1339,15 @@ namespace Overlay
 				const bool onStar = ImGui::GetIO().MousePos.x > at.x + width - 24.0f;
 				// Click selects, double-click loads (like the plugin browser); the star toggles a favourite.
 				State& s = S();
+				if (!InList(s.toneOrderNext, tone)) s.toneOrderNext.push_back(tone);
 				if (pressed) {
 					if (onStar) VstHostLink::SetFavouriteTone(tone, !favourite);
-					else s.selectedTone = tone;
+					else { SelectClick(s.selectedTones, s.toneAnchor, s.toneOrder, tone); s.selectedTone = tone; }
 				}
 				if (hovered && !onStar && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && !current && !vst.busy) RequestLoad(vst, tone);
-				const bool selected = _stricmp(s.selectedTone.c_str(), tone.c_str()) == 0;
-				Hint(current ? "The tone playing now. Right-click for more." : "Double-click to load it. Right-click for more. The star keeps it at the top.");
+				const bool selected = InList(s.selectedTones, tone);
+				Hint(current ? "The tone playing now. Right-click for more. Ctrl or Shift+click to select several."
+					: "Double-click to load it. Right-click for more; Ctrl or Shift+click to select several for a batch. The star keeps it at the top.");
 				ImDrawList* list = ImGui::GetWindowDrawList();
 				const ImVec2 end(at.x + width, at.y + height);
 				if (selected) list->AddRectFilled(at, end, Ink::RowSelected, 5.0f);
@@ -1269,6 +1368,10 @@ namespace Overlay
 
 				PushPopupPadding();
 				if (ImGui::BeginPopupContextItem("##toneMenu")) {
+					// Right-click outside the selection: that tone alone. On a selection of several: the batch.
+					if (!InList(s.selectedTones, tone)) { s.selectedTones = { tone }; s.toneAnchor = tone; }
+					if (s.selectedTones.size() > 1) BatchToneMenu(vst);
+					else {
 					s.selectedTone = tone;
 					ImGui::TextDisabled("%s", tone.c_str());
 					ImGui::Separator();
@@ -1299,6 +1402,7 @@ namespace Overlay
 					ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Bad));
 					if (ImGui::MenuItem("Delete...", nullptr, false, !vst.busy)) Ask(Dialog::Delete, tone);
 					ImGui::PopStyleColor();
+					}
 					ImGui::EndPopup();
 				}
 				ImGui::PopStyleVar();
@@ -1321,6 +1425,8 @@ namespace Overlay
 			void LibraryColumn(const VstHostLink::Snapshot& vst, float width, float height)
 			{
 				State& s = S();
+				s.toneOrder.swap(s.toneOrderNext);
+				s.toneOrderNext.clear();
 				ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 10));
 				ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(6, 2));
 				ImGui::PushStyleColor(ImGuiCol_FrameBg, ImGui::ColorConvertU32ToFloat4(Ink::Field));
@@ -1800,6 +1906,296 @@ namespace Overlay
 				return pressed;
 			}
 
+			// The browser's two tabs as its title: the one shown in white, the other a click away.
+			void BrowserTitle()
+			{
+				State& s = S();
+				static const char* const names[2] = { "Plugin browser", "Song browser" };
+				for (int i = 0; i < 2; ++i) {
+					if (i > 0) ImGui::SameLine(0.0f, 14.0f);
+					const bool on = s.browserTab == i;
+					ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(on ? IM_COL32_WHITE : Ink::Dim));
+					ImGui::AlignTextToFramePadding();
+					ImGui::TextUnformatted(names[i]);
+					ImGui::PopStyleColor();
+					if (on) {
+						const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+						ImGui::GetWindowDrawList()->AddLine(ImVec2(a.x, b.y + 1.0f), ImVec2(b.x, b.y + 1.0f), Ink::Blue, 2.0f);
+					}
+					else {
+						if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+						if (ImGui::IsItemClicked()) s.browserTab = i;
+						Hint(i == 1 ? "Your songs: search one, give it a tone of its own, see how long its tone took to load."
+							: "Your VST3 plugins, to add to the chain or keep loaded.");
+					}
+				}
+			}
+
+			// Tone choices for a menu: tones outside folders, then a submenu per folder.
+			template <typename Pick> void ToneChoices(Pick pick)
+			{
+				const std::vector<std::string>& tones = VstHostLink::Tones();
+				if (tones.empty()) ImGui::TextDisabled("No saved tones yet");
+				for (const std::string& tone : tones) if (FolderOf(tone).empty() && ImGui::MenuItem(tone.c_str())) pick(tone);
+				for (const std::string& folder : ToneFolders(tones))
+					if (ImGui::BeginMenu(folder.c_str())) {
+						for (const std::string& tone : tones) if (FolderOf(tone) == folder && ImGui::MenuItem(BaseName(tone).c_str())) pick(tone);
+						ImGui::EndMenu();
+					}
+			}
+
+			// The song browser: every song in the library (SongLibrary), its tone, and how long its tone took to load
+			// when it last started (VstHostLink::SongLoads, the audit). Select songs (Ctrl or Shift for several) and give
+			// them a tone, or take it away.
+			void SongBrowser(const VstHostLink::Snapshot& vst, float width)
+			{
+				State& s = S();
+				SongLibrary::Refresh();
+				const std::shared_ptr<const SongLibrary::Library> library = SongLibrary::Get();
+				const std::vector<std::pair<std::string, std::string>> songTones = VstHostLink::SongToneList();
+				const std::vector<std::pair<std::string, VstHostLink::SongLoad>> loads = VstHostLink::SongLoads();
+				auto toneOf = [&](const std::string& key) -> std::string {
+					for (const auto& entry : songTones) if (_stricmp(entry.first.c_str(), key.c_str()) == 0) return entry.second;
+					return {};
+				};
+				auto loadOf = [&](const std::string& key) -> const VstHostLink::SongLoad* {
+					for (const auto& entry : loads) if (_stricmp(entry.first.c_str(), key.c_str()) == 0) return &entry.second;
+					return nullptr;
+				};
+				auto slow = [](const VstHostLink::SongLoad* load) { return load && load->seconds >= 3.0f && !load->plugins.empty(); };
+
+				ImFont* caption = CaptionFont();
+				const float pad = 14.0f;
+				const float left = ImGui::GetCursorPosX() + pad;
+				const float inner = width - 2.0f * pad;
+				ImGui::Dummy(ImVec2(0, 4));
+
+				// Title, count and search.
+				ImGui::SetCursorPosX(left);
+				BrowserTitle();
+				ImGui::SameLine(0.0f, 10.0f);
+				const SongLibrary::State state = SongLibrary::GetState();
+				std::string count = std::to_string(library->songs.size()) + " songs, " + std::to_string(songTones.size()) + " with a tone";
+				if (state == SongLibrary::State::Reading) count += library->songs.empty() ? "; reading your song library..." : "; checking for new songs...";
+				ImGui::PushFont(caption);
+				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Dim));
+				ImGui::AlignTextToFramePadding();
+				ImGui::TextUnformatted(count.c_str());
+				ImGui::PopStyleColor();
+				ImGui::PopFont();
+				const float searchW = std::min(240.0f, inner * 0.4f);
+				ImGui::SameLine(left + inner - searchW);
+				ImGui::SetNextItemWidth(searchW);
+				ImGui::PushStyleColor(ImGuiCol_FrameBg, ImGui::ColorConvertU32ToFloat4(Ink::Field));
+				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8, 4));
+				ImGui::InputTextWithHint("##songSearch", "Search songs or artists", s.songSearch, sizeof(s.songSearch));
+				ImGui::PopStyleVar();
+				ImGui::PopStyleColor();
+
+				enum { AllSongs, WithTone, SlowToLoad, WithoutTone, SongFilterCount };
+				static const char* const chips[SongFilterCount] = { "All", "With a tone", "Slow to load", "Without a tone" };
+				ImGui::SetCursorPosX(left);
+				for (int c = 0; c < SongFilterCount; ++c) {
+					if (c > 0) ImGui::SameLine(0.0f, 6.0f);
+					if (Chip(chips[c], s.songFilter == c)) s.songFilter = c;
+					if (c == SlowToLoad) Hint("Songs whose tone waited 3 s or more for plugins to load when they last started. Right-click those plugins in the plugin browser, Always keep loaded, to make them instant, or leave songs you rarely play as they are.");
+				}
+
+				// Rows: the library's songs, and song keys with a tone or a load record that the library does not have.
+				struct Row { std::string key, title, artist; const SongLibrary::Song* song; };
+				std::vector<Row> rows;
+				auto matches = [&](const std::string& title, const std::string& artist, const std::string& key) {
+					if (!s.songSearch[0]) return true;
+					const std::string needle = s.songSearch;
+					auto has = [&](const std::string& text) {
+						return std::search(text.begin(), text.end(), needle.begin(), needle.end(),
+							[](char a, char b) { return tolower(static_cast<unsigned char>(a)) == tolower(static_cast<unsigned char>(b)); }) != text.end();
+					};
+					return has(title) || has(artist) || has(key);
+				};
+				auto wanted = [&](const std::string& key) {
+					const bool hasTone = !toneOf(key).empty();
+					switch (s.songFilter) {
+					case WithTone: return hasTone;
+					case WithoutTone: return !hasTone;
+					case SlowToLoad: return slow(loadOf(key));
+					default: return true;
+					}
+				};
+				for (const SongLibrary::Song& song : library->songs)
+					if (wanted(song.key) && matches(song.title, song.artist, song.key)) rows.push_back({ song.key, song.title, song.artist, &song });
+				auto addOrphan = [&](const std::string& key) {
+					if (library->Find(key) || std::any_of(rows.begin(), rows.end(), [&](const Row& r) { return _stricmp(r.key.c_str(), key.c_str()) == 0; })) return;
+					if (wanted(key) && matches(key, std::string(), key))
+						rows.push_back({ key, key, library->songs.empty() ? std::string() : std::string("not in your song library"), nullptr });
+				};
+				for (const auto& entry : songTones) addOrphan(entry.first);
+				for (const auto& entry : loads) addOrphan(entry.first);
+				if (s.songFilter == SlowToLoad)
+					std::sort(rows.begin(), rows.end(), [&](const Row& a, const Row& b) { return loadOf(a.key)->seconds > loadOf(b.key)->seconds; });
+				std::vector<std::string> order;
+				order.reserve(rows.size());
+				for (const Row& row : rows) order.push_back(row.key);
+
+				// Table.
+				const float titleX = 10.0f, artistX = inner * 0.36f, toneX = inner * 0.60f;
+				ImDrawList* list = ImGui::GetWindowDrawList();
+				ImGui::SetCursorPosX(left);
+				{
+					const ImVec2 at = ImGui::GetCursorScreenPos();
+					Text(list, caption, ImVec2(at.x + titleX, at.y), Ink::Dim, "Song");
+					Text(list, caption, ImVec2(at.x + artistX, at.y), Ink::Dim, "Artist");
+					Text(list, caption, ImVec2(at.x + toneX, at.y), Ink::Dim, "Tone");
+					Text(list, caption, ImVec2(at.x + inner - TextWidth(caption, "Last load") - 10.0f, at.y), Ink::Dim, "Last load");
+					ImGui::Dummy(ImVec2(inner, caption->FontSize + 2.0f));
+					list->AddLine(ImVec2(at.x, at.y + caption->FontSize + 4.0f), ImVec2(at.x + inner, at.y + caption->FontSize + 4.0f), Ink::Edge);
+				}
+				const float rowH = ImGui::GetFontSize() + 10.0f;
+				const bool canUseCurrent = !vst.toneName.empty() && !vst.toneModified;
+				const std::string useCurrent = vst.toneName.empty() ? "Use the tone playing now" : "Use \"" + BaseName(vst.toneName) + "\"";
+				auto assign = [&](const std::string& tone) { for (const std::string& key : s.selectedSongs) VstHostLink::SetToneForSong(key, tone); };
+				if (rows.empty()) {
+					ImGui::SetCursorPosX(left);
+					ImGui::PushFont(caption);
+					ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Muted));
+					ImGui::TextUnformatted(state == SongLibrary::State::Failed && library->songs.empty()
+						? "Your song library could not be read: RSMods.exe needs to be in the game's RSMods folder (the installer's Repair puts it back)."
+						: state == SongLibrary::State::Reading && library->songs.empty() ? "Reading your song library. The first time takes a minute or two for a big library."
+						: s.songFilter == WithTone ? "No song has a tone of its own yet: select songs and give them one."
+						: s.songFilter == SlowToLoad ? "No song has waited for its tone to load. Songs show here after they start."
+						: "Nothing matches.");
+					ImGui::PopStyleColor();
+					ImGui::PopFont();
+				}
+				else {
+					const int shownRows = std::min(static_cast<int>(rows.size()), 8);
+					ImGui::SetCursorPosX(left);
+					ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
+					ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, 6.0f);
+					ImGui::BeginChild("##songs", ImVec2(inner, shownRows * rowH), false);
+					ImDrawList* rowsList = ImGui::GetWindowDrawList();
+					const float rowW = ImGui::GetContentRegionAvail().x;
+					ImGuiListClipper clipper;   // a big library has thousands of rows: only the visible ones are drawn
+					clipper.Begin(static_cast<int>(rows.size()), rowH);
+					while (clipper.Step()) {
+						for (int r = clipper.DisplayStart; r < clipper.DisplayEnd; ++r) {
+							const Row& row = rows[static_cast<size_t>(r)];
+							ImGui::PushID(row.key.c_str());
+							const bool selected = InList(s.selectedSongs, row.key);
+							const ImVec2 at = ImGui::GetCursorScreenPos();
+							if (ImGui::InvisibleButton("##song", ImVec2(rowW, rowH))) SelectClick(s.selectedSongs, s.songAnchor, order, row.key);
+							const bool hovered = ImGui::IsItemHovered();
+							if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && canUseCurrent) {
+								s.selectedSongs = { row.key };
+								assign(vst.toneName);
+							}
+							Hint(canUseCurrent ? "Double-click to give it the tone playing now. Right-click for more; Ctrl or Shift+click to select several."
+								: "Right-click to give it a tone. Ctrl or Shift+click to select several.");
+							PushPopupPadding();
+							if (ImGui::BeginPopupContextItem("##songMenu")) {
+								if (!selected && ImGui::IsWindowAppearing()) { s.selectedSongs = { row.key }; s.songAnchor = row.key; }
+								const size_t n = s.selectedSongs.size();
+								ImGui::TextDisabled("%s", n == 1 ? row.title.c_str() : (std::to_string(n) + " songs").c_str());
+								ImGui::Separator();
+								if (ImGui::MenuItem(useCurrent.c_str(), nullptr, false, canUseCurrent)) assign(vst.toneName);
+								if (!canUseCurrent && !vst.toneName.empty()) Hint("Save the tone first: songs load the saved file.");
+								if (ImGui::BeginMenu("Give it a tone")) { ToneChoices(assign); ImGui::EndMenu(); }
+								bool anyTone = false;
+								for (const std::string& key : s.selectedSongs) anyTone = anyTone || !toneOf(key).empty();
+								if (ImGui::MenuItem("Take its tone away", nullptr, false, anyTone)) assign({});
+								Hint(vst.defaultTone.empty() ? "It plays with your usual tone again." : "It plays with your default tone again.");
+								ImGui::EndPopup();
+							}
+							ImGui::PopStyleVar();
+
+							const ImVec2 end(at.x + rowW, at.y + rowH);
+							if (selected) rowsList->AddRectFilled(at, end, Ink::RowSelected, 5.0f);
+							else if (hovered) rowsList->AddRectFilled(at, end, Ink::RowHover, 5.0f);
+							const float textY = at.y + (rowH - ImGui::GetFontSize()) * 0.5f;
+							const float captionY = at.y + (rowH - caption->FontSize) * 0.5f;
+							rowsList->PushClipRect(ImVec2(at.x + titleX, at.y), ImVec2(at.x + artistX - 8.0f, end.y), true);
+							rowsList->AddText(ImVec2(at.x + titleX, textY), IM_COL32_WHITE, row.title.c_str());
+							rowsList->PopClipRect();
+							rowsList->PushClipRect(ImVec2(at.x + artistX, at.y), ImVec2(at.x + toneX - 8.0f, end.y), true);
+							Text(rowsList, caption, ImVec2(at.x + artistX, captionY), Ink::Muted, row.artist.c_str());
+							rowsList->PopClipRect();
+							const std::string tone = toneOf(row.key);
+							const VstHostLink::SongLoad* load = loadOf(row.key);
+							std::string last = !load ? std::string() : load->seconds < 1.5f || load->plugins.empty() ? std::string("instant")
+								: std::to_string(static_cast<int>(load->seconds + 0.5f)) + " s, " + load->plugins;
+							const float lastW = last.empty() ? 0.0f : std::min(TextWidth(caption, last.c_str()), inner * 0.22f);
+							if (!tone.empty()) {
+								const std::string tag = BaseName(tone);
+								const float tagW = std::min(TextWidth(caption, tag.c_str()) + 16.0f, end.x - lastW - 20.0f - (at.x + toneX));
+								rowsList->AddRectFilled(ImVec2(at.x + toneX, at.y + 4.0f), ImVec2(at.x + toneX + tagW, end.y - 4.0f), Ink::Tag, 5.0f);
+								rowsList->PushClipRect(ImVec2(at.x + toneX, at.y), ImVec2(at.x + toneX + tagW - 4.0f, end.y), true);
+								Text(rowsList, caption, ImVec2(at.x + toneX + 8.0f, captionY), Ink::TagText, tag.c_str());
+								rowsList->PopClipRect();
+							}
+							else if (!vst.defaultTone.empty()) Text(rowsList, caption, ImVec2(at.x + toneX, captionY), Ink::Dim, ("default: " + BaseName(vst.defaultTone)).c_str());
+							if (!last.empty()) {
+								rowsList->PushClipRect(ImVec2(end.x - lastW - 12.0f, at.y), ImVec2(end.x - 8.0f, end.y), true);
+								Text(rowsList, caption, ImVec2(end.x - lastW - 10.0f, captionY), slow(load) ? Ink::Amber : Ink::Muted, last.c_str());
+								rowsList->PopClipRect();
+							}
+							ImGui::PopID();
+						}
+					}
+					clipper.End();
+					ImGui::EndChild();
+					ImGui::PopStyleVar(2);
+				}
+
+				// Buttons for the selection, and what the selection is.
+				ImGui::Dummy(ImVec2(0, 4));
+				ImGui::SetCursorPosX(left);
+				const bool any = !s.selectedSongs.empty();
+				ImGui::BeginDisabled(!any || !canUseCurrent);
+				if (Button(useCurrent.c_str(), true)) assign(vst.toneName);
+				ImGui::EndDisabled();
+				ImGui::SameLine();
+				ImGui::BeginDisabled(!any);
+				if (Button("Give it a tone...")) ImGui::OpenPopup("##songTonePick");
+				ImGui::SameLine();
+				bool anyTone = false;
+				for (const std::string& key : s.selectedSongs) anyTone = anyTone || !toneOf(key).empty();
+				ImGui::BeginDisabled(!anyTone);
+				if (Button("Take its tone away")) assign({});
+				ImGui::EndDisabled();
+				ImGui::EndDisabled();
+				PushPopupPadding();
+				if (ImGui::BeginPopup("##songTonePick")) { ToneChoices(assign); ImGui::EndPopup(); }
+				ImGui::PopStyleVar();
+
+				ImGui::SetCursorPosX(left);
+				ImGui::PushFont(caption);
+				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Muted));
+				ImGui::PushTextWrapPos(left + inner);
+				std::string about;
+				if (s.selectedSongs.size() > 1) about = std::to_string(s.selectedSongs.size()) + " songs selected.";
+				else if (s.selectedSongs.size() == 1) {
+					const std::string& key = s.selectedSongs.front();
+					if (const SongLibrary::Song* song = library->Find(key)) {
+						about = song->key + " | " + song->album + (song->year > 0 ? " (" + std::to_string(song->year) + ")" : std::string())
+							+ " | " + song->arrangements + " | " + song->file;
+					}
+					else about = key;
+					if (const VstHostLink::SongLoad* load = loadOf(key)) {
+						char seconds[16]{};
+						sprintf_s(seconds, "%.1f", load->seconds);
+						about += std::string("\nLast start: \"") + load->tone + "\" was ready in " + seconds + " s"
+							+ (load->plugins.empty() ? std::string(", every plugin already loaded.")
+								: ", loading " + load->plugins + " from scratch. Always keep loaded (right-click it in the plugin browser) makes it instant.");
+					}
+				}
+				else about = "Select a song to give it a tone of its own. Ctrl or Shift+click selects several.";
+				ImGui::TextUnformatted(about.c_str());
+				ImGui::PopTextWrapPos();
+				ImGui::PopStyleColor();
+				ImGui::PopFont();
+				ImGui::Dummy(ImVec2(0, 6));
+			}
+
 			// Under the board: every plugin found, with search, filters, type and status.
 			void PluginBrowser(const VstHostLink::Snapshot& vst, float width)
 			{
@@ -1815,10 +2211,7 @@ namespace Overlay
 
 				// Title, count and search on one line.
 				ImGui::SetCursorPosX(left);
-				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(IM_COL32_WHITE));
-				ImGui::AlignTextToFramePadding();
-				ImGui::TextUnformatted("Plugin browser");
-				ImGui::PopStyleColor();
+				BrowserTitle();
 				ImGui::SameLine(0.0f, 10.0f);
 				const size_t folders = VstHostLink::ScanFolders().size() + 1;
 				const std::string count = std::to_string(plugins.size()) + " found, " + std::to_string(folders) + (folders == 1 ? " folder" : " folders");
@@ -2116,15 +2509,43 @@ namespace Overlay
 					}
 					case Dialog::NewFolder: {
 						heading("New folder");
-						Caption(("Moves \"" + BaseName(s.dialogTone) + "\" into a new folder, for example Bass tones or Experimental.").c_str());
+						Caption((s.dialogTones.empty() ? "Moves \"" + BaseName(s.dialogTone) + "\" into a new folder, for example Bass tones or Experimental."
+							: "Moves the " + std::to_string(s.dialogTones.size()) + " selected tones into a new folder, for example Bass tones or Experimental.").c_str());
 						if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
 						ImGui::SetNextItemWidth(-1.0f);
 						const bool enter = ImGui::InputTextWithHint("##folder", "Folder name", s.name, sizeof(s.name), ImGuiInputTextFlags_EnterReturnsTrue);
 						std::string folder = Trimmed(s.name);
 						folder.erase(std::remove(folder.begin(), folder.end(), '/'), folder.end());
 						ImGui::BeginDisabled(folder.empty());
-						if (Button("Move", true) || (enter && !folder.empty())) { MoveToFolder(s.dialogTone, folder); close = true; }
+						if (Button("Move", true) || (enter && !folder.empty())) {
+							if (s.dialogTones.empty()) MoveToFolder(s.dialogTone, folder);
+							else for (const std::string& t : std::vector<std::string>(s.dialogTones)) MoveToFolder(t, folder);
+							close = true;
+						}
 						ImGui::EndDisabled();
+						ImGui::SameLine();
+						if (Button("Cancel")) close = true;
+						break;
+					}
+					case Dialog::DeleteTones: {
+						heading("Delete " + std::to_string(s.dialogTones.size()) + " tones?");
+						std::string names;
+						for (size_t i = 0; i < s.dialogTones.size() && i < 6; ++i) names += (i ? ", " : "") + BaseName(s.dialogTones[i]);
+						if (s.dialogTones.size() > 6) names += " and " + std::to_string(s.dialogTones.size() - 6) + " more";
+						Caption((names + ". The tone files are deleted; songs that use them go back to your usual tone. A backup (File, Backups) can bring them back.").c_str());
+						if (DangerButton(("Delete " + std::to_string(s.dialogTones.size()) + " tones").c_str())) {
+							for (const std::string& t : s.dialogTones) VstHostLink::DeleteTone(t);
+							s.selectedTones.clear();
+							close = true;
+						}
+						ImGui::SameLine();
+						if (Button("Cancel")) close = true;
+						break;
+					}
+					case Dialog::Restore: {
+						heading("Restore \"" + s.dialogTone + "\"?");
+						Caption("Your tones, song tones, plugin settings and Tone designer settings are replaced by the ones in this backup. What you have now is backed up first, so this can be undone. Tone designer closes for a moment and starts again.");
+						if (DangerButton("Restore")) { ToneBackup::Restore(s.dialogPath); close = true; }
 						ImGui::SameLine();
 						if (Button("Cancel")) close = true;
 						break;
@@ -2170,7 +2591,10 @@ namespace Overlay
 				ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + barH + mainH));
 				if (stripH > 0.0f) Strip(vst, amp, width);
 				const float browserTop = ImGui::GetCursorScreenPos().y;
-				if (IsOpen(Browser)) PluginBrowser(vst, width);
+				if (IsOpen(Browser)) {
+					if (S().browserTab == 1) SongBrowser(vst, width);
+					else PluginBrowser(vst, width);
+				}
 				const float bottom = std::max(ImGui::GetCursorScreenPos().y, browserTop);
 
 				list->ChannelsSetCurrent(0);
@@ -2213,6 +2637,12 @@ namespace Overlay
 			const bool otherApp = amp.link.guestPresent && !guest.empty() && !VstHostLink::IsHostGuest(guest);
 			const std::string otherAppText = guest + " (External app tab) is using the amp link, so Tone designer plays nothing. Close "
 				+ guest + " to use Tone designer.";
+
+			if (const std::string backup = ToneBackup::Status(); !backup.empty()) {
+				BeginCard();
+				Caption(backup.c_str());
+				EndCard();
+			}
 
 			// A plugin crashed the host this session: say which, and that it was restarted (VstHostLink::FollowCrashes).
 			if (!vst.crashNote.empty()) {

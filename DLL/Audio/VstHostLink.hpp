@@ -133,4 +133,23 @@ namespace VstHostLink
 	// Per-song tones: the current song (Snapshot::songKey) gets this tone when it starts.
 	void SetSongTone(const std::string& tone);
 	void ClearSongTone();
+	// Any song (the song browser): `tone` empty takes its tone away. The song playing now gets it at once.
+	void SetToneForSong(const std::string& song, const std::string& tone);
+	std::vector<std::pair<std::string, std::string>> SongToneList();   // song key, tone (SongTones.ini)
+
+	// How long each song's tone took to load the last time the song started (SongLoads.ini): an audit, so a
+	// player can see which songs wait for plugins that are not kept loaded.
+	struct SongLoad
+	{
+		float seconds = 0.0f;
+		std::string tone;
+		std::string plugins;          // the ones loaded from scratch, "AmpliTube 5, Helix Native"; empty = all kept
+	};
+	std::vector<std::pair<std::string, SongLoad>> SongLoads();
+
+	// The status line on the game screen while a tone loads with the overlay closed (and a moment after).
+	std::string HudLine();
+
+	bool HostProcessRunning();           // thread safe
+	void ReloadSettings();               // after a restore: favourites, lists and tones read again
 }

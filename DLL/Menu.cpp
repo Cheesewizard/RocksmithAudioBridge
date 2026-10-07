@@ -6,6 +6,8 @@
 #include "Mods/Midi.hpp"
 #include "Overlay/OverlayShell.hpp"
 #include "Audio/VstHostLink.hpp"
+#include "Audio/ToneBackup.hpp"
+#include "GameState.hpp"
 #include "Overlay/OverlayUi.hpp"
 
 namespace Menu {
@@ -63,6 +65,7 @@ namespace Menu {
 			Overlay::DrawShell(&Menu::audioBridgeMenuEnabled);
 		QueryPerformanceCounter(&drawn);
 		VstHostLink::OnFrame(Menu::audioBridgeMenuEnabled);   // the VST host's plugin windows show only with the overlay
+		ToneBackup::OnFrame(GameState::GameLoaded);           // the daily backup, and a restore's steps
 		QueryPerformanceCounter(&linked);
 		const double drawMs = (drawn.QuadPart - start.QuadPart) * 1000.0 / frequency.QuadPart;
 		const double linkMs = (linked.QuadPart - drawn.QuadPart) * 1000.0 / frequency.QuadPart;

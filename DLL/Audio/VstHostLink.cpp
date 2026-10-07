@@ -2,6 +2,7 @@
 #include "VstHostLink.hpp"
 #include "VstHostControl.hpp"
 #include "ExternalAmp.hpp"
+#include "SongLibrary.hpp"
 #include "../GameState.hpp"
 
 #include <ShlObj.h>
@@ -65,6 +66,18 @@ namespace VstHostLink
 		std::string g_preparedSong;      // the last one whose tone's plugins the host was asked to get ready
 		std::string g_lastMenu;
 		std::string g_toneBeforeSong;    // the player's tone before a song tone replaced it
+		bool g_overlayVisible = false;
+		// A song's tone loading (FollowSong queued it): timed, with the plugins loaded from scratch, for SongLoads.ini
+		// and the status line on the game screen.
+		struct SongLoadWatch
+		{
+			bool active = false, seenLoading = false;
+			std::string song, tone;
+			std::vector<std::string> plugins;
+			ULONGLONG queuedAt = 0, startedAt = 0;
+		} g_watch;
+		std::string g_doneLine;          // "... ready (took 14 s)", shown until g_doneUntil
+		ULONGLONG g_doneUntil = 0;
 
 		VstHostControl::Shared* Shared()
 		{
@@ -401,13 +414,48 @@ namespace VstHostLink
 			return GetPrivateProfileIntW(L"Renderer.Win32", L"Fullscreen", 0, (GameFolder() + L"Rocksmith.ini").c_str()) == 2;
 		}
 
-		size_t CountSongTones()
+		std::wstring SongLoadsFile() { return DataDirectory() + L"\\SongLoads.ini"; }
+
+		// key=value lines of an ini section, any size.
+		std::vector<std::pair<std::wstring, std::wstring>> ReadSection(const std::wstring& file, const wchar_t* name)
 		{
-			std::vector<wchar_t> section(32768);
-			const DWORD size = GetPrivateProfileSectionW(L"Songs", section.data(), static_cast<DWORD>(section.size()), SongTonesFile().c_str());
-			size_t count = 0;
-			for (const wchar_t* line = section.data(); line < section.data() + size && *line; line += wcslen(line) + 1) ++count;
-			return count;
+			std::vector<wchar_t> section(65536);
+			DWORD size = 0;
+			for (;;)
+			{
+				size = GetPrivateProfileSectionW(name, section.data(), static_cast<DWORD>(section.size()), file.c_str());
+				if (size + 2 < section.size() || section.size() >= (1u << 22)) break;
+				section.resize(section.size() * 4);
+			}
+			std::vector<std::pair<std::wstring, std::wstring>> lines;
+			for (const wchar_t* line = section.data(); line < section.data() + size && *line; line += wcslen(line) + 1)
+				if (const wchar_t* equals = wcschr(line, L'=')) lines.push_back({ std::wstring(line, equals), equals + 1 });
+			return lines;
+		}
+
+		std::vector<std::pair<std::string, std::string>> ReadSongTones()
+		{
+			std::vector<std::pair<std::string, std::string>> songs;
+			for (const auto& line : ReadSection(SongTonesFile(), L"Songs")) songs.push_back({ Utf8(line.first), Utf8(line.second) });
+			return songs;
+		}
+
+		// SongLoads.ini [Loads]: key=seconds|tone|plugins loaded from scratch.
+		std::vector<std::pair<std::string, SongLoad>> ReadSongLoads()
+		{
+			std::vector<std::pair<std::string, SongLoad>> loads;
+			for (const auto& line : ReadSection(SongLoadsFile(), L"Loads"))
+			{
+				const std::string value = Utf8(line.second);
+				const size_t a = value.find('|'), b = a == std::string::npos ? a : value.find('|', a + 1);
+				if (b == std::string::npos) continue;
+				SongLoad load;
+				load.seconds = static_cast<float>(atof(value.substr(0, a).c_str()));
+				load.tone = value.substr(a + 1, b - a - 1);
+				load.plugins = value.substr(b + 1);
+				loads.push_back({ Utf8(line.first), load });
+			}
+			return loads;
 		}
 
 		// ---- Slow reads, off the render thread ---------------------------------------------------------------
@@ -422,7 +470,8 @@ namespace VstHostLink
 			std::string songKey;     // the song being played (set by the render thread), and its tone
 			std::string songTone;
 			std::vector<std::string> tones;
-			size_t songToneCount = 0;
+			std::vector<std::pair<std::string, std::string>> songTones;
+			std::vector<std::pair<std::string, SongLoad>> songLoads;
 			std::vector<std::wstring> scanFolders;
 			std::string defaultTone;   // loads when a song without a tone of its own starts (empty: none)
 			int keepRecent = 4;
@@ -450,7 +499,8 @@ namespace VstHostLink
 				fresh.exclusiveFullscreen = ExclusiveFullscreen();
 				fresh.songTone = SongTone(songKey);
 				fresh.tones = ReadToneNames();
-				fresh.songToneCount = CountSongTones();
+				fresh.songTones = ReadSongTones();
+				fresh.songLoads = ReadSongLoads();
 				fresh.scanFolders = ExtraFolders();
 				fresh.defaultTone = Utf8(ReadString(L"DefaultTone"));
 				fresh.keepRecent = static_cast<int>(ReadDword(L"KeepRecentPlugins", 4));
@@ -487,6 +537,53 @@ namespace VstHostLink
 			StartSlowWorker();
 			std::lock_guard<std::mutex> lock(g_slowLock);
 			return read(g_slow);
+		}
+
+		void WatchSongLoad(const std::string& song, const std::string& tone)
+		{
+			g_watch = SongLoadWatch{};
+			g_watch.active = true;
+			g_watch.song = song;
+			g_watch.tone = tone;
+			g_watch.queuedAt = GetTickCount64();
+		}
+
+		// Every frame while a song's tone is on its way: the host's `loading` spans the whole LoadTone, and names
+		// each plugin it loads from scratch (plugins kept loaded are not named). The result goes to SongLoads.ini.
+		void FollowSongLoad(VstHostControl::Shared* shared)
+		{
+			if (!g_watch.active) return;
+			const ULONGLONG now = GetTickCount64();
+			if (shared->loading != 0)
+			{
+				if (!g_watch.seenLoading) { g_watch.seenLoading = true; g_watch.startedAt = now; }
+				char name[VstHostControl::kNameChars + 1]{};
+				memcpy(name, shared->loadingText, VstHostControl::kNameChars);
+				if (name[0] && std::find(g_watch.plugins.begin(), g_watch.plugins.end(), name) == g_watch.plugins.end()) g_watch.plugins.push_back(name);
+				return;
+			}
+			if (!g_watch.seenLoading)
+			{
+				if (now - g_watch.queuedAt > 20000) g_watch.active = false;   // never started: nothing to record
+				return;
+			}
+			const float seconds = (now - g_watch.startedAt) / 1000.0f;
+			std::string plugins;
+			for (const std::string& plugin : g_watch.plugins) plugins += (plugins.empty() ? "" : ", ") + plugin;
+			char value[64]{};
+			sprintf_s(value, "%.1f", seconds);
+			const std::string record = std::string(value) + "|" + g_watch.tone + "|" + plugins;
+			SHCreateDirectoryExW(nullptr, DataDirectory().c_str(), nullptr);
+			WritePrivateProfileStringW(L"Loads", Wide(g_watch.song).c_str(), Wide(record).c_str(), SongLoadsFile().c_str());
+			LOG_INFO("(VST HOST) song " << g_watch.song << ": tone '" << g_watch.tone << "' ready in " << value << " s"
+				<< (plugins.empty() ? std::string(", every plugin was already loaded") : ", loaded from scratch: " + plugins) << std::endl);
+			if (seconds >= 1.5f)
+			{
+				g_doneLine = "Tone designer: \"" + g_watch.tone + "\" ready (took " + std::to_string(static_cast<int>(seconds + 0.5f)) + " s)";
+				g_doneUntil = now + 5000;
+			}
+			g_watch.active = false;
+			KickSlow();
 		}
 
 		// The song list's highlighted song (its preview playing gives its key): after a moment on it, the host loads
@@ -549,6 +646,7 @@ namespace VstHostLink
 				if (g_toneBeforeSong.empty()) g_toneBeforeSong = current;
 				LOG_INFO("(VST HOST) song " << g_songKey << ": loading its tone '" << tone << "'" << std::endl);
 				Queue(Command::LoadTone, 0, 0, Wide(tone));
+				WatchSongLoad(g_songKey, tone);
 			}
 			else if (const std::string fallback = ReadSlow([](SlowState& slow) { return slow.defaultTone; }); !fallback.empty())
 			{
@@ -557,6 +655,7 @@ namespace VstHostLink
 				if (_stricmp(fallback.c_str(), current) == 0) return;
 				LOG_INFO("(VST HOST) song " << g_songKey << " has no tone of its own: loading the default tone '" << fallback << "'" << std::endl);
 				Queue(Command::LoadTone, 0, 0, Wide(fallback));
+				WatchSongLoad(g_songKey, fallback);
 			}
 			else if (!g_toneBeforeSong.empty())
 			{
@@ -699,9 +798,11 @@ namespace VstHostLink
 
 	void OnFrame(bool overlayVisible)
 	{
+		g_overlayVisible = overlayVisible;
 		VstHostControl::Shared* shared = Shared();
 		if (!shared) return;
 		shared->overlayVisible = overlayVisible ? 1 : 0;
+		FollowSongLoad(shared);
 		const ULONGLONG now = GetTickCount64();
 		if (now - g_lastBeat >= static_cast<ULONGLONG>(VstHostControl::kBeatMs) / 2)
 		{
@@ -811,7 +912,62 @@ namespace VstHostLink
 		return songs;
 	}
 
-	size_t SongToneCount() { return ReadSlow([](SlowState& slow) { return slow.songToneCount; }); }
+	size_t SongToneCount() { return ReadSlow([](SlowState& slow) { return slow.songTones.size(); }); }
+
+	std::vector<std::pair<std::string, std::string>> SongToneList() { return ReadSlow([](SlowState& slow) { return slow.songTones; }); }
+
+	std::vector<std::pair<std::string, SongLoad>> SongLoads() { return ReadSlow([](SlowState& slow) { return slow.songLoads; }); }
+
+	void SetToneForSong(const std::string& song, const std::string& tone)
+	{
+		if (song.empty()) return;
+		SHCreateDirectoryExW(nullptr, DataDirectory().c_str(), nullptr);
+		WritePrivateProfileStringW(L"Songs", Wide(song).c_str(), tone.empty() ? nullptr : Wide(tone).c_str(), SongTonesFile().c_str());
+		ReadSlow([&](SlowState& slow)
+		{
+			slow.songTones.erase(std::remove_if(slow.songTones.begin(), slow.songTones.end(),
+				[&](const auto& entry) { return _stricmp(entry.first.c_str(), song.c_str()) == 0; }), slow.songTones.end());
+			if (!tone.empty()) slow.songTones.push_back({ song, tone });
+			if (slow.songKey == song) slow.songTone = tone;
+			return 0;
+		});
+		if (_stricmp(song.c_str(), g_songKey.c_str()) == 0) g_appliedSong.clear();   // playing now: apply it (FollowSong)
+		if (_stricmp(song.c_str(), g_preparedSong.c_str()) == 0) g_preparedSong.clear();
+		KickSlow();
+		g_snapshotAt = 0;
+	}
+
+	bool HostProcessRunning() { return !HostProcessGone(); }
+
+	void ReloadSettings()
+	{
+		g_favouritesRead = g_recentRead = g_favouriteTonesRead = false;
+		g_appliedSong.clear();
+		g_preparedSong.clear();
+		KickSlow();
+		g_snapshotAt = 0;
+	}
+
+	std::string HudLine()
+	{
+		if (g_overlayVisible) return {};
+		VstHostControl::Shared* shared = Shared();
+		if (shared && shared->loading != 0)
+		{
+			char name[VstHostControl::kNameChars + 1]{};
+			memcpy(name, shared->loadingText, VstHostControl::kNameChars);
+			std::string line = "Tone designer: loading";
+			if (g_watch.active) {
+				const SongLibrary::Song* song = SongLibrary::Get()->Find(g_watch.song);
+				line += " \"" + g_watch.tone + "\" for " + (song ? song->title : g_watch.song);
+			}
+			if (name[0]) line += std::string(" | ") + name + (shared->loadingTotal > 1 ? " (" + std::to_string(shared->loadingStep) + " of " + std::to_string(shared->loadingTotal) + ")" : std::string());
+			if (g_watch.active && g_watch.seenLoading) line += " | " + std::to_string((GetTickCount64() - g_watch.startedAt) / 1000) + " s";
+			return line;
+		}
+		if (GetTickCount64() < g_doneUntil) return g_doneLine;
+		return {};
+	}
 
 	bool IsFavouriteTone(const std::string& tone)
 	{
@@ -1021,9 +1177,8 @@ namespace VstHostLink
 	{
 		if (g_songKey.empty() || tone.empty()) return;
 		SHCreateDirectoryExW(nullptr, DataDirectory().c_str(), nullptr);
-		WritePrivateProfileStringW(L"Songs", Wide(g_songKey).c_str(), Wide(tone).c_str(), SongTonesFile().c_str());
+		SetToneForSong(g_songKey, tone);
 		g_appliedSong = g_songKey;   // it is the tone playing now
-		ReadSlow([&](SlowState& slow) { if (slow.songKey == g_songKey) slow.songTone = tone; return 0; });
 		KickSlow();
 		g_snapshotAt = 0;
 	}
@@ -1031,9 +1186,7 @@ namespace VstHostLink
 	void ClearSongTone()
 	{
 		if (g_songKey.empty()) return;
-		WritePrivateProfileStringW(L"Songs", Wide(g_songKey).c_str(), nullptr, SongTonesFile().c_str());
-		ReadSlow([&](SlowState& slow) { if (slow.songKey == g_songKey) slow.songTone.clear(); return 0; });
-		KickSlow();
-		g_snapshotAt = 0;
+		SetToneForSong(g_songKey, {});
+		g_appliedSong = g_songKey;   // nothing to load: the tone playing stays
 	}
 }
