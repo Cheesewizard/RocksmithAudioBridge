@@ -47,6 +47,9 @@ namespace Overlay
 		constexpr unsigned Refresh = 0xE72C;
 		constexpr unsigned Pedal = 0xE8D6;      // "Audio" waveform glyph
 		constexpr unsigned Link = 0xE71B;       // chain link (External amp)
+		constexpr unsigned Library = 0xE8F1;    // Tone designer
+		constexpr unsigned Star = 0xE734;
+		constexpr unsigned StarFilled = 0xE735;
 	}
 
 	struct Fonts

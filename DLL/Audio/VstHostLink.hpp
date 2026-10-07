@@ -5,14 +5,16 @@
 
 // Overlay side of the VST host (VstHost/, RocksmithAudioBridgeVstHost.exe): a 64-bit program that plays the guitar
 // through a chain of VST3 plugins over the external amp link and shows the chosen plugin's window as a popout over
-// the game. This tells the host when the overlay is on screen (the popout only shows with it), carries the External
-// amp page's commands, starts the host with the game, and loads each song's tone when the song starts.
+// the game. In the overlay it is the Tone designer page. This tells the host when the overlay is on screen (the
+// popout only shows with it), carries the page's commands, starts the host with the game, and loads each song's
+// tone when the song starts.
 // State: VstHostControl.hpp. Settings: HKCU\Software\RSMods\VstHost. Song tones: SongTones.ini next to the tones.
 namespace VstHostLink
 {
 	struct SlotView
 	{
 		std::string name;
+		std::wstring path;
 		bool bypass = false;
 	};
 
@@ -29,6 +31,7 @@ namespace VstHostLink
 		int inputTenths = 0, outputTenths = 0;
 		float inputPeak = 0.0f, outputPeak = 0.0f;   // linear, 1.0 = full scale
 		std::string loadError;        // the last command's problem
+		bool chainBypassed = false;   // every plugin skipped for now (clean guitar)
 		bool popoutWanted = false;
 		bool popoutShown = false;
 		bool autoStart = true;
@@ -38,24 +41,39 @@ namespace VstHostLink
 		std::string songTone;         // the tone assigned to that song
 	};
 
+	// What a plugin is, from its VST3 sub categories (moduleinfo.json); Unknown when the bundle does not say.
+	enum class Kind { Unknown, Amp, Effect, Dynamics, Instrument };
+
 	struct Plugin
 	{
 		std::string name;
 		std::wstring path;
+		std::string vendor;           // moduleinfo.json, else the folder it sits in under VST3; may be empty
+		std::string version;
+		Kind kind = Kind::Unknown;
 	};
 
 	void OnFrame(bool overlayVisible);   // every rendered frame
 	Snapshot GetSnapshot();              // cheap: refreshed a few times a second
+	bool IsHostGuest(const std::string& guestName);   // the amp link's guest is the VST host (Tone designer)
 
 	// Plugins: 64-bit VST3 in Common Files\VST3 and any added folders, scanned on first use.
 	const std::vector<Plugin>& Plugins();
-	void Rescan();
+	void Rescan();                       // also forgets which plugins failed to load
 	void AddScanFolder();                // asks for a folder (dialog on its own thread), then rescans
 	std::vector<std::wstring> ScanFolders();
+	void ShowPluginFile(const std::wstring& path);   // Explorer, with the plugin selected
+
+	// Plugin browser marks, remembered in HKCU\Software\RSMods\VstHost.
+	bool IsFavourite(const std::wstring& path);
+	void SetFavourite(const std::wstring& path, bool favourite);
+	std::vector<std::wstring> RecentPlugins();      // newest first, the last 8 added
+	bool FailedToLoad(const std::wstring& path);
 
 	// Tones: the saved chains.
 	const std::vector<std::string>& Tones();
 	void OpenTonesFolder();
+	std::vector<std::string> SongsUsingTone(const std::string& tone);   // song keys from SongTones.ini
 
 	// Host.
 	void StartHost();
@@ -72,11 +90,18 @@ namespace VstHostLink
 	void MoveSlot(int slot, int delta);
 	void SetBypass(int slot, bool bypass);
 	void ShowSlot(int slot);
+	void DuplicateSlot(int slot);
+	void SetChainBypass(bool bypass);
 	void ClearChain();
 	void SetLevels(int inputTenths, int outputTenths);
 	void LoadTone(const std::string& name);
 	void SaveTone(const std::string& name);
 	void DeleteTone(const std::string& name);
+	void RenameTone(const std::string& from, const std::string& to);   // song assignments follow the new name
+
+	// Tone designer page layout: which sections are open (bit per section), remembered.
+	unsigned SectionsOpen(unsigned fallback);
+	void SetSectionsOpen(unsigned bits);
 
 	// Per-song tones: the current song (Snapshot::songKey) gets this tone when it starts.
 	void SetSongTone(const std::string& tone);

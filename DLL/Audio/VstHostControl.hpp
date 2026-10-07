@@ -3,17 +3,18 @@
 // Shared state between the overlay (DLL/Audio/VstHostLink.cpp) and the VST host program
 // (VstHost/Source/Main.cpp). Plain named shared memory; the layout is the same in 32 and 64 bit (only 32-bit
 // fields). The VST host does the audio and owns the amp window; the overlay tells it whether the overlay is on
-// screen, and sends the External amp page's commands (one at a time, see Command).
+// screen, and sends the Tone designer page's commands (one at a time, see Command).
 
 #include <Windows.h>
 #include <cstdint>
 
 namespace VstHostControl
 {
-	// v3: plugin chains, tones, levels. A new mapping name per version, so an old host and a new overlay never meet.
-	constexpr wchar_t kMappingName[] = L"Local\\RocksmithAudioBridge.VstHost.v3";
+	// v4: plugin chains, tones, levels, plus slot paths, chain bypass and the Tone designer page's commands. A new
+	// mapping name per version, so an old host and a new overlay never meet.
+	constexpr wchar_t kMappingName[] = L"Local\\RocksmithAudioBridge.VstHost.v4";
 	constexpr uint32_t kMagic = 0x56424152;   // "RABV"
-	constexpr uint32_t kVersion = 3;
+	constexpr uint32_t kVersion = 4;
 	constexpr int kBeatMs = 250;              // both sides bump their beat at least this often
 	constexpr int kAliveMs = 1500;            // a side is gone when its beat stops this long
 	constexpr int kPathChars = 520;
@@ -37,6 +38,9 @@ namespace VstHostControl
 		SetLevels = 10,     // arg = input trim, arg2 = output trim, tenths of a dB
 		ClearChain = 11,
 		SetMuted = 12,      // arg = 0/1: the chain plays silence (mute while tuning)
+		DuplicateSlot = 13, // arg = slot; the copy, with the same settings, goes right after it
+		SetChainBypass = 14,// arg = 0/1: every plugin skipped (clean guitar); each slot keeps its own bypass
+		RenameTone = 15,    // text = old name, a newline, new name
 	};
 
 	struct Slot
@@ -83,6 +87,11 @@ namespace VstHostControl
 		// it from its saved choice when it starts.
 		volatile LONG popoutWanted;
 		volatile LONG quitRequested;   // overlay -> VST host: close (saves the chain)
+
+		// Written by the host (v4).
+		volatile LONG chainBypassed;   // SetChainBypass is on
+		wchar_t slotPaths[kMaxSlots][kPathChars];   // each slot's plugin file
+		wchar_t failedPath[kPathChars];             // the last plugin that did not load (Add or Replace)
 	};
 
 	// Creates or opens the block. Returns nullptr on failure; `mapping` must stay open while it is used.

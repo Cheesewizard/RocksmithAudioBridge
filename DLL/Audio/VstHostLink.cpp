@@ -37,6 +37,8 @@ namespace VstHostLink
 
 		std::vector<Plugin> g_plugins;
 		bool g_scanned = false;
+		std::vector<std::wstring> g_failed;   // plugins that did not load this session (the host's failedPath)
+		std::wstring g_lastFailed;
 		std::atomic<bool> g_rescanWanted{ false };   // set by the folder dialog's thread; the render thread rescans
 		std::vector<std::string> g_tones;
 		ULONGLONG g_tonesReadAt = 0;
@@ -214,6 +216,104 @@ namespace VstHostLink
 			return folders;
 		}
 
+		// The value of the first "key": "value" pair after `from` in a moduleinfo.json (JSON5, written by the
+		// SDK's moduleinfotool). Enough for the few fields the browser shows; not a JSON parser.
+		std::string JsonString(const std::string& json, const char* key, size_t from = 0)
+		{
+			const size_t at = json.find(std::string("\"") + key + "\"", from);
+			if (at == std::string::npos) return {};
+			const size_t open = json.find('"', json.find(':', at) + 1);
+			const size_t close = open == std::string::npos ? std::string::npos : json.find('"', open + 1);
+			return close == std::string::npos ? std::string() : json.substr(open + 1, close - open - 1);
+		}
+
+		bool Contains(const std::string& text, const char* word)
+		{
+			std::string lower = text;
+			for (char& c : lower) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+			return lower.find(word) != std::string::npos;
+		}
+
+		// Vendor, version and kind. A bundle's Contents\Resources\moduleinfo.json says them; for older plugins the
+		// vendor is the folder the plugin sits in (Common Files\VST3\<vendor>\...), and the kind is guessed from the
+		// name or left Unknown.
+		void Describe(Plugin& plugin, const std::filesystem::path& path, const std::wstring& root)
+		{
+			std::string json;
+			std::error_code error;
+			const std::filesystem::path info = path / L"Contents" / L"Resources" / L"moduleinfo.json";
+			if (std::filesystem::is_regular_file(info, error) && std::filesystem::file_size(info, error) < (1u << 20))
+			{
+				if (FILE* file = _wfopen(info.c_str(), L"rb"))
+				{
+					char buffer[4096];
+					size_t read = 0;
+					while ((read = fread(buffer, 1, sizeof(buffer), file)) > 0) json.append(buffer, read);
+					fclose(file);
+				}
+			}
+			std::string categories;
+			if (!json.empty())
+			{
+				plugin.vendor = JsonString(json, "Vendor", json.find("\"Factory Info\""));
+				const size_t classes = json.find("\"Classes\"");
+				if (classes != std::string::npos) plugin.version = JsonString(json, "Version", classes);
+				for (size_t at = json.find("\"Sub Categories\""); at != std::string::npos; at = json.find("\"Sub Categories\"", at + 1))
+					categories += json.substr(at, json.find(']', at) - at) + "|";
+			}
+			if (plugin.vendor.empty())
+			{
+				const std::filesystem::path parent = path.parent_path();
+				if (_wcsicmp(parent.c_str(), root.c_str()) != 0) plugin.vendor = Utf8(parent.filename().wstring());
+			}
+			if (Contains(categories, "instrument") && !Contains(categories, "\"fx\"")) plugin.kind = Kind::Instrument;
+			else if (Contains(categories, "amp") || Contains(categories, "distortion") || Contains(plugin.name, "amp")) plugin.kind = Kind::Amp;
+			else if (Contains(categories, "dynamics") || Contains(plugin.name, "gate") || Contains(plugin.name, "comp")) plugin.kind = Kind::Dynamics;
+			else if (Contains(categories, "fx")) plugin.kind = Kind::Effect;
+		}
+
+		std::vector<std::wstring> ReadList(const wchar_t* name)
+		{
+			std::vector<std::wstring> items;
+			const std::wstring list = ReadString(name);
+			size_t start = 0;
+			while (start < list.size())
+			{
+				const size_t end = list.find(L';', start);
+				const std::wstring item = list.substr(start, end == std::wstring::npos ? std::wstring::npos : end - start);
+				if (!item.empty()) items.push_back(item);
+				if (end == std::wstring::npos) break;
+				start = end + 1;
+			}
+			return items;
+		}
+
+		void WriteList(const wchar_t* name, const std::vector<std::wstring>& items)
+		{
+			std::wstring list;
+			for (const std::wstring& item : items) list += (list.empty() ? L"" : L";") + item;
+			WriteString(name, list);
+		}
+
+		bool ListHas(const std::vector<std::wstring>& items, const std::wstring& item)
+		{
+			return std::any_of(items.begin(), items.end(), [&](const std::wstring& i) { return _wcsicmp(i.c_str(), item.c_str()) == 0; });
+		}
+
+		std::vector<std::wstring> g_favourites, g_recent;
+		bool g_favouritesRead = false, g_recentRead = false;
+
+		void RememberRecent(const std::wstring& path)
+		{
+			std::vector<std::wstring> recent = ReadList(L"RecentPlugins");
+			recent.erase(std::remove_if(recent.begin(), recent.end(), [&](const std::wstring& p) { return _wcsicmp(p.c_str(), path.c_str()) == 0; }), recent.end());
+			recent.insert(recent.begin(), path);
+			if (recent.size() > 8) recent.resize(8);
+			WriteList(L"RecentPlugins", recent);
+			g_recent = recent;
+			g_recentRead = true;
+		}
+
 		void Scan()
 		{
 			std::vector<Plugin> plugins;
@@ -235,7 +335,10 @@ namespace VstHostLink
 					if (!Is64Bit(path)) continue;
 					const bool duplicate = std::any_of(plugins.begin(), plugins.end(),
 						[&](const Plugin& p) { return _wcsicmp(p.path.c_str(), path.c_str()) == 0; });
-					if (!duplicate) plugins.push_back({ Utf8(path.stem().wstring()), path.wstring() });
+					if (duplicate) continue;
+					Plugin plugin{ Utf8(path.stem().wstring()), path.wstring() };
+					Describe(plugin, path, root);
+					plugins.push_back(std::move(plugin));
 				}
 			}
 			std::sort(plugins.begin(), plugins.end(), [](const Plugin& a, const Plugin& b) { return _stricmp(a.name.c_str(), b.name.c_str()) < 0; });
@@ -346,8 +449,11 @@ namespace VstHostLink
 					{
 						char name[VstHostControl::kNameChars + 1]{};
 						memcpy(name, shared->slots[i].name, VstHostControl::kNameChars);
-						s.slots.push_back({ name, shared->slots[i].bypass != 0 });
+						wchar_t path[VstHostControl::kPathChars + 1]{};
+						memcpy(path, const_cast<const wchar_t*>(shared->slotPaths[i]), sizeof(shared->slotPaths[i]));
+						s.slots.push_back({ name, path, shared->slots[i].bypass != 0 });
 					}
+					s.chainBypassed = shared->chainBypassed != 0;
 					s.shownSlot = shared->shownSlot;
 					char tone[VstHostControl::kNameChars + 1]{};
 					memcpy(tone, shared->toneName, VstHostControl::kNameChars);
@@ -380,6 +486,14 @@ namespace VstHostLink
 			InterlockedIncrement(&shared->overlayBeat);
 		}
 		const bool hostRunning = HostAlive(shared);
+		// A plugin that did not load is marked in the browser for the rest of the session (or until a rescan).
+		wchar_t failed[VstHostControl::kPathChars + 1]{};
+		memcpy(failed, const_cast<const wchar_t*>(shared->failedPath), sizeof(shared->failedPath));
+		if (failed[0] && g_lastFailed != failed)
+		{
+			g_lastFailed = failed;
+			if (!ListHas(g_failed, failed)) g_failed.push_back(failed);
+		}
 		AutoStart(hostRunning);
 		FollowSong(shared, hostRunning);
 		FollowTuner(hostRunning);
@@ -406,9 +520,55 @@ namespace VstHostLink
 		return g_plugins;
 	}
 
-	void Rescan() { Scan(); }
+	void Rescan() { g_failed.clear(); Scan(); }
 
 	std::vector<std::wstring> ScanFolders() { return ExtraFolders(); }
+
+	void ShowPluginFile(const std::wstring& path)
+	{
+		ShellExecuteW(nullptr, L"open", L"explorer.exe", (L"/select,\"" + path + L"\"").c_str(), nullptr, SW_SHOWNORMAL);
+	}
+
+	// The browser asks for every row every frame, so both lists are read from the registry once and kept.
+	bool IsFavourite(const std::wstring& path)
+	{
+		if (!g_favouritesRead) { g_favourites = ReadList(L"FavouritePlugins"); g_favouritesRead = true; }
+		return ListHas(g_favourites, path);
+	}
+
+	void SetFavourite(const std::wstring& path, bool favourite)
+	{
+		IsFavourite(path);
+		g_favourites.erase(std::remove_if(g_favourites.begin(), g_favourites.end(), [&](const std::wstring& p) { return _wcsicmp(p.c_str(), path.c_str()) == 0; }), g_favourites.end());
+		if (favourite) g_favourites.push_back(path);
+		WriteList(L"FavouritePlugins", g_favourites);
+	}
+
+	std::vector<std::wstring> RecentPlugins()
+	{
+		if (!g_recentRead) { g_recent = ReadList(L"RecentPlugins"); g_recentRead = true; }
+		return g_recent;
+	}
+
+	bool FailedToLoad(const std::wstring& path) { return ListHas(g_failed, path); }
+
+	bool IsHostGuest(const std::string& guestName) { return _stricmp(guestName.c_str(), "RocksmithAudioBridgeVstHost.exe") == 0; }
+
+	std::vector<std::string> SongsUsingTone(const std::string& tone)
+	{
+		std::vector<std::string> songs;
+		std::vector<wchar_t> section(32768);
+		const DWORD size = GetPrivateProfileSectionW(L"Songs", section.data(), static_cast<DWORD>(section.size()), SongTonesFile().c_str());
+		for (const wchar_t* line = section.data(); line < section.data() + size && *line; line += wcslen(line) + 1)
+		{
+			const wchar_t* equals = wcschr(line, L'=');
+			if (equals && _wcsicmp(equals + 1, Wide(tone).c_str()) == 0) songs.push_back(Utf8(std::wstring(line, equals)));
+		}
+		return songs;
+	}
+
+	unsigned SectionsOpen(unsigned fallback) { return ReadDword(L"ToneDesignerSections", fallback); }
+	void SetSectionsOpen(unsigned bits) { WriteDword(L"ToneDesignerSections", bits); }
 
 	void AddScanFolder()
 	{
@@ -485,11 +645,14 @@ namespace VstHostLink
 	void AddPlugin(const std::wstring& path)
 	{
 		VstHostControl::Shared* shared = Shared();
+		RememberRecent(path);
 		if (!shared || !HostAlive(shared)) { if (HostProcessGone()) Launch(path); return; }
 		Queue(Command::AddPlugin, 0, 0, path);
 	}
 
-	void ReplaceSlot(int slot, const std::wstring& path) { Queue(Command::ReplaceSlot, slot, 0, path); }
+	void ReplaceSlot(int slot, const std::wstring& path) { RememberRecent(path); Queue(Command::ReplaceSlot, slot, 0, path); }
+	void DuplicateSlot(int slot) { Queue(Command::DuplicateSlot, slot); }
+	void SetChainBypass(bool bypass) { Queue(Command::SetChainBypass, bypass ? 1 : 0); }
 	void RemoveSlot(int slot) { Queue(Command::RemoveSlot, slot); }
 	void MoveSlot(int slot, int delta) { Queue(Command::MoveSlot, slot, delta); }
 	void SetBypass(int slot, bool bypass) { Queue(Command::SetBypass, slot, bypass ? 1 : 0); }
@@ -498,7 +661,26 @@ namespace VstHostLink
 	void SetLevels(int inputTenths, int outputTenths) { Queue(Command::SetLevels, inputTenths, outputTenths); }
 	void LoadTone(const std::string& name) { g_toneBeforeSong.clear(); Queue(Command::LoadTone, 0, 0, Wide(name)); }
 	void SaveTone(const std::string& name) { Queue(Command::SaveTone, 0, 0, Wide(name)); g_tonesReadAt = 0; }
-	void DeleteTone(const std::string& name) { Queue(Command::DeleteTone, 0, 0, Wide(name)); g_tonesReadAt = 0; }
+	void DeleteTone(const std::string& name)
+	{
+		Queue(Command::DeleteTone, 0, 0, Wide(name));
+		// Songs that used it go back to the player's usual tone instead of failing to load a missing file.
+		for (const std::string& song : SongsUsingTone(name))
+			WritePrivateProfileStringW(L"Songs", Wide(song).c_str(), nullptr, SongTonesFile().c_str());
+		g_tonesReadAt = 0;
+		g_snapshotAt = 0;
+	}
+
+	void RenameTone(const std::string& from, const std::string& to)
+	{
+		if (from.empty() || to.empty() || from == to) return;
+		Queue(Command::RenameTone, 0, 0, Wide(from) + L"\n" + Wide(to));
+		for (const std::string& song : SongsUsingTone(from))
+			WritePrivateProfileStringW(L"Songs", Wide(song).c_str(), Wide(to).c_str(), SongTonesFile().c_str());
+		if (_stricmp(g_toneBeforeSong.c_str(), from.c_str()) == 0) g_toneBeforeSong = to;
+		g_tonesReadAt = 0;
+		g_snapshotAt = 0;
+	}
 
 	void SetSongTone(const std::string& tone)
 	{

@@ -29,6 +29,7 @@ namespace VstHost
 		void Remove(int index);
 		void Move(int index, int delta);
 		void SetBypass(int index, bool bypass);
+		bool Duplicate(int index, std::string& error);   // the copy, with the same settings, goes right after it
 		void Clear();
 
 		bool Prepare(int frames, std::string& error);   // every slot, for a (new) stream
@@ -41,6 +42,9 @@ namespace VstHost
 
 		void SetLevels(int inputTenths, int outputTenths);
 		void SetMuted(bool muted) { m_muted = muted; }
+		// Every plugin skipped (the clean guitar plays); each slot keeps its own bypass. Not part of the tone.
+		void SetChainBypass(bool bypass) { m_chainBypass = bypass; }
+		bool ChainBypassed() const { return m_chainBypass.load(); }
 		int InputTenths() const { return m_inputTenths; }
 		int OutputTenths() const { return m_outputTenths; }
 		float TakeInputPeak() { return m_inputPeak.exchange(0.0f); }
@@ -78,6 +82,7 @@ namespace VstHost
 		int m_inputTenths = 0;
 		int m_outputTenths = 0;
 		std::atomic<bool> m_muted{ false };
+		std::atomic<bool> m_chainBypass{ false };
 		std::atomic<float> m_inputGain{ 1.0f };
 		std::atomic<float> m_outputGain{ 1.0f };
 		std::atomic<float> m_inputPeak{ 0.0f };

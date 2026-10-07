@@ -3,7 +3,7 @@
 // plugins are 64-bit only; audio goes through the bridge driver's external amp link, the same path an external
 // amp sim uses.
 //
-// The overlay's External amp page drives it through a shared block (DLL/Audio/VstHostControl.hpp): build the
+// The overlay's Tone designer page drives it through a shared block (DLL/Audio/VstHostControl.hpp): build the
 // chain, pick which plugin's window shows, save and load tones, set levels. The shown plugin's editor lives in a
 // borderless, always-on-top popout over the game that shows with the overlay, so the amp can be adjusted without
 // leaving Rocksmith. That needs Rocksmith in windowed or borderless fullscreen; nothing can draw over exclusive
@@ -27,6 +27,7 @@
 #include <ShlObj.h>
 #include <commdlg.h>
 #include <shellapi.h>
+#include <TlHelp32.h>
 #include <algorithm>
 #include <cmath>
 #include <string>
@@ -162,6 +163,40 @@ namespace
 		if (g_control) CopyText(g_control->loadError, sizeof(g_control->loadError), text);
 	}
 
+	// The plugin browser marks this plugin "Failed to load".
+	void SetFailedPath(const std::wstring& path)
+	{
+		if (!g_control) return;
+		wchar_t* destination = const_cast<wchar_t*>(g_control->failedPath);
+		memset(destination, 0, sizeof(g_control->failedPath));
+		wcsncpy_s(destination, VstHostControl::kPathChars, path.c_str(), _TRUNCATE);
+	}
+
+	bool RocksmithRunning()
+	{
+		HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+		if (snapshot == INVALID_HANDLE_VALUE) return true;   // cannot tell: assume it is, never close by mistake
+		PROCESSENTRY32W entry{ sizeof(entry) };
+		bool found = false;
+		for (BOOL more = Process32FirstW(snapshot, &entry); more && !found; more = Process32NextW(snapshot, &entry))
+			found = _wcsicmp(entry.szExeFile, L"Rocksmith2014.exe") == 0;
+		CloseHandle(snapshot);
+		return found;
+	}
+
+	// The host is the game's companion: once it has seen Rocksmith, it closes (saving the chain) when the game
+	// does, instead of staying behind with nothing to play and its exe locked. Started by hand with no game, it
+	// stays until closed. Checked every 2 s.
+	bool GameClosed()
+	{
+		static bool seen = false;
+		static int tick = 0;
+		if (++tick % 4 != 0) return false;
+		const bool running = RocksmithRunning();
+		seen = seen || running;
+		return seen && !running;
+	}
+
 	bool IsRocksmithProcess(DWORD pid)
 	{
 		HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
@@ -271,7 +306,7 @@ namespace
 		}
 	}
 
-	// The popout is on screen when the External amp page's "Pop out amp" is on and the overlay is open. Without
+	// The popout is on screen when the Tone designer page's "Show amp window" is on and the overlay is open. Without
 	// an overlay reporting in (Rocksmith closed, or an overlay that predates this), the switch alone decides.
 	void UpdatePopout()
 	{
@@ -349,7 +384,7 @@ namespace
 		PluginHost* plugin = g_chain.Plugin(g_shown);
 		if (!plugin)
 		{
-			g_title = L"No plugins: add one on the External amp page";
+			g_title = L"No plugins: add one on the Tone designer page";
 			FitPopoutToEditor(Scale(460), Scale(60));
 		}
 		else
@@ -380,7 +415,14 @@ namespace
 			CopyText(g_control->slots[i].name, sizeof(g_control->slots[i].name), plugin ? plugin->Name() : std::string());
 			g_control->slots[i].bypass = plugin && g_chain.Bypassed(i) ? 1 : 0;
 		}
+		for (int i = 0; i < VstHostControl::kMaxSlots; ++i)
+		{
+			wchar_t* destination = const_cast<wchar_t*>(g_control->slotPaths[i]);
+			memset(destination, 0, sizeof(g_control->slotPaths[i]));
+			if (i < count) wcsncpy_s(destination, VstHostControl::kPathChars, g_chain.Path(i).c_str(), _TRUNCATE);
+		}
 		g_control->slotCount = count;
+		g_control->chainBypassed = g_chain.ChainBypassed() ? 1 : 0;
 		g_control->shownSlot = g_shown;
 		CopyText(g_control->toneName, sizeof(g_control->toneName), Utf8(g_toneName));
 		g_control->toneModified = g_toneModified ? 1 : 0;
@@ -407,7 +449,7 @@ namespace
 
 	void MarkModified() { g_toneModified = true; }
 
-	// One command from the External amp page.
+	// One command from the Tone designer page.
 	void RunCommand(VstHostControl::Command op, int arg, int arg2, const std::wstring& text)
 	{
 		using VstHostControl::Command;
@@ -418,7 +460,7 @@ namespace
 		case Command::AddPlugin:
 			BeginLoading();
 			if (g_chain.Add(text, error)) { MarkModified(); ShowSlot(g_chain.Count() - 1); }
-			else SetLoadError(error.empty() ? "That plugin did not load." : error);
+			else { SetLoadError(error.empty() ? "That plugin did not load." : error); SetFailedPath(text); }
 			EndLoading();
 			break;
 		case Command::ReplaceSlot:
@@ -427,7 +469,7 @@ namespace
 			const bool shown = arg == g_shown;
 			if (shown) if (PluginHost* plugin = g_chain.Plugin(g_shown)) plugin->CloseEditor();
 			if (g_chain.Replace(arg, text, error)) MarkModified();
-			else SetLoadError(error.empty() ? "That plugin did not load." : error);
+			else { SetLoadError(error.empty() ? "That plugin did not load." : error); SetFailedPath(text); }
 			if (shown || g_shown < 0) ShowSlot(arg);
 			EndLoading();
 			break;
@@ -507,6 +549,33 @@ namespace
 			g_chain.SetMuted(arg != 0);
 			Log("chain: %s", arg ? "muted (tuning)" : "unmuted");
 			break;
+		case Command::DuplicateSlot:
+			BeginLoading();
+			if (g_chain.Duplicate(arg, error)) { MarkModified(); ShowSlot(arg + 1); }
+			else SetLoadError(error.empty() ? "That plugin did not load a second time." : error);
+			EndLoading();
+			break;
+		case Command::SetChainBypass:
+			g_chain.SetChainBypass(arg != 0);
+			Log("chain: %s", arg ? "bypassed (clean guitar)" : "playing");
+			break;
+		case Command::RenameTone:
+		{
+			const size_t split = text.find(L'\n');
+			if (split == std::wstring::npos) break;
+			const std::wstring oldName = text.substr(0, split), newName = text.substr(split + 1);
+			const std::wstring from = ToneFile(oldName), to = ToneFile(newName);
+			if (from.empty() || to.empty()) { SetLoadError("Give the tone a name."); break; }
+			if (GetFileAttributesW(to.c_str()) != INVALID_FILE_ATTRIBUTES && _wcsicmp(from.c_str(), to.c_str()) != 0)
+			{
+				SetLoadError("A tone with that name already exists.");
+				break;
+			}
+			if (!MoveFileExW(from.c_str(), to.c_str(), 0)) { SetLoadError("The tone could not be renamed."); break; }   // a change of case works too
+			Log("tone: renamed %ls to %ls", from.c_str(), to.c_str());
+			if (_wcsicmp(g_toneName.c_str(), oldName.c_str()) == 0) { g_toneName = newName; RememberTone(); }
+			break;
+		}
 		case Command::ClearChain:
 			if (PluginHost* plugin = g_chain.Plugin(g_shown)) plugin->CloseEditor();
 			g_chain.Clear();
@@ -580,6 +649,12 @@ namespace
 				return 0;
 			}
 			if (g_control) InterlockedIncrement(&g_control->hostBeat);
+			if (GameClosed())
+			{
+				Log("host: Rocksmith has closed, closing too");
+				PostMessageW(window, WM_CLOSE, 0, 0);
+				return 0;
+			}
 			if (g_chain.TakeRestartRequest()) { StartAudio(window); ShowSlot(g_shown); }
 			if (g_chain.Dirty() && !g_toneModified) { g_toneModified = true; PublishState(); }
 			if (++g_ticks >= kAutosaveTicks)
@@ -599,7 +674,7 @@ namespace
 		case WM_LBUTTONUP:
 		{
 			const POINT point{ static_cast<short>(LOWORD(lParam)), static_cast<short>(HIWORD(lParam)) };
-			// The window's close button only puts the amp away (the page's "Pop out amp" brings it back); without
+			// The window's close button only puts the amp away (the page's "Show amp window" brings it back); without
 			// an overlay to bring it back, it closes the host.
 			if (InCloseButton(window, point))
 			{
@@ -732,7 +807,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 	ShowSlot(ReadDword(L"ShownSlot", shown) ? static_cast<int>(shown) : 0);
 	PlacePopout();
 
-	// Tell the overlay's External amp page we are here; the popout follows its "Pop out amp" switch (UpdatePopout).
+	// Tell the overlay's Tone designer page we are here; the popout follows its "Show amp window" switch (UpdatePopout).
 	if (g_control)
 	{
 		DWORD wanted = 0;
@@ -746,7 +821,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 		PublishState();
 		InterlockedExchange(&g_control->loading, 0);
 		InterlockedExchange(&g_control->hostPid, static_cast<LONG>(GetCurrentProcessId()));
-		Log("popout: %s", g_savedWanted ? "Pop out amp is on" : "waiting for Pop out amp on the External amp page");
+		Log("popout: %s", g_savedWanted ? "amp window is on" : "waiting for Show amp window on the Tone designer page");
 	}
 	else ShowPopout();
 	SetTimer(g_popout, kHousekeepingTimer, kHousekeepingMs, nullptr);

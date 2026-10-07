@@ -129,6 +129,24 @@ namespace VstHost
 		m_structureDirty = true;
 	}
 
+	bool Chain::Duplicate(int index, std::string& error)
+	{
+		if (index < 0 || index >= Count()) return false;
+		if (Count() >= kMaxSlots) { error = "The chain is full (" + std::to_string(kMaxSlots) + " plugins)."; return false; }
+		std::vector<char> component, controller;
+		m_slots[index]->plugin->GetStateBlobs(component, controller);
+		auto slot = std::make_unique<Slot>();
+		if (!LoadSlot(*slot, m_slots[index]->path, error)) return false;
+		slot->plugin->SetStateBlobs(std::move(component), std::move(controller));   // before it plays: no stream thread yet
+		slot->bypass = m_slots[index]->bypass.load();
+		Pause();
+		m_slots.insert(m_slots.begin() + index + 1, std::move(slot));
+		m_structureDirty = true;
+		Resume();
+		Log("chain: duplicated slot %d (%d in the chain)", index + 1, Count());
+		return true;
+	}
+
 	void Chain::Clear()
 	{
 		Pause();
@@ -209,8 +227,10 @@ namespace VstHost
 		RaisePeak(m_inputPeak, Peak(inL, frames));
 
 		// An empty chain, or every slot bypassed, passes the clean guitar through.
+		const bool chainBypassed = m_chainBypass.load(std::memory_order_relaxed);
 		for (auto& slot : m_slots)
 		{
+			if (chainBypassed) break;
 			if (slot->bypass.load(std::memory_order_relaxed)) continue;
 			if (!slot->plugin->Process(inL, inR, outL, outR, frames)) continue;   // not ready: skip it, keep the signal
 			std::swap(inL, outL);
