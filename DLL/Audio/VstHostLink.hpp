@@ -46,6 +46,7 @@ namespace VstHostLink
 		bool exclusiveFullscreen = false;   // Rocksmith.ini: no window can show over the game
 		std::string songKey;          // the song being played, empty outside songs
 		std::string songTone;         // the tone assigned to that song
+		std::string defaultTone;      // loads for songs without a tone of their own (empty: none)
 	};
 
 	// What a plugin is, from its VST3 sub categories (moduleinfo.json); Unknown when the bundle does not say.
@@ -110,6 +111,9 @@ namespace VstHostLink
 	void SaveTone(const std::string& name);
 	void DeleteTone(const std::string& name);
 	void RenameTone(const std::string& from, const std::string& to);   // song assignments follow the new name
+	// Tone names are "Name" or "Folder/Name" (one folder level in the tones folder); RenameTone moves between folders.
+	std::string DefaultTone();
+	void SetDefaultTone(const std::string& tone);   // empty: none
 
 	// Tone designer page layout: which sections are open (bit per section), remembered.
 	unsigned SectionsOpen(unsigned fallback);

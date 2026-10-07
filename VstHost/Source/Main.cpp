@@ -106,12 +106,33 @@ namespace
 	std::wstring CurrentChainFile() { return DataDirectory() + L"\\Current.rabtone"; }
 
 	// Tone names become file names: keep them to characters every file system takes.
-	std::wstring ToneFile(const std::wstring& name)
+	std::wstring SafeFilePart(const std::wstring& part)
 	{
 		std::wstring safe;
-		for (wchar_t c : name) safe += (c < 32 || wcschr(L"<>:\"/\\|?*", c)) ? L'_' : c;
+		for (wchar_t c : part) safe += (c < 32 || wcschr(L"<>:\"/\\|?*", c)) ? L'_' : c;
 		while (!safe.empty() && (safe.back() == L' ' || safe.back() == L'.')) safe.pop_back();
-		return safe.empty() ? std::wstring() : DataDirectory() + L"\\Tones\\" + safe + L".rabtone";
+		while (!safe.empty() && safe.front() == L' ') safe.erase(safe.begin());
+		return safe;
+	}
+
+	// A tone's name is "Name", or "Folder/Name" for a tone in a folder of the tones folder (one level; the page
+	// groups them, "Bass tones", "Experimental"). Each part keeps to characters every file system takes.
+	std::wstring ToneFile(const std::wstring& name)
+	{
+		const size_t slash = name.find(L'/');
+		const std::wstring folder = slash == std::wstring::npos ? std::wstring() : SafeFilePart(name.substr(0, slash));
+		const std::wstring base = SafeFilePart(slash == std::wstring::npos ? name : name.substr(slash + 1));
+		if (base.empty()) return {};
+		return DataDirectory() + L"\\Tones\\" + (folder.empty() ? std::wstring() : folder + L"\\") + base + L".rabtone";
+	}
+
+	void CreateFolderFor(const std::wstring& file) { SHCreateDirectoryExW(nullptr, file.substr(0, file.find_last_of(L'\\')).c_str(), nullptr); }
+
+	// A tone folder left empty by a move or delete goes (RemoveDirectory refuses a folder that still has files).
+	void RemoveFolderIfEmpty(const std::wstring& file)
+	{
+		const std::wstring folder = file.substr(0, file.find_last_of(L'\\'));
+		if (_wcsicmp(folder.c_str(), (DataDirectory() + L"\\Tones").c_str()) != 0) RemoveDirectoryW(folder.c_str());
 	}
 
 	std::wstring Wide(const std::string& text)
@@ -669,6 +690,7 @@ namespace
 		{
 			const std::wstring file = ToneFile(text);
 			if (file.empty()) { SetLoadError("Give the tone a name."); break; }
+			CreateFolderFor(file);
 			g_chain.SavePluginSettings();
 			if (g_chain.SaveTone(file))
 			{
@@ -685,6 +707,7 @@ namespace
 			if (!file.empty() && DeleteFileW(file.c_str()))
 			{
 				Log("tone: deleted %ls", file.c_str());
+				RemoveFolderIfEmpty(file);
 				if (_wcsicmp(g_toneName.c_str(), text.c_str()) == 0) { g_toneName.clear(); RememberTone(); }
 			}
 			break;
@@ -719,7 +742,9 @@ namespace
 				SetLoadError("A tone with that name already exists.");
 				break;
 			}
+			CreateFolderFor(to);   // a rename can move it into a folder
 			if (!MoveFileExW(from.c_str(), to.c_str(), 0)) { SetLoadError("The tone could not be renamed."); break; }   // a change of case works too
+			RemoveFolderIfEmpty(from);
 			Log("tone: renamed %ls to %ls", from.c_str(), to.c_str());
 			if (_wcsicmp(g_toneName.c_str(), oldName.c_str()) == 0) { g_toneName = newName; RememberTone(); }
 			break;

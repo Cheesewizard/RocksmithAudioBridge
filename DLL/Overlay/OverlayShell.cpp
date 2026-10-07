@@ -746,7 +746,7 @@ namespace Overlay
 		namespace ToneDesigner
 		{
 			enum Section : unsigned { Library = 2, Browser = 4, Meters = 8 };
-			enum class Dialog { None, SaveAs, Rename, Delete, NewTone, Discard, Levels };
+			enum class Dialog { None, SaveAs, Rename, Delete, NewTone, Discard, Levels, NewFolder };
 			enum Filter { All, Favourites, Amps, Effects, Dynamics, Instruments, Recent, FilterCount };
 
 			// The panel's own colours (the mockup's): neutral greys, so it reads as a separate app inside the overlay.
@@ -807,6 +807,7 @@ namespace Overlay
 				char search[64] = {};
 				char toneSearch[48] = {};
 				std::string selectedTone;       // the library's selected row (double-click or Load loads it)
+				std::vector<std::string> foldedFolders;   // tone folders folded away in the library (this session)
 				int filter = All;
 				Dialog dialog = Dialog::None;
 				bool openDialog = false;
@@ -824,6 +825,20 @@ namespace Overlay
 
 			bool IsOpen(Section section) { return (S().open & section) != 0; }
 
+			// Tone names are "Name" or "Folder/Name" (VstHostLink.hpp): one folder level in the tones folder.
+			std::string FolderOf(const std::string& tone)
+			{
+				const size_t slash = tone.find('/');
+				return slash == std::string::npos ? std::string() : tone.substr(0, slash);
+			}
+
+			std::string BaseName(const std::string& tone)
+			{
+				const size_t slash = tone.find('/');
+				return slash == std::string::npos ? tone : tone.substr(slash + 1);
+			}
+
+
 			void Toggle(Section section)
 			{
 				State& s = S();
@@ -840,7 +855,7 @@ namespace Overlay
 				s.openDialog = true;
 				s.dialogTone = tone;
 				s.dialogSongs = dialog == Dialog::Delete ? VstHostLink::SongsUsingTone(tone).size() : 0;
-				strncpy_s(s.name, tone.c_str(), _TRUNCATE);
+				strncpy_s(s.name, (dialog == Dialog::Rename ? BaseName(tone) : dialog == Dialog::NewFolder ? std::string() : tone).c_str(), _TRUNCATE);
 			}
 
 			const VstHostLink::Plugin* FindPlugin(const std::wstring& path)
@@ -1126,7 +1141,7 @@ namespace Overlay
 					Hint("Your tones. Click to pick one; File has Save and Save as.");
 					list->AddRectFilled(box, ImVec2(box.x + nameW, box.y + button), Ink::Field, 6.0f);
 					list->AddRect(box, ImVec2(box.x + nameW, box.y + button), Ink::FieldEdge, 6.0f);
-					const std::string name = vst.loading ? "Loading..." : vst.toneName.empty() ? (vst.slots.empty() ? "New tone" : "Unsaved tone") : vst.toneName;
+					const std::string name = vst.loading ? "Loading..." : vst.toneName.empty() ? (vst.slots.empty() ? "New tone" : "Unsaved tone") : BaseName(vst.toneName);
 					const bool dot = HasUnsavedChanges(vst);
 					const float textW = ImGui::CalcTextSize(name.c_str()).x + (dot ? 13.0f : 0.0f);
 					const float tx = box.x + std::max(8.0f, (nameW - textW) * 0.5f);
@@ -1152,6 +1167,24 @@ namespace Overlay
 				ImGui::PopStyleVar();
 				ImGui::EndChild();
 				ImGui::PopStyleColor(3);
+			}
+
+			std::vector<std::string> ToneFolders(const std::vector<std::string>& tones)
+			{
+				std::vector<std::string> folders;
+				for (const std::string& tone : tones) {
+					const std::string folder = FolderOf(tone);
+					if (!folder.empty() && std::find(folders.begin(), folders.end(), folder) == folders.end()) folders.push_back(folder);
+				}
+				std::sort(folders.begin(), folders.end(), [](const std::string& a, const std::string& b) { return _stricmp(a.c_str(), b.c_str()) < 0; });
+				return folders;
+			}
+
+			void MoveToFolder(const std::string& tone, const std::string& folder)
+			{
+				const std::string to = folder.empty() ? BaseName(tone) : folder + "/" + BaseName(tone);
+				if (to != tone) VstHostLink::RenameTone(tone, to);
+				if (_stricmp(S().selectedTone.c_str(), tone.c_str()) == 0) S().selectedTone = to;
 			}
 
 			// One row of the tone library: click loads, the star marks a favourite, right-click for the rest.
@@ -1181,8 +1214,14 @@ namespace Overlay
 				// The tone playing now: a green dot before its name.
 				if (current) list->AddCircleFilled(ImVec2(at.x + 9.0f, at.y + height * 0.5f), 3.5f, Ink::Good, 12);
 				list->PushClipRect(at, ImVec2(end.x - 24.0f, end.y), true);
-				list->AddText(ImVec2(at.x + 18.0f, at.y + 5.0f), current || selected ? IM_COL32_WHITE : IM_COL32(195, 200, 210, 255), tone.c_str());
+				const std::string shown = BaseName(tone);
+				list->AddText(ImVec2(at.x + 18.0f, at.y + 5.0f), current || selected ? IM_COL32_WHITE : IM_COL32(195, 200, 210, 255), shown.c_str());
 				list->PopClipRect();
+				if (_stricmp(vst.defaultTone.c_str(), tone.c_str()) == 0 && !hovered && !favourite) {
+					ImFont* caption = CaptionFont();
+					const float w = TextWidth(caption, "default");
+					Text(list, caption, ImVec2(end.x - w - 6.0f, at.y + (height - caption->FontSize) * 0.5f), Ink::Dim, "default");
+				}
 				if (favourite || hovered)
 					DrawIcon(list, ImVec2(end.x - 12.0f, at.y + height * 0.5f), favourite ? Glyph::StarFilled : Glyph::Star, favourite ? Ink::Amber : Ink::Dim);
 
@@ -1194,12 +1233,25 @@ namespace Overlay
 					if (ImGui::MenuItem("Load", "or double-click it", false, !current && !vst.busy)) RequestLoad(vst, tone);
 					if (ImGui::MenuItem("Favourite", nullptr, favourite)) VstHostLink::SetFavouriteTone(tone, !favourite);
 					const bool songTone = _stricmp(vst.songTone.c_str(), tone.c_str()) == 0;
+					const bool isDefault = _stricmp(vst.defaultTone.c_str(), tone.c_str()) == 0;
+					if (ImGui::MenuItem("Use as default tone", nullptr, isDefault))
+						VstHostLink::SetDefaultTone(isDefault ? std::string() : tone);
+					Hint("Loads whenever a song without a tone of its own starts.");
 					if (ImGui::MenuItem("Use for the current song", nullptr, songTone, !vst.songKey.empty() && !songTone && !vst.busy)) {
 						VstHostLink::SetSongTone(tone);
 						if (!current) RequestLoad(vst, tone);
 					}
 					ImGui::Separator();
 					if (ImGui::MenuItem("Rename...", nullptr, false, !vst.busy)) Ask(Dialog::Rename, tone);
+					if (ImGui::BeginMenu("Move to folder", !vst.busy)) {
+						if (ImGui::MenuItem("No folder", nullptr, FolderOf(tone).empty())) MoveToFolder(tone, {});
+						ImGui::Separator();
+						for (const std::string& folder : ToneFolders(VstHostLink::Tones()))
+							if (ImGui::MenuItem(folder.c_str(), nullptr, folder == FolderOf(tone))) MoveToFolder(tone, folder);
+						ImGui::Separator();
+						if (ImGui::MenuItem("New folder...")) Ask(Dialog::NewFolder, tone);
+						ImGui::EndMenu();
+					}
 					if (ImGui::MenuItem("Show in folder")) VstHostLink::OpenTonesFolder();
 					ImGui::Separator();
 					ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Bad));
@@ -1250,7 +1302,7 @@ namespace Overlay
 					FoldLabel("Favourites");
 					for (const std::string& tone : tones) if (VstHostLink::IsFavouriteTone(tone) && matches(tone)) ToneRow(vst, tone, rowW);
 				}
-				FoldLabel("All tones");
+				FoldLabel(ToneFolders(tones).empty() ? "All tones" : "Tones");
 				if (tones.empty()) {
 					ImGui::PushFont(CaptionFont());
 					ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Muted));
@@ -1260,13 +1312,46 @@ namespace Overlay
 					ImGui::PopStyleColor();
 					ImGui::PopFont();
 				}
-				for (const std::string& tone : tones) if (matches(tone)) ToneRow(vst, tone, rowW);
+				for (const std::string& tone : tones) if (FolderOf(tone).empty() && matches(tone)) ToneRow(vst, tone, rowW);
+				// Folders: a header that folds the folder away (click), its tones under it.
+				for (const std::string& folder : ToneFolders(tones)) {
+					size_t count = 0;
+					for (const std::string& tone : tones) if (FolderOf(tone) == folder && matches(tone)) ++count;
+					if (count == 0) continue;
+					auto& folded = s.foldedFolders;
+					const auto it = std::find(folded.begin(), folded.end(), folder);
+					const bool open = it == folded.end();
+					ImGui::PushID(folder.c_str());
+					const ImVec2 at = ImGui::GetCursorScreenPos();
+					const float headerH = ImGui::GetFontSize() + 8.0f;
+					if (ImGui::InvisibleButton("##folder", ImVec2(rowW, headerH))) {
+						if (open) folded.push_back(folder);
+						else folded.erase(it);
+					}
+					const bool hovered = ImGui::IsItemHovered();
+					ImGui::PopID();
+					ImDrawList* list = ImGui::GetWindowDrawList();
+					if (hovered) list->AddRectFilled(at, ImVec2(at.x + rowW, at.y + headerH), Ink::RowHover, 5.0f);
+					const ImU32 color = hovered ? Ink::Text : Ink::Soft;
+					const float cx = at.x + 8.0f, cy = at.y + headerH * 0.5f;
+					if (open) list->AddTriangleFilled(ImVec2(cx - 4.0f, cy - 2.0f), ImVec2(cx + 4.0f, cy - 2.0f), ImVec2(cx, cy + 3.0f), color);
+					else list->AddTriangleFilled(ImVec2(cx - 2.0f, cy - 4.0f), ImVec2(cx + 3.0f, cy), ImVec2(cx - 2.0f, cy + 4.0f), color);
+					list->AddText(ImVec2(at.x + 18.0f, at.y + 4.0f), color, folder.c_str());
+					ImFont* caption = CaptionFont();
+					const std::string number = std::to_string(count);
+					Text(list, caption, ImVec2(at.x + rowW - TextWidth(caption, number.c_str()) - 8.0f, at.y + (headerH - caption->FontSize) * 0.5f), Ink::Dim, number.c_str());
+					if (open)
+						for (const std::string& tone : tones) if (FolderOf(tone) == folder && matches(tone)) {
+							ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 10.0f);
+							ToneRow(vst, tone, rowW - 10.0f);
+						}
+				}
 				FoldLabel("Song tones");
 				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Muted));
 				const size_t songs = VstHostLink::SongToneCount();
 				ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 6.0f);
 				ImGui::TextUnformatted(songs == 0 ? "None yet" : songs == 1 ? "1 song" : (std::to_string(songs) + " songs").c_str());
-				Hint("Songs that load their own tone when they start. Right-click the song strip below, during a song, to set one.");
+				Hint("Songs that load their own tone when they start. During a song, the strip under the board has a button to give it the tone you are on.");
 				ImGui::PopStyleColor();
 
 				// Right-click on the empty part of the column.
@@ -1555,10 +1640,18 @@ namespace Overlay
 					: "Your guitar into the chain and the chain's output. Click for the levels.");
 				if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) Ask(Dialog::Levels);
 
-				// Song row.
+				// Song row: the song, its tone, and a button to give it the tone playing now (or forget its own).
 				const ImVec2 song(at.x + pad, at.y + rowH + 12.0f);
+				std::string songAction;
+				bool songActionEnabled = true;
+				if (!vst.songKey.empty()) {
+					if (!vst.songTone.empty() && _stricmp(vst.songTone.c_str(), vst.toneName.c_str()) == 0) songAction = "Forget this song's tone";
+					else if (vst.toneName.empty() || vst.toneModified) { songAction = "Save the tone to use it here"; songActionEnabled = false; }
+					else songAction = "Use \"" + BaseName(vst.toneName) + "\" for this song";
+				}
+				const float actionW = songAction.empty() ? 0.0f : ImGui::CalcTextSize(songAction.c_str()).x + 28.0f + pad;
 				ImGui::SetCursorScreenPos(ImVec2(at.x, song.y - 4.0f));
-				ImGui::InvisibleButton("##song", ImVec2(width, ImGui::GetFontSize() + 10.0f));
+				ImGui::InvisibleButton("##song", ImVec2(std::max(width - actionW, 10.0f), ImGui::GetFontSize() + 10.0f));
 				DrawIcon(list, ImVec2(song.x + 8.0f, song.y + ImGui::GetFontSize() * 0.5f), Glyph::MusicNote, Ink::Soft);
 				float sx = song.x + 22.0f;
 				if (vst.songKey.empty()) {
@@ -1567,7 +1660,8 @@ namespace Overlay
 				else {
 					list->AddText(ImVec2(sx, song.y), Ink::Soft, vst.songKey.c_str());
 					sx += ImGui::CalcTextSize(vst.songKey.c_str()).x + 10.0f;
-					const std::string tag = vst.songTone.empty() ? "your usual tone" : vst.songTone;
+					const std::string tag = !vst.songTone.empty() ? BaseName(vst.songTone)
+						: !vst.defaultTone.empty() ? "default: " + BaseName(vst.defaultTone) : "your usual tone";
 					const float tagW = TextWidth(caption, tag.c_str()) + 16.0f;
 					list->AddRectFilled(ImVec2(sx, song.y - 1.0f), ImVec2(sx + tagW, song.y + ImGui::GetFontSize() + 1.0f), Ink::Tag, 5.0f);
 					Text(list, caption, ImVec2(sx + 8.0f, song.y + (ImGui::GetFontSize() - caption->FontSize) * 0.5f), Ink::TagText, tag.c_str());
@@ -1595,6 +1689,18 @@ namespace Overlay
 					ImGui::EndPopup();
 				}
 				ImGui::PopStyleVar();
+				if (!songAction.empty()) {
+					ImGui::SetCursorScreenPos(ImVec2(at.x + width - actionW, song.y - 5.0f));
+					ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10, 3));
+					ImGui::BeginDisabled(!songActionEnabled || vst.busy);
+					if (ImGui::Button(songAction.c_str())) {
+						if (_stricmp(vst.songTone.c_str(), vst.toneName.c_str()) == 0) VstHostLink::ClearSongTone();
+						else VstHostLink::SetSongTone(vst.toneName);
+					}
+					ImGui::EndDisabled();
+					ImGui::PopStyleVar();
+					Hint("A song with its own tone loads it whenever it starts; other songs get the default tone (right-click a tone), or keep the one playing.");
+				}
 				ImGui::SetCursorScreenPos(ImVec2(at.x, song.y + ImGui::GetFontSize() + 10.0f));
 			}
 
@@ -1882,11 +1988,13 @@ namespace Overlay
 						const bool rename = s.dialog == Dialog::Rename;
 						heading(rename ? "Rename tone" : "Save tone as");
 						Caption(rename ? "Songs that use it keep using it under its new name."
-							: "Saves the chain with every plugin's settings. You hear the same either way.");
+							: "Saves the chain with every plugin's settings. Folder/Name saves it into a folder (Bass tones/Fuzz).");
 						if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
 						ImGui::SetNextItemWidth(-1.0f);
 						const bool enter = ImGui::InputTextWithHint("##name", "Tone name", s.name, sizeof(s.name), ImGuiInputTextFlags_EnterReturnsTrue);
-						const std::string name = Trimmed(s.name);
+						const std::string typed = Trimmed(s.name);
+						// Renaming keeps the tone in its folder (Move to folder moves it).
+						const std::string name = rename && !typed.empty() && !FolderOf(s.dialogTone).empty() ? FolderOf(s.dialogTone) + "/" + typed : typed;
 						const std::vector<std::string>& tones = VstHostLink::Tones();
 						const bool taken = _stricmp(name.c_str(), s.dialogTone.c_str()) != 0
 							&& std::any_of(tones.begin(), tones.end(), [&](const std::string& t) { return _stricmp(t.c_str(), name.c_str()) == 0; });
@@ -1930,6 +2038,21 @@ namespace Overlay
 						if (Button("Cancel")) close = true;
 						break;
 					}
+					case Dialog::NewFolder: {
+						heading("New folder");
+						Caption(("Moves \"" + BaseName(s.dialogTone) + "\" into a new folder, for example Bass tones or Experimental.").c_str());
+						if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+						ImGui::SetNextItemWidth(-1.0f);
+						const bool enter = ImGui::InputTextWithHint("##folder", "Folder name", s.name, sizeof(s.name), ImGuiInputTextFlags_EnterReturnsTrue);
+						std::string folder = Trimmed(s.name);
+						folder.erase(std::remove(folder.begin(), folder.end(), '/'), folder.end());
+						ImGui::BeginDisabled(folder.empty());
+						if (Button("Move", true) || (enter && !folder.empty())) { MoveToFolder(s.dialogTone, folder); close = true; }
+						ImGui::EndDisabled();
+						ImGui::SameLine();
+						if (Button("Cancel")) close = true;
+						break;
+					}
 					case Dialog::Levels:
 						heading("Levels");
 						LevelsDialogBody(vst);
@@ -1953,7 +2076,7 @@ namespace Overlay
 				const float barH = ImGui::GetFontSize() + 20.0f;
 				const float mainH = 250.0f;
 				const float stripH = IsOpen(Meters) ? CaptionFont()->FontSize + ImGui::GetFontSize() + 34.0f : 0.0f;
-				const float libraryW = IsOpen(Library) ? std::min(190.0f, width * 0.28f) : 0.0f;
+				const float libraryW = IsOpen(Library) ? std::min(240.0f, width * 0.32f) : 0.0f;
 				const ImVec2 at = ImGui::GetCursorScreenPos();
 				ImDrawList* list = ImGui::GetWindowDrawList();
 				// The browser's height is only known after it is drawn: split the draw list so the panel's background

@@ -359,12 +359,22 @@ namespace VstHostLink
 			g_scanned = true;
 		}
 
+		// Tones, and tones in folders one level down as "Folder/Name" (the host's ToneFile maps the same way).
 		std::vector<std::string> ReadToneNames()
 		{
 			std::vector<std::string> tones;
 			std::error_code error;
 			for (const auto& entry : std::filesystem::directory_iterator(DataDirectory() + L"\\Tones", error))
-				if (_wcsicmp(entry.path().extension().c_str(), L".rabtone") == 0) tones.push_back(Utf8(entry.path().stem().wstring()));
+			{
+				if (entry.is_directory(error))
+				{
+					std::error_code inner;
+					for (const auto& file : std::filesystem::directory_iterator(entry.path(), inner))
+						if (_wcsicmp(file.path().extension().c_str(), L".rabtone") == 0)
+							tones.push_back(Utf8(entry.path().filename().wstring()) + "/" + Utf8(file.path().stem().wstring()));
+				}
+				else if (_wcsicmp(entry.path().extension().c_str(), L".rabtone") == 0) tones.push_back(Utf8(entry.path().stem().wstring()));
+			}
 			std::sort(tones.begin(), tones.end(), [](const std::string& a, const std::string& b) { return _stricmp(a.c_str(), b.c_str()) < 0; });
 			return tones;
 		}
@@ -407,6 +417,7 @@ namespace VstHostLink
 			std::vector<std::string> tones;
 			size_t songToneCount = 0;
 			std::vector<std::wstring> scanFolders;
+			std::string defaultTone;   // loads when a song without a tone of its own starts (empty: none)
 			unsigned version = 0;
 		};
 		std::mutex g_slowLock;
@@ -431,6 +442,7 @@ namespace VstHostLink
 				fresh.tones = ReadToneNames();
 				fresh.songToneCount = CountSongTones();
 				fresh.scanFolders = ExtraFolders();
+				fresh.defaultTone = Utf8(ReadString(L"DefaultTone"));
 				{
 					std::lock_guard<std::mutex> lock(g_slowLock);
 					fresh.songKey = g_slow.songKey;
@@ -490,6 +502,14 @@ namespace VstHostLink
 				if (g_toneBeforeSong.empty()) g_toneBeforeSong = current;
 				LOG_INFO("(VST HOST) song " << g_songKey << ": loading its tone '" << tone << "'" << std::endl);
 				Queue(Command::LoadTone, 0, 0, Wide(tone));
+			}
+			else if (const std::string fallback = ReadSlow([](SlowState& slow) { return slow.defaultTone; }); !fallback.empty())
+			{
+				// A song without its own tone gets the default tone, when the player has set one.
+				g_toneBeforeSong.clear();
+				if (_stricmp(fallback.c_str(), current) == 0) return;
+				LOG_INFO("(VST HOST) song " << g_songKey << " has no tone of its own: loading the default tone '" << fallback << "'" << std::endl);
+				Queue(Command::LoadTone, 0, 0, Wide(fallback));
 			}
 			else if (!g_toneBeforeSong.empty())
 			{
@@ -573,6 +593,7 @@ namespace VstHostLink
 				s.muteWhileTuning = slow.muteWhileTuning;
 				s.exclusiveFullscreen = slow.exclusiveFullscreen;
 				s.songTone = slow.songKey == g_songKey ? slow.songTone : std::string();
+				s.defaultTone = slow.defaultTone;
 				return 0;
 			});
 			s.songKey = g_songKey;
@@ -852,8 +873,18 @@ namespace VstHostLink
 	void SetLevels(int inputTenths, int outputTenths) { Queue(Command::SetLevels, inputTenths, outputTenths); }
 	void LoadTone(const std::string& name) { g_toneBeforeSong.clear(); Queue(Command::LoadTone, 0, 0, Wide(name)); }
 	void SaveTone(const std::string& name) { Queue(Command::SaveTone, 0, 0, Wide(name)); KickSlow(); }
+	std::string DefaultTone() { return ReadSlow([](SlowState& slow) { return slow.defaultTone; }); }
+
+	void SetDefaultTone(const std::string& tone)
+	{
+		WriteString(L"DefaultTone", Wide(tone));
+		ReadSlow([&](SlowState& slow) { slow.defaultTone = tone; return 0; });
+		g_snapshotAt = 0;
+	}
+
 	void DeleteTone(const std::string& name)
 	{
+		if (_stricmp(DefaultTone().c_str(), name.c_str()) == 0) SetDefaultTone({});
 		Queue(Command::DeleteTone, 0, 0, Wide(name));
 		// Songs that used it go back to the player's usual tone instead of failing to load a missing file.
 		for (const std::string& song : SongsUsingTone(name))
@@ -870,6 +901,7 @@ namespace VstHostLink
 			WritePrivateProfileStringW(L"Songs", Wide(song).c_str(), Wide(to).c_str(), SongTonesFile().c_str());
 		if (_stricmp(g_toneBeforeSong.c_str(), from.c_str()) == 0) g_toneBeforeSong = to;
 		if (IsFavouriteTone(from)) { SetFavouriteTone(from, false); SetFavouriteTone(to, true); }
+		if (_stricmp(DefaultTone().c_str(), from.c_str()) == 0) SetDefaultTone(to);
 		KickSlow();
 		g_snapshotAt = 0;
 	}
