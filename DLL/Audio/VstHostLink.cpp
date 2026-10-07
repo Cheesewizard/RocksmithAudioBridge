@@ -151,8 +151,10 @@ namespace VstHostLink
 			if (shared->hostPid == 0) return false;
 			if (now - g_hostBeatSeenAt < static_cast<ULONGLONG>(VstHostControl::kAliveMs)) return true;
 			// A heavy plugin can take seconds to load, and the host's beat pauses meanwhile; it is still there as
-			// long as the process is.
-			return shared->loading != 0 && !HostProcessGone();
+			// long as the process is. Opening a big plugin's window (AmpliTube) pauses it too, for a few seconds:
+			// still running up to kHungMs, after which the page offers Force close (hostHung).
+			if (HostProcessGone()) return false;
+			return shared->loading != 0 || now - g_hostBeatSeenAt <= kHungMs;
 		}
 
 		void Launch(const std::wstring& plugin)
