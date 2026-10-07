@@ -70,8 +70,9 @@ namespace
 	wchar_t g_loadingNow[128] = {};   // the plugin loading now, for a crash report (plain buffer: read in OnCrash)
 	wchar_t g_openWindowNames[256] = {};   // plugins whose windows are open, for a crash report (OnCrash)
 	ULONGLONG g_lastCommandAt = 0;    // the page's last command (background loading waits for a quiet moment)
-	bool g_preloadStarred = false;    // the page's "Keep starred plugins loaded"
-	std::vector<std::wstring> g_starred, g_preloadFailed;
+	// Spares the player asked for (RefreshKeepSettings): KeepLoadedPlugins ("Always keep loaded"), and this run's
+	// "Load in the background"; PreloadFailed, plugins that went down loading that way.
+	std::vector<std::wstring> g_alwaysLoaded, g_sessionLoaded, g_preloadFailed;
 
 	bool ReadDword(const wchar_t* name, DWORD& value)
 	{
@@ -666,52 +667,61 @@ namespace
 	void MarkModified() { g_toneModified = true; }
 
 	// Spares (Chain.hpp): the page's settings, read every couple of seconds. KeepRecentPlugins: how many plugins
-	// that left the chain stay loaded. PreloadStarred: the plugins starred in the browser are kept loaded too, and
-	// loaded in the background when they are not.
+	// that left the chain stay loaded. KeepLoadedPlugins: plugins marked "Always keep loaded" in the browser, loaded
+	// in the background when they are not (PreloadStep); g_sessionLoaded: "Load in the background", kept until the
+	// host closes.
 	void RefreshKeepSettings()
 	{
-		DWORD recent = 4, starred = 0;
+		DWORD recent = 4;
 		ReadDword(L"KeepRecentPlugins", recent);
-		ReadDword(L"PreloadStarred", starred);
-		g_preloadStarred = starred != 0;
-		g_starred = g_preloadStarred ? ReadList(L"FavouritePlugins") : std::vector<std::wstring>{};
+		g_alwaysLoaded = ReadList(L"KeepLoadedPlugins");
 		g_preloadFailed = ReadList(L"PreloadFailed");
+		std::vector<std::wstring> keep = g_alwaysLoaded;
+		for (const std::wstring& path : g_sessionLoaded) if (!ListHas(keep, path)) keep.push_back(path);
 		const int before = g_chain.SpareCount();
-		g_chain.SetKeep(static_cast<int>(recent), g_starred);
+		g_chain.SetKeep(static_cast<int>(recent), keep);
 		if (g_chain.SpareCount() != before) PublishState();
 	}
 
-	// One starred plugin that is not loaded yet, loaded as a spare. Only while no song plays (the page says so; a
-	// plugin starting up can cost the stream late buffers), with no command waiting, and a few seconds after the
-	// last one, so it never gets in the way of what the player is doing. One per call; the call comes again.
-	// PreloadingNow names it meanwhile: if it takes the host down, the next start puts it on PreloadFailed (main)
-	// and it is not tried again until the page's switch is turned off and on.
+	// Loads one plugin as a spare now; the beat pauses meanwhile and `preloading` tells the page which. PreloadingNow
+	// names it in the registry: if it takes the host down, the next start puts it on PreloadFailed (main) and the
+	// background never tries it again until the player asks for it on the page.
+	bool LoadSpareNow(const std::wstring& path, const char* why, bool recent)
+	{
+		std::wstring name = path.substr(path.find_last_of(L"\\/") + 1);
+		if (name.size() > 5 && _wcsicmp(name.c_str() + name.size() - 5, L".vst3") == 0) name.resize(name.size() - 5);
+		Log("spares: loading %ls in the background (%s)", name.c_str(), why);
+		WriteString(L"PreloadingNow", path);
+		wcsncpy_s(g_loadingNow, name.c_str(), _TRUNCATE);
+		CopyText(g_control->preloadText, sizeof(g_control->preloadText), Utf8(name));
+		InterlockedExchange(&g_control->preloading, 1);
+		std::string error;
+		const bool ok = g_chain.PreloadOne(path, error, recent);
+		if (!ok)
+		{
+			Log("spares: %ls did not load (%s)", name.c_str(), error.c_str());
+			if (!ListHas(g_preloadFailed, path)) g_preloadFailed.push_back(path);
+		}
+		WriteString(L"PreloadingNow", {});
+		g_loadingNow[0] = 0;
+		InterlockedIncrement(&g_control->hostBeat);
+		InterlockedExchange(&g_control->preloading, 0);
+		CopyText(g_control->preloadText, sizeof(g_control->preloadText), {});
+		PublishState();
+		return ok;
+	}
+
+	// One "Always keep loaded" plugin that is not loaded yet. Only while no song plays (the page says so; a plugin
+	// starting up can cost the stream late buffers), with no command waiting and a few seconds after the last one,
+	// so it never gets in the way of the player. One per call; the call comes again.
 	void PreloadStep()
 	{
-		if (!g_preloadStarred || !g_control || !g_control->preloadAllowed) return;
+		if (g_alwaysLoaded.empty() || !g_control || !g_control->preloadAllowed) return;
 		if (g_control->commandSeq != g_handledCommand || GetTickCount64() - g_lastCommandAt < 4000) return;
-		for (const std::wstring& path : g_starred)
+		for (const std::wstring& path : g_alwaysLoaded)
 		{
 			if (g_chain.IsLoaded(path) || ListHas(g_preloadFailed, path) || GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) continue;
-			std::wstring name = path.substr(path.find_last_of(L"\\/") + 1);
-			if (name.size() > 5 && _wcsicmp(name.c_str() + name.size() - 5, L".vst3") == 0) name.resize(name.size() - 5);
-			Log("spares: loading %ls in the background (starred)", name.c_str());
-			WriteString(L"PreloadingNow", path);
-			wcsncpy_s(g_loadingNow, name.c_str(), _TRUNCATE);
-			CopyText(g_control->preloadText, sizeof(g_control->preloadText), Utf8(name));
-			InterlockedExchange(&g_control->preloading, 1);
-			std::string error;
-			if (!g_chain.PreloadOne(path, error))
-			{
-				Log("spares: %ls did not load (%s); not tried again", name.c_str(), error.c_str());
-				g_preloadFailed.push_back(path);
-			}
-			WriteString(L"PreloadingNow", {});
-			g_loadingNow[0] = 0;
-			InterlockedIncrement(&g_control->hostBeat);
-			InterlockedExchange(&g_control->preloading, 0);
-			CopyText(g_control->preloadText, sizeof(g_control->preloadText), {});
-			PublishState();
+			LoadSpareNow(path, "always kept loaded", false);
 			return;
 		}
 	}
@@ -860,21 +870,22 @@ namespace
 			{
 				if (room-- <= 0) break;
 				if (ListHas(g_preloadFailed, path) || GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) continue;
-				std::wstring name = path.substr(path.find_last_of(L"\\/") + 1);
-				if (name.size() > 5 && _wcsicmp(name.c_str() + name.size() - 5, L".vst3") == 0) name.resize(name.size() - 5);
-				Log("spares: loading %ls for tone %ls (the highlighted song's)", name.c_str(), text.c_str());
-				wcsncpy_s(g_loadingNow, name.c_str(), _TRUNCATE);
-				CopyText(g_control->preloadText, sizeof(g_control->preloadText), Utf8(name));
-				InterlockedExchange(&g_control->preloading, 1);
-				std::string loadError;
-				if (!g_chain.PreloadOne(path, loadError, true)) Log("spares: %ls did not load (%s)", name.c_str(), loadError.c_str());
-				g_loadingNow[0] = 0;
-				InterlockedIncrement(&g_control->hostBeat);
-				InterlockedExchange(&g_control->preloading, 0);
-				CopyText(g_control->preloadText, sizeof(g_control->preloadText), {});
+				LoadSpareNow(path, "the highlighted song's tone", true);
 			}
 			break;
 		}
+		case Command::LoadSpare:
+			// The player's own choice: loaded even if it failed that way before, and kept while the host runs.
+			if (!ListHas(g_sessionLoaded, text)) g_sessionLoaded.push_back(text);
+			RefreshKeepSettings();
+			if (!g_chain.IsLoaded(text)) LoadSpareNow(text, "asked for on the page", true);
+			break;
+		case Command::UnloadSpare:
+			g_sessionLoaded.erase(std::remove_if(g_sessionLoaded.begin(), g_sessionLoaded.end(),
+				[&](const std::wstring& p) { return _wcsicmp(p.c_str(), text.c_str()) == 0; }), g_sessionLoaded.end());
+			RefreshKeepSettings();
+			g_chain.DropSpares(text);
+			break;
 		case Command::ClearChain:
 			CloseAllWindows();
 			g_chain.Clear();

@@ -48,6 +48,7 @@ namespace VstHost
 		static std::vector<std::wstring> TonePlugins(const std::wstring& file);
 		std::vector<std::wstring> NotLoaded(const std::vector<std::wstring>& plugins) const;
 		int KeepRecent() const { return m_keepRecent; }
+		void DropSpares(const std::wstring& path);
 		int SpareCount() const { return static_cast<int>(m_spares.size()); }
 		const std::wstring& SparePath(int index) const { return m_spares[index].path; }
 

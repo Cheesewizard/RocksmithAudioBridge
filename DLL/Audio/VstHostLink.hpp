@@ -51,8 +51,8 @@ namespace VstHostLink
 		std::vector<std::wstring> spares;
 		std::string preloadingName;   // a plugin loading in the background now (starred, or the highlighted song's)
 		int keepRecent = 4;           // plugins that left the chain kept loaded
-		bool preloadStarred = false;  // starred plugins kept loaded, loaded in the background
-		std::vector<std::wstring> preloadFailed;   // starred plugins that went down while loading that way
+		std::vector<std::wstring> alwaysLoaded;    // "Always keep loaded": loaded in the background each session
+		std::vector<std::wstring> preloadFailed;   // plugins that went down while loading in the background
 	};
 
 	// What a plugin is, from its VST3 sub categories (moduleinfo.json); Unknown when the bundle does not say.
@@ -100,7 +100,10 @@ namespace VstHostLink
 	void SetMuteWhileTuning(bool on);   // the chain goes quiet in the tuner screens
 	void SetPopout(bool wanted);
 	void SetKeepRecent(int count);       // 0 = unload plugins as they leave the chain
-	void SetPreloadStarred(bool on);     // also lets the ones that failed that way be tried again
+	// Plugins kept loaded outside the chain, so tones using them switch at once (the host's spares).
+	void LoadInBackground(const std::wstring& path);              // now, until the game closes (host running)
+	void SetAlwaysLoaded(const std::wstring& path, bool on);      // every session, loaded in the background
+	void Unload(const std::wstring& path);                        // its spares go, and Always is cleared
 	void DismissCrashNote();
 
 	// Chain commands (queued; the host handles them in order). AddPlugin starts the host when it is not running.

@@ -120,6 +120,13 @@ namespace VstHost
 			}
 	}
 
+	void Chain::DropSpares(const std::wstring& path)
+	{
+		const size_t before = m_spares.size();
+		m_spares.erase(std::remove_if(m_spares.begin(), m_spares.end(), [&](const Spare& spare) { return _wcsicmp(spare.path.c_str(), path.c_str()) == 0; }), m_spares.end());
+		if (m_spares.size() != before) Log("spares: unloaded %ls (asked for)", path.c_str());
+	}
+
 	void Chain::SetKeep(int recent, std::vector<std::wstring> always)
 	{
 		recent = std::clamp(recent, 0, 16);

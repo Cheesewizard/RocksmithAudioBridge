@@ -426,7 +426,7 @@ namespace VstHostLink
 			std::vector<std::wstring> scanFolders;
 			std::string defaultTone;   // loads when a song without a tone of its own starts (empty: none)
 			int keepRecent = 4;
-			bool preloadStarred = false;
+			std::vector<std::wstring> alwaysLoaded;
 			std::vector<std::wstring> preloadFailed;
 			unsigned version = 0;
 		};
@@ -454,7 +454,7 @@ namespace VstHostLink
 				fresh.scanFolders = ExtraFolders();
 				fresh.defaultTone = Utf8(ReadString(L"DefaultTone"));
 				fresh.keepRecent = static_cast<int>(ReadDword(L"KeepRecentPlugins", 4));
-				fresh.preloadStarred = ReadDword(L"PreloadStarred", 0) != 0;
+				fresh.alwaysLoaded = ReadList(L"KeepLoadedPlugins");
 				fresh.preloadFailed = ReadList(L"PreloadFailed");
 				{
 					std::lock_guard<std::mutex> lock(g_slowLock);
@@ -647,7 +647,7 @@ namespace VstHostLink
 				s.songTone = slow.songKey == g_songKey ? slow.songTone : std::string();
 				s.defaultTone = slow.defaultTone;
 				s.keepRecent = slow.keepRecent;
-				s.preloadStarred = slow.preloadStarred;
+				s.alwaysLoaded = slow.alwaysLoaded;
 				s.preloadFailed = slow.preloadFailed;
 				return 0;
 			});
@@ -916,10 +916,38 @@ namespace VstHostLink
 		g_snapshotAt = 0;
 	}
 
-	void SetPreloadStarred(bool on)
+	namespace
 	{
-		WriteDword(L"PreloadStarred", on ? 1 : 0);
-		WriteString(L"PreloadFailed", {});   // a fresh start for plugins that failed to load in the background
+		void SetListed(const wchar_t* list, const std::wstring& path, bool on)
+		{
+			std::vector<std::wstring> items = ReadList(list);
+			items.erase(std::remove_if(items.begin(), items.end(), [&](const std::wstring& p) { return _wcsicmp(p.c_str(), path.c_str()) == 0; }), items.end());
+			if (on) items.push_back(path);
+			WriteList(list, items);
+		}
+	}
+
+	// The player asking for a plugin also clears its PreloadFailed mark: they choose to try it again.
+	void LoadInBackground(const std::wstring& path)
+	{
+		SetListed(L"PreloadFailed", path, false);
+		Queue(Command::LoadSpare, 0, 0, path);
+		KickSlow();
+	}
+
+	void SetAlwaysLoaded(const std::wstring& path, bool on)
+	{
+		SetListed(L"KeepLoadedPlugins", path, on);
+		SetListed(L"PreloadFailed", path, false);
+		if (on && HostAlive(Shared())) Queue(Command::LoadSpare, 0, 0, path);   // now, not at the next quiet moment
+		KickSlow();
+		g_snapshotAt = 0;
+	}
+
+	void Unload(const std::wstring& path)
+	{
+		SetListed(L"KeepLoadedPlugins", path, false);
+		Queue(Command::UnloadSpare, 0, 0, path);
 		KickSlow();
 		g_snapshotAt = 0;
 	}

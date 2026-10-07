@@ -45,6 +45,8 @@ namespace VstHostControl
 		RenameTone = 15,    // text = old name, a newline, new name
 		HideSlot = 16,      // arg = slot: close its plugin window
 		PrepareTone = 17,   // text = tone name: load the plugins it needs as spares; the chain plays on unchanged
+		LoadSpare = 18,     // text = plugin path: load it now as a spare and keep it while the host runs
+		UnloadSpare = 19,   // text = plugin path: unload its spares (not the chain's)
 	};
 
 	struct Slot

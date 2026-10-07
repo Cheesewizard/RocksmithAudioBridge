@@ -892,9 +892,20 @@ namespace Overlay
 					[&](const VstHostLink::SlotView& slot) { return _wcsicmp(slot.path.c_str(), path.c_str()) == 0; });
 			}
 
-			bool KeptLoaded(const VstHostLink::Snapshot& vst, const std::wstring& path)
+			bool Listed(const std::vector<std::wstring>& list, const std::wstring& path)
 			{
-				return std::any_of(vst.spares.begin(), vst.spares.end(), [&](const std::wstring& p) { return _wcsicmp(p.c_str(), path.c_str()) == 0; });
+				return std::any_of(list.begin(), list.end(), [&](const std::wstring& p) { return _wcsicmp(p.c_str(), path.c_str()) == 0; });
+			}
+
+			bool KeptLoaded(const VstHostLink::Snapshot& vst, const std::wstring& path) { return Listed(vst.spares, path); }
+
+			// Loading in the background now: the host names it by its file name without .vst3.
+			bool Loading(const VstHostLink::Snapshot& vst, const std::wstring& path)
+			{
+				if (vst.preloadingName.empty()) return false;
+				std::wstring name = path.substr(path.find_last_of(L"\\/") + 1);
+				if (name.size() > 5 && _wcsicmp(name.c_str() + name.size() - 5, L".vst3") == 0) name.resize(name.size() - 5);
+				return _stricmp(Utf8(name).c_str(), vst.preloadingName.c_str()) == 0;
 			}
 
 			bool HasUnsavedChanges(const VstHostLink::Snapshot& vst) { return vst.toneModified && !vst.slots.empty(); }
@@ -1067,12 +1078,12 @@ namespace Overlay
 					}
 					Hint("Switching back to a tone that uses them is then instant. Each one takes memory while loaded.");
 					ImGui::Separator();
-					if (ImGui::MenuItem("Keep starred plugins loaded", nullptr, vst.preloadStarred)) VstHostLink::SetPreloadStarred(!vst.preloadStarred);
-					Hint("Loads every plugin starred in the plugin browser in the background (outside songs), so any tone using them switches at once. Star only the ones you use.");
+					ImGui::TextDisabled("Right-click a plugin in the browser to load it in the background,");
+					ImGui::TextDisabled("or to always keep it loaded.");
 					for (const std::wstring& failed : vst.preloadFailed) {
 						const size_t slash = failed.find_last_of(L"\\/");
 						const std::string name = Utf8(slash == std::wstring::npos ? failed : failed.substr(slash + 1));
-						ImGui::TextDisabled("Not loaded in the background: %s (it crashed doing that)", name.c_str());
+						ImGui::TextDisabled("Not loaded in the background: %s (it failed doing that)", name.c_str());
 					}
 					ImGui::Separator();
 					ImGui::TextDisabled("The song list's highlighted song gets its tone ready too.");
@@ -1770,7 +1781,9 @@ namespace Overlay
 				if (VstHostLink::FailedToLoad(plugin.path)) { text = "Failed to load"; color = Ink::Bad; }
 				else if (InChain(vst, plugin.path)) { text = "In chain"; color = Ink::Good; }
 				else if (plugin.kind == VstHostLink::Kind::Instrument) { text = "Not for guitar"; color = Ink::Amber; }
-				else if (KeptLoaded(vst, plugin.path)) { text = "Loaded"; color = Ink::Good; }
+				else if (Loading(vst, plugin.path)) { text = "Loading..."; color = Ink::Amber; }
+				else if (KeptLoaded(vst, plugin.path)) { text = Listed(vst.alwaysLoaded, plugin.path) ? "Always loaded" : "Loaded"; color = Ink::Blue; }
+				else if (Listed(vst.alwaysLoaded, plugin.path)) { text = Listed(vst.preloadFailed, plugin.path) ? "Failed to load" : "Loads soon"; color = Ink::Amber; }
 				else { text = "Ready"; color = Ink::Good; }
 			}
 
@@ -1814,6 +1827,19 @@ namespace Overlay
 				ImGui::AlignTextToFramePadding();
 				ImGui::TextUnformatted(count.c_str());
 				ImGui::PopStyleColor();
+				// How many plugins are loaded outside the chain (the host's spares): visible, so the speed is not a mystery.
+				int loadedOutside = 0;
+				for (const std::wstring& spare : vst.spares) if (!InChain(vst, spare)) ++loadedOutside;
+				if (loadedOutside > 0 || !vst.preloadingName.empty()) {
+					ImGui::SameLine(0.0f, 8.0f);
+					const std::string kept = !vst.preloadingName.empty() ? "loading " + vst.preloadingName + " in the background..."
+						: std::to_string(loadedOutside) + (loadedOutside == 1 ? " plugin" : " plugins") + " loaded for fast tone changes";
+					ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Blue));
+					ImGui::AlignTextToFramePadding();
+					ImGui::TextUnformatted(kept.c_str());
+					ImGui::PopStyleColor();
+					Hint("Plugins kept loaded outside the chain: a tone that uses them switches at once instead of waiting seconds for each one to start. Right-click a plugin to load it in the background, always keep it loaded, or unload it. View > Fast tone changes sets how many recent ones stay.");
+				}
 				ImGui::PopFont();
 				const float searchW = std::min(240.0f, inner * 0.4f);
 				ImGui::SameLine(left + inner - searchW);
@@ -1892,8 +1918,7 @@ namespace Overlay
 							else s.selectedPlugin = plugin.path;
 						}
 						if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && canAdd) VstHostLink::AddPlugin(plugin.path);
-						Hint(vst.preloadStarred ? "Double-click to add it to the end of the chain. Right-click for more. Starred plugins are kept loaded, for fast tone changes."
-							: "Double-click to add it to the end of the chain. Right-click for more. The star marks a favourite.");
+						Hint("Double-click to add it to the end of the chain. Right-click to keep it loaded for fast tone changes, and more. The star marks a favourite.");
 						PushPopupPadding();
 						if (ImGui::BeginPopupContextItem("##pluginMenu")) {
 							s.selectedPlugin = plugin.path;
@@ -1901,6 +1926,17 @@ namespace Overlay
 							ImGui::Separator();
 							if (ImGui::MenuItem("Add to chain", "or double-click it", false, canAdd)) VstHostLink::AddPlugin(plugin.path);
 							if (ImGui::MenuItem("Replace selected pedal", nullptr, false, canReplace)) VstHostLink::ReplaceSlot(s.selected, plugin.path);
+							ImGui::Separator();
+							// Fast tone changes: a plugin kept loaded outside the chain is in a tone in a moment.
+							const bool inChain = InChain(vst, plugin.path), loaded = KeptLoaded(vst, plugin.path);
+							const bool always = Listed(vst.alwaysLoaded, plugin.path);
+							if (ImGui::MenuItem("Load in the background", nullptr, false, vst.hostRunning && !inChain && !loaded && !Loading(vst, plugin.path)))
+								VstHostLink::LoadInBackground(plugin.path);
+							Hint("Loads it now without adding it, and keeps it loaded until the game closes: tones that use it switch at once.");
+							if (ImGui::MenuItem("Always keep loaded", nullptr, always)) VstHostLink::SetAlwaysLoaded(plugin.path, !always);
+							Hint("Loads it in the background every time Tone designer starts (outside songs), so tones that use it always switch at once. Costs memory while loaded.");
+							if (ImGui::MenuItem("Unload", nullptr, false, vst.hostRunning && loaded)) VstHostLink::Unload(plugin.path);
+							Hint("Frees its memory. In the chain it stays; this only unloads the spare copy.");
 							ImGui::Separator();
 							if (ImGui::MenuItem("Favourite", nullptr, favourite)) VstHostLink::SetFavourite(plugin.path, !favourite);
 							if (ImGui::MenuItem("Show the file")) VstHostLink::ShowPluginFile(plugin.path);
