@@ -9,8 +9,10 @@ namespace RSMods.Audio
 {
 	internal sealed class WindowCaptureRecorder : IDisposable
 	{
-		private const uint FRAMES_PER_SECOND = 30;
-		private const uint BITS_PER_SECOND = 12000000;
+		// The game draws at 60; recording at 30 made the scrolling highway visibly step.
+		private const uint FRAMES_PER_SECOND = 60;
+		// 0 = the recorder picks a bitrate from the window size (about 0.15 bits per pixel per frame).
+		private const uint BITS_PER_SECOND = 0;
 		private const long MAXIMUM_DRIFT_TICKS = 30 * TimeSpan.TicksPerSecond;
 		private const int ERROR_EMPTY = unchecked((int)0x800700FE);
 		private const int ERROR_NOT_SUPPORTED = unchecked((int)0x80070032);
