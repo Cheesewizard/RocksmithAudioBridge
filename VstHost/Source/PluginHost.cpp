@@ -103,24 +103,37 @@ namespace VstHost
 		return true;
 	}
 
-	// Main buses only: the guitar into input bus 0, output bus 0 to the game, asked for stereo. Side-chains and
-	// extra outputs stay off. The input keeps the plugin's own choice (guitar amps are often mono).
+	// Main buses only: the guitar into input bus 0, output bus 0 to the game. Side-chains and extra outputs stay
+	// off. Layouts are tried in order until the plugin takes one (mono in / stereo out suits a guitar amp, then
+	// stereo / stereo, mono / mono, stereo / mono); a plugin's default can have its main buses switched off
+	// (Overloud TH3 opened with 0 in / 0 out), which would silence the chain. A plugin still without an output
+	// is skipped by Process, so the chain passes the signal through it.
 	void PluginHost::ChooseBuses()
 	{
-		juce::AudioProcessor::BusesLayout layout = m_plugin->getBusesLayout();
-		for (int i = 1; i < layout.inputBuses.size(); ++i) layout.inputBuses.getReference(i) = juce::AudioChannelSet::disabled();
-		for (int i = 1; i < layout.outputBuses.size(); ++i) layout.outputBuses.getReference(i) = juce::AudioChannelSet::disabled();
-		if (!layout.outputBuses.isEmpty()) layout.outputBuses.getReference(0) = juce::AudioChannelSet::stereo();
-		if (!m_plugin->setBusesLayout(layout))
+		const juce::AudioProcessor::BusesLayout start = m_plugin->getBusesLayout();
+		auto with = [&](const juce::AudioChannelSet& in, const juce::AudioChannelSet& out)
 		{
-			// Keep the plugin's own output layout, still without the extra buses.
-			layout = m_plugin->getBusesLayout();
+			juce::AudioProcessor::BusesLayout layout = start;
+			for (int i = 0; i < layout.inputBuses.size(); ++i) layout.inputBuses.getReference(i) = i == 0 ? in : juce::AudioChannelSet::disabled();
+			for (int i = 0; i < layout.outputBuses.size(); ++i) layout.outputBuses.getReference(i) = i == 0 ? out : juce::AudioChannelSet::disabled();
+			return layout;
+		};
+		const juce::AudioChannelSet mono = juce::AudioChannelSet::mono(), stereo = juce::AudioChannelSet::stereo();
+		const std::pair<juce::AudioChannelSet, juce::AudioChannelSet> tries[] = { { mono, stereo }, { stereo, stereo }, { mono, mono }, { stereo, mono } };
+		bool set = false;
+		for (const auto& [in, out] : tries)
+			if (m_plugin->setBusesLayout(with(in, out))) { set = true; break; }
+		if (!set)
+		{
+			// None taken: keep its own layout without the extra buses, with its main buses on.
+			juce::AudioProcessor::BusesLayout layout = start;
 			for (int i = 1; i < layout.inputBuses.size(); ++i) layout.inputBuses.getReference(i) = juce::AudioChannelSet::disabled();
 			for (int i = 1; i < layout.outputBuses.size(); ++i) layout.outputBuses.getReference(i) = juce::AudioChannelSet::disabled();
-			m_plugin->setBusesLayout(layout);
+			if (!m_plugin->setBusesLayout(layout)) m_plugin->enableAllBuses();
 		}
 		m_inputChannels = m_plugin->getMainBusNumInputChannels();
 		m_outputChannels = m_plugin->getMainBusNumOutputChannels();
+		if (m_outputChannels == 0) Log("load: %s has no audio output it will use; it is skipped in the chain", m_name.c_str());
 	}
 
 	bool PluginHost::Prepare(int frames, std::string& error)
@@ -154,7 +167,7 @@ namespace VstHost
 			~InProcess() { flag.store(false); }
 		} inProcess(m_inProcess);
 
-		if (!m_processing.load() || frames != m_frames)
+		if (!m_processing.load() || frames != m_frames || m_outputChannels == 0)
 		{
 			std::fill(left, left + frames, 0.0f);
 			std::fill(right, right + frames, 0.0f);

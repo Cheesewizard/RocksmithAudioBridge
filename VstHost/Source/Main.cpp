@@ -982,7 +982,21 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 	Log("host: starting%s%s%ls", fromOverlay ? " from the overlay" : "", plugin.empty() ? "" : ", adding ", plugin.c_str());
 
 	g_control = VstHostControl::Open(g_controlMapping);
-	if (g_control) InterlockedExchange(&g_control->loading, 1);
+	if (g_control)
+	{
+		// Announce the host at once, loading: restoring a chain of heavy plugins can take most of a minute, and the
+		// page shows the loading panel meanwhile instead of "off" (with a Start button that cannot start a second
+		// host). The overlay counts a loading host as running while its process is there (VstHostLink HostAlive).
+		InterlockedExchange(&g_control->loading, 1);
+		CopyText(g_control->loadingText, sizeof(g_control->loadingText), "your chain");
+		InterlockedExchange(&g_control->quitRequested, 0);
+		// A command from before this host started was meant for a host that is gone; later ones wait in the queue
+		// until the chain is restored.
+		g_handledCommand = g_control->commandSeq;
+		InterlockedExchange(&g_control->commandDone, g_handledCommand);
+		InterlockedIncrement(&g_control->hostBeat);
+		InterlockedExchange(&g_control->hostPid, static_cast<LONG>(GetCurrentProcessId()));
+	}
 	g_chain.SetLoadReporter(ReportLoading);
 	RestoreChain(plugin, fromOverlay);
 
@@ -1012,7 +1026,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 	g_font = CreateFontW(-MulDiv(13, static_cast<int>(GetDpiForSystem()), 96), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
 		OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
 
-	if (!StartAudio(g_main)) { DestroyWindow(g_main); g_chain.Clear(); ReleasePluginFormats(); OleUninitialize(); return 1; }
+	if (!StartAudio(g_main))
+	{
+		if (g_control) { InterlockedExchange(&g_control->hostPid, 0); EndLoading(); }
+		DestroyWindow(g_main);
+		g_chain.Clear();
+		ReleasePluginFormats();
+		OleUninitialize();
+		return 1;
+	}
 
 	// The windows that were open last time. Before per-plugin windows there was one, showing ShownSlot.
 	DWORD openWindows = 0, shown = 0;
@@ -1026,13 +1048,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 		ReadDword(L"PopoutWanted", wanted);
 		g_savedWanted = wanted != 0;
 		InterlockedExchange(&g_control->popoutWanted, g_savedWanted ? 1 : 0);
-		InterlockedExchange(&g_control->quitRequested, 0);
-		// A command from before this host started was meant for a host that is gone.
-		g_handledCommand = g_control->commandSeq;
-		InterlockedExchange(&g_control->commandDone, g_handledCommand);
 		PublishState();
-		InterlockedExchange(&g_control->loading, 0);
-		InterlockedExchange(&g_control->hostPid, static_cast<LONG>(GetCurrentProcessId()));
+		EndLoading();
 		Log("windows: %zu open, %s", g_windows.size(), g_savedWanted ? "shown with the overlay" : "waiting for Show plugin windows on the Tone designer page");
 	}
 	UpdateWindows();
