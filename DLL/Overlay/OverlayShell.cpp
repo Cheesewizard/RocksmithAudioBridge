@@ -31,8 +31,7 @@ namespace Overlay
 {
 	namespace
 	{
-		enum class Page { NoteByNote, Mixer, Input, Output, Record, General, Debug, DropPedal, ExternalAmp, ToneDesigner };
-		std::optional<Page> g_pageRequest;   // a page's "Go to ..." button; DrawShell switches next frame
+		enum class Page { NoteByNote, Mixer, Input, Output, Record, General, Debug, DropPedal, AmpSim };
 
 		// ---- Engine access ------------------------------------------------------------------------------
 		// Same operation codes the desktop bridge sends over the pipe; the overlay calls the engine directly.
@@ -742,7 +741,7 @@ namespace Overlay
 		//   - a strip with the in / out meters, latency, and the current song's tone;
 		//   - the plugin browser under it.
 		// View shows or hides the library, the browser and the meters (remembered). Commands are queued to the host;
-		// the page shows its state a few times a second. It shares the amp link with the External amp page, which
+		// the page shows its state a few times a second. It shares the amp link with the External app tab, which
 		// carries one app at a time: each page says when the other one has it.
 		namespace ToneDesigner
 		{
@@ -1036,8 +1035,6 @@ namespace Overlay
 				if (ImGui::MenuItem("Compare with the game's amp", nullptr, amp.comparing)) ExternalAmp::SetCompare(!amp.comparing);
 				if (ImGui::MenuItem("Mute while tuning", nullptr, vst.muteWhileTuning)) VstHostLink::SetMuteWhileTuning(!vst.muteWhileTuning);
 				if (ImGui::MenuItem("Start with the game", nullptr, vst.autoStart)) VstHostLink::SetAutoStart(!vst.autoStart);
-				// The link's latency, shared with external apps (one setting: it is the same link).
-				if (ImGui::MenuItem("Extra safety buffer", nullptr, amp.safetyBuffer)) ExternalAmp::SetSafetyBuffer(!amp.safetyBuffer);
 				ImGui::Separator();
 				if (ImGui::MenuItem("Rescan plugins")) VstHostLink::Rescan();
 				if (ImGui::MenuItem("Add plugin folder...")) VstHostLink::AddScanFolder();
@@ -1540,13 +1537,9 @@ namespace Overlay
 				const ImVec2 at = ImGui::GetCursorScreenPos();
 				const float rowH = caption->FontSize + 6.0f;
 				const float pad = 14.0f;
-				char latency[64];
-				sprintf_s(latency, "%.1f ms", amp.link.frames * (amp.link.latencyBlocks > 1 ? 2 : 1) * 1000.0 / AmpLink::kSampleRate);
-				char late[32];
-				sprintf_s(late, "%u late", amp.link.lateBlocks);
-				const float lateW = TextWidth(caption, late), latencyW = TextWidth(caption, latency) + 14.0f;
+				// IN and OUT; the link's latency and late buffers are in the Amp link card above.
 				const float labelsW = TextWidth(caption, "IN") + TextWidth(caption, "OUT") + 4.0f * 10.0f;
-				const float meterW = std::max(40.0f, (width - 2.0f * pad - labelsW - latencyW - lateW - 10.0f) * 0.5f);
+				const float meterW = std::max(40.0f, (width - 2.0f * pad - labelsW) * 0.5f);
 				float x = at.x + pad;
 				const float y = at.y + 9.0f;
 				Text(list, caption, ImVec2(x, y), Ink::Muted, "IN");
@@ -1556,14 +1549,10 @@ namespace Overlay
 				Text(list, caption, ImVec2(x, y), Ink::Muted, "OUT");
 				x += TextWidth(caption, "OUT") + 10.0f;
 				MeterBar(list, ImVec2(x, y + (caption->FontSize - 7.0f) * 0.5f), meterW, vst.outputPeak);
-				x += meterW + 10.0f;
-				Text(list, caption, ImVec2(x, y), Ink::Muted, latency);
-				x += latencyW;
-				Text(list, caption, ImVec2(x, y), amp.link.lateBlocks > 0 ? Ink::Amber : Ink::Muted, late);
 				ImGui::SetCursorScreenPos(at);
 				ImGui::InvisibleButton("##levels", ImVec2(width, rowH + 6.0f));
 				Hint(vst.outputPeak > 1.0f ? "The chain's output is clipping. Click to lower the output trim, or lower the last plugin's volume."
-					: "Your guitar into the chain and the chain's output. Click for the levels. Late buffers are clicks: try View, Extra safety buffer, or fewer plugins.");
+					: "Your guitar into the chain and the chain's output. Click for the levels.");
 				if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) Ask(Dialog::Levels);
 
 				// Song row.
@@ -2007,12 +1996,11 @@ namespace Overlay
 			}
 		}
 
-		void ToneDesignerPage()
+		void ToneDesignerTab()
 		{
 			using namespace ToneDesigner;
 			const ExternalAmp::Snapshot amp = ExternalAmp::GetSnapshot();
 			const VstHostLink::Snapshot vst = VstHostLink::GetSnapshot();
-			PageHeader("Tone designer", "Build your tone from VST3 plugins (amp sims, pedals, effects) and tweak each one in its own window over the game.");
 
 			if (!vst.hostInstalled) {
 				BeginCard();
@@ -2024,7 +2012,7 @@ namespace Overlay
 			// The amp link carries one app at a time; say plainly when another app has it.
 			const std::string guest = amp.link.guestName;
 			const bool otherApp = amp.link.guestPresent && !guest.empty() && !VstHostLink::IsHostGuest(guest);
-			const std::string otherAppText = guest + " is using the amp link, so Tone designer plays nothing. Close "
+			const std::string otherAppText = guest + " (External app tab) is using the amp link, so Tone designer plays nothing. Close "
 				+ guest + " to use Tone designer.";
 
 			// A plugin crashed the host this session: say which, and that it was restarted (VstHostLink::FollowCrashes).
@@ -2070,22 +2058,61 @@ namespace Overlay
 			Dialogs(vst);
 		}
 
-		void ExternalAmpPage()
-		{
-			const ExternalAmp::Snapshot amp = ExternalAmp::GetSnapshot();
-			const AmpLink::Status& link = amp.link;
-			PageHeader("External amp", "Play through an app connected to Rocksmith Audio Bridge ASIO (AmpliTube, TONE3000, a DAW). Rocksmith keeps reading your clean signal.");
-			// The amp link carries one app at a time. Tone designer (the VST host) is one such app, with its own page.
-			const bool toneDesigner = link.guestPresent && VstHostLink::IsHostGuest(link.guestName);
+		// ---- Amp sim ------------------------------------------------------------------------------------------
+		// One page for the two ways to play through an amp sim over the amp link (AsioProxy/AmpLink.hpp), which
+		// carries one at a time: Tone designer (the VST host, VstHostLink.hpp) and an external app on the Rocksmith
+		// Audio Bridge ASIO driver (AmpliTube standalone, TONE3000, a DAW). On top, the link's own settings, the
+		// same whichever plays (what is connected, latency, late buffers, the safety buffer, compare with the
+		// game's amp); under it a tab for each. The page opens on the tab whose app holds the link.
+		enum class AmpTab { ToneDesigner, ExternalApp };
+		AmpTab g_ampTab = AmpTab::ToneDesigner;
 
-			// While Tone designer holds the link, nothing on this page applies to it (it has its own page, trims and
-			// fallback), so the page says only that.
-			// This page never controls Tone designer: it only says the link is busy and points to Tone designer's page.
-			if (toneDesigner) {
+		void AmpLinkCard(const ExternalAmp::Snapshot& amp)
+		{
+			const AmpLink::Status& link = amp.link;
+			BeginCard("Amp link");
+			if (!amp.proxyLoaded) {
+				WarnCaption("Needs Rocksmith Audio Bridge ASIO as the game's audio driver. It is not loaded in this session.");
+				EndCard();
+				return;
+			}
+			const bool toneDesigner = link.guestPresent && VstHostLink::IsHostGuest(link.guestName);
+			const std::string name = toneDesigner ? "Tone designer" : link.guestName[0] ? link.guestName : "an amp sim";
+			if (amp.comparing) InfoRow("Playing", "The game's amp (comparing)", Color::Warn);
+			else if (link.connected) InfoRow("Playing", name, Color::Good);
+			else if (link.guestPresent) InfoRow("Playing", name + " (audio stopped)", Color::Warn);
+			else InfoRow("Playing", "The game's amp (nothing connected)", Color::Muted);
+			char text[96];
+			if (link.frames > 0)
+				sprintf_s(text, "48 kHz, %d samples, +%.1f ms", link.frames, link.frames * (link.latencyBlocks > 1 ? 2 : 1) * 1000.0 / AmpLink::kSampleRate);
+			InfoRow("Format", link.frames > 0 ? text : "Waiting for the game's audio");
+			sprintf_s(text, "%u this session", link.lateBlocks);
+			InfoRow("Late buffers", text, link.lateBlocks > 0 ? Color::Warn : Color::Text);
+			if (link.lateBlocks > 0)
+				Caption("Late buffers are blocks the amp sim did not finish in time; each one is a click. Try the extra safety buffer, fewer or lighter plugins (or a lighter preset), or a bigger game buffer.");
+			if (amp.pedalSemitones != 0) {
+				sprintf_s(text, "%+d semitones, sent to the amp sim too", amp.pedalSemitones);
+				InfoRow("Drop Pedal", text);
+			}
+			bool safety = amp.safetyBuffer;
+			char safetyCaption[96];
+			sprintf_s(safetyCaption, "Adds one more buffer (+%.1f ms) so a busy PC clicks less.", (link.frames > 0 ? link.frames : 128) * 1000.0 / AmpLink::kSampleRate);
+			if (ToggleRow("Extra safety buffer", safetyCaption, &safety)) ExternalAmp::SetSafetyBuffer(safety);
+			bool compare = amp.comparing;
+			if (ToggleRow("Compare with the game's amp", "A/B: hear Rocksmith's own amp instead for now. Not saved.", &compare))
+				ExternalAmp::SetCompare(compare);
+			EndCard();
+		}
+
+		void ExternalAppTab(const ExternalAmp::Snapshot& amp)
+		{
+			const AmpLink::Status& link = amp.link;
+			// While Tone designer holds the link, nothing here applies; this tab never controls Tone designer.
+			if (link.guestPresent && VstHostLink::IsHostGuest(link.guestName)) {
 				BeginCard();
 				InfoRow("Amp link", "Busy: Tone designer is playing", Color::Warn);
-				Caption("An external app can connect once Tone designer is closed (power button on its page).");
-				if (Button("Go to Tone designer")) g_pageRequest = Page::ToneDesigner;
+				Caption("An external app can connect once Tone designer is closed (the power button on its tab).");
+				if (Button("Go to Tone designer")) g_ampTab = AmpTab::ToneDesigner;
 				EndCard();
 				return;
 			}
@@ -2094,74 +2121,86 @@ namespace Overlay
 			bool enabled = amp.enabled;
 			const char* state = !amp.enabled ? "Off: the game's amp plays as normal."
 				: amp.gameAmpMuted ? "On: the game's amp is muted and you hear the external app."
-				: amp.fallback ? "On: the game's amp plays until an amp sim connects."
-				: "On: the game's amp stays muted, waiting for an amp sim.";
-			if (ToggleRow("Use external amp", state, &enabled, "Saved. Note detection always uses your clean signal, whichever amp you hear."))
+				: amp.fallback ? "On: the game's amp plays until an app connects."
+				: "On: the game's amp stays muted, waiting for an app.";
+			if (ToggleRow("Use an external app", state, &enabled, "Saved. Note detection always uses your clean signal, whichever amp you hear."))
 				ExternalAmp::SetEnabled(enabled);
-			EndCard();
-
-			BeginCard("Connection");
-			if (!amp.proxyLoaded) {
-				WarnCaption("Needs Rocksmith Audio Bridge ASIO as the game's audio driver. It is not loaded in this session.");
-			}
-			else {
-				const std::string name = link.guestName[0] ? link.guestName : "an amp sim";
-				if (link.connected) InfoRow("Connected app", name, Color::Good);
-				else if (link.guestPresent) InfoRow("Connected app", name + " (audio stopped)", Color::Warn);
-				else InfoRow("Connected app", "None", Color::Muted);
-				char text[64];
-				sprintf_s(text, "48 kHz, %d samples", link.frames);
-				InfoRow("Format", link.frames > 0 ? text : "Waiting for the game's audio");
-				sprintf_s(text, "+%.1f ms", link.frames * (link.latencyBlocks > 1 ? 2 : 1) * 1000.0 / AmpLink::kSampleRate);
-				InfoRow("Added latency", text);
-				sprintf_s(text, "%u this session", link.lateBlocks);
-				InfoRow("Late buffers", text, link.lateBlocks > 0 ? Color::Warn : Color::Text);
-				InfoRow("Game amp", amp.gameAmpMuted ? "Muted" : "Playing", amp.gameAmpMuted ? Color::Muted : Color::Text);
-				if (amp.pedalSemitones != 0) {
-					sprintf_s(text, "%+d semitones, sent to the amp sim too", amp.pedalSemitones);
-					InfoRow("Drop Pedal", text);
-				}
-				if (link.guestPresent && link.guestFrames > 0 && link.frames > 0 && link.guestFrames != link.frames) {
-					sprintf_s(text, "%d", link.frames);
-					WarnCaption((name + " is set to " + std::to_string(link.guestFrames) + " samples. It should switch to " + text
-						+ " by itself; if not, pick " + text + " in its audio settings.").c_str());
-				}
-				if (link.lateBlocks > 0)
-					Caption("Late buffers are blocks the amp sim did not finish in time; each one is a click. Try the extra safety buffer below, a lighter preset, or a bigger game buffer.");
+			const std::string name = link.guestName[0] ? link.guestName : "an amp sim";
+			if (link.connected) InfoRow("Connected app", name, Color::Good);
+			else if (link.guestPresent) InfoRow("Connected app", name + " (audio stopped)", Color::Warn);
+			else InfoRow("Connected app", "None", Color::Muted);
+			if (link.guestPresent && link.guestFrames > 0 && link.frames > 0 && link.guestFrames != link.frames) {
+				char frames[16];
+				sprintf_s(frames, "%d", link.frames);
+				WarnCaption((name + " is set to " + std::to_string(link.guestFrames) + " samples. It should switch to " + frames
+					+ " by itself; if not, pick " + frames + " in its audio settings.").c_str());
 			}
 			if (!amp.guest64Registered)
 				WarnCaption("64-bit amp sims (AmpliTube 5) cannot see the driver yet. In the Rocksmith Audio Bridge window, press Repair next to the driver (one admin prompt).");
-			EndCard();
-
-			BeginCard("Levels");
-			Meter("Clean signal out", MeterFraction(link.inputPeak), "Your raw guitar as the amp sim receives it, before the Input page's processing.");
-			float returnDb = amp.returnTenths / 10.0f;
-			bool returnSaved = false;
-			if (SliderRow("Amp return", &returnDb, -30.0f, 6.0f, "%+.1f dB", &returnSaved, "Level of the amp sim in your mix."))
-				ExternalAmp::SetReturnTenths(static_cast<int>(std::lround(returnDb * 10.0f)), false);
-			if (returnSaved) ExternalAmp::SetReturnTenths(static_cast<int>(std::lround(returnDb * 10.0f)), true);
-			Meter("Return level", MeterFraction(link.returnPeak), "The amp sim's output after the return level.");
-			EndCard();
-
-			BeginCard();
-			bool safety = amp.safetyBuffer;
-			char safetyCaption[96];
-			sprintf_s(safetyCaption, "Adds one more buffer (+%.1f ms) so a busy PC clicks less.", (link.frames > 0 ? link.frames : 128) * 1000.0 / AmpLink::kSampleRate);
-			if (ToggleRow("Extra safety buffer", safetyCaption, &safety)) ExternalAmp::SetSafetyBuffer(safety);
 			bool fallback = amp.fallback;
 			if (ToggleRow("Fall back to the game's amp", "If the app disconnects, the game's amp comes back on.", &fallback))
 				ExternalAmp::SetFallback(fallback);
-			bool compare = amp.comparing;
-			if (ToggleRow("Compare with the game's amp", "A/B: hear Rocksmith's own amp instead for now. Not saved.", &compare))
-				ExternalAmp::SetCompare(compare);
+			EndCard();
+
+			BeginCard("Levels");
+			Meter("Clean signal out", MeterFraction(link.inputPeak), "Your raw guitar as the app receives it, before the Input page's processing.");
+			float returnDb = amp.returnTenths / 10.0f;
+			bool returnSaved = false;
+			if (SliderRow("App return", &returnDb, -30.0f, 6.0f, "%+.1f dB", &returnSaved, "Level of the external app in your mix (Tone designer has its own levels)."))
+				ExternalAmp::SetReturnTenths(static_cast<int>(std::lround(returnDb * 10.0f)), false);
+			if (returnSaved) ExternalAmp::SetReturnTenths(static_cast<int>(std::lround(returnDb * 10.0f)), true);
+			Meter("Return level", MeterFraction(link.returnPeak), "The app's output after the return level.");
 			EndCard();
 
 			BeginCard("Setup");
 			Caption("1. Open AmpliTube 5, or any ASIO amp sim.");
 			Caption("2. In its audio settings, choose Rocksmith Audio Bridge ASIO. Input: Rocksmith guitar. Outputs: Rocksmith out L and R.");
-			Caption("3. Keep Use external amp on. The game's amp mutes as soon as the app connects.");
-			Caption("For VST3 plugins without an app of their own, use the Tone designer page instead.");
+			Caption("3. Keep Use an external app on. The game's amp mutes as soon as the app connects.");
+			Caption("For VST3 plugins without an app of their own, use the Tone designer tab instead.");
 			EndCard();
+		}
+
+		// Two tabs as a segmented strip.
+		void AmpTabs()
+		{
+			static const char* const labels[] = { "Tone designer", "External app" };
+			const float height = ImGui::GetFrameHeight() + 4.0f;
+			const float width = ImGui::GetContentRegionAvail().x;
+			const ImVec2 at = ImGui::GetCursorScreenPos();
+			ImDrawList* list = ImGui::GetWindowDrawList();
+			list->AddRectFilled(at, ImVec2(at.x + width, at.y + height), Color::Card, 6.0f);
+			list->AddRect(at, ImVec2(at.x + width, at.y + height), Color::CardEdge, 6.0f);
+			for (int i = 0; i < 2; ++i) {
+				const ImVec2 tab(at.x + width * 0.5f * i, at.y);
+				ImGui::SetCursorScreenPos(tab);
+				ImGui::PushID(i);
+				if (ImGui::InvisibleButton("##ampTab", ImVec2(width * 0.5f, height))) g_ampTab = static_cast<AmpTab>(i);
+				const bool hovered = ImGui::IsItemHovered();
+				ImGui::PopID();
+				const bool on = g_ampTab == static_cast<AmpTab>(i);
+				if (on) list->AddRectFilled(ImVec2(tab.x + 3.0f, tab.y + 3.0f), ImVec2(tab.x + width * 0.5f - 3.0f, tab.y + height - 3.0f), Color::Accent, 5.0f);
+				else if (hovered) list->AddRectFilled(ImVec2(tab.x + 3.0f, tab.y + 3.0f), ImVec2(tab.x + width * 0.5f - 3.0f, tab.y + height - 3.0f), Color::Hover, 5.0f);
+				const ImVec2 size = ImGui::CalcTextSize(labels[i]);
+				list->AddText(ImVec2(tab.x + (width * 0.5f - size.x) * 0.5f, tab.y + (height - size.y) * 0.5f), on ? Color::Text : Color::Muted, labels[i]);
+			}
+			ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + height));
+			ImGui::Dummy(ImVec2(0, 6));
+		}
+
+		void AmpSimPage()
+		{
+			const ExternalAmp::Snapshot amp = ExternalAmp::GetSnapshot();
+			PageHeader("Amp sim", "Play through an amp sim instead of the game's amp: VST3 plugins in Tone designer, or an app on Rocksmith Audio Bridge ASIO. Rocksmith keeps reading your clean signal.");
+			// The first time the page opens this session, the tab of whatever holds the link.
+			static bool chosen = false;
+			if (!chosen && amp.proxyLoaded) {
+				chosen = true;
+				if (amp.link.guestPresent && !VstHostLink::IsHostGuest(amp.link.guestName)) g_ampTab = AmpTab::ExternalApp;
+			}
+			AmpLinkCard(amp);
+			AmpTabs();
+			if (g_ampTab == AmpTab::ToneDesigner) ToneDesignerTab();
+			else ExternalAppTab(amp);
 		}
 
 		// ---- Output device switching ---------------------------------------------------------------------
@@ -2788,8 +2827,7 @@ namespace Overlay
 				{ nullptr, Glyph::Pedal, "Drop Pedal", Page::DropPedal },
 				{ "Audio", Glyph::Mixer, "Mixer", Page::Mixer },
 				{ nullptr, Glyph::Input, "Input", Page::Input },
-				{ nullptr, Glyph::Link, "External amp", Page::ExternalAmp },
-				{ nullptr, Glyph::Library, "Tone designer", Page::ToneDesigner },
+				{ nullptr, Glyph::Library, "Amp sim", Page::AmpSim },
 				{ nullptr, Glyph::Speaker, "Output", Page::Output },
 				{ nullptr, Glyph::Record, "Record", Page::Record },
 				{ "System", Glyph::Settings, "General", Page::General },
@@ -2801,7 +2839,7 @@ namespace Overlay
 				if (entry.page == Page::Debug && !kDebugPage) continue;
 				// External amp needs the Audio Bridge ASIO driver in the game (ASIO mode); in Cable mode
 				// there is nothing for an amp sim to connect to, so the page is not offered.
-				if ((entry.page == Page::ExternalAmp || entry.page == Page::ToneDesigner) && !externalAmpAvailable) continue;
+				if (entry.page == Page::AmpSim && !externalAmpAvailable) continue;
 				if (entry.group) { ImGui::Dummy(ImVec2(0, 8)); ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 8.0f); SectionLabel(entry.group); ImGui::Dummy(ImVec2(0, 2)); }
 				if (NavItem(entry.glyph, entry.label, page == entry.page)) page = entry.page;
 			}
@@ -2825,7 +2863,6 @@ namespace Overlay
 		static bool themed = false;
 		if (!themed) { ApplyTheme(); themed = true; }
 		static Page page = Page::NoteByNote;
-		if (g_pageRequest) { page = *g_pageRequest; g_pageRequest.reset(); }
 #ifdef OVERLAY_PREVIEW
 		// Offscreen preview build only (not built into the DLL): renders each page in turn.
 		extern int g_overlayPreviewPage;
@@ -2865,8 +2902,8 @@ namespace Overlay
 			ImGui::SameLine(0.0f, 0.0f);
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(26, 20));
 			ImGui::BeginChild("##page", ImVec2(0, 0), false, ImGuiWindowFlags_AlwaysUseWindowPadding);
-			// Left on the External amp page when the driver is not loaded (it is hidden from the sidebar then).
-			if ((page == Page::ExternalAmp || page == Page::ToneDesigner) && !ExternalAmp::GetSnapshot().proxyLoaded) page = Page::NoteByNote;
+			// Left on the Amp sim page when the driver is not loaded (it is hidden from the sidebar then).
+			if (page == Page::AmpSim && !ExternalAmp::GetSnapshot().proxyLoaded) page = Page::NoteByNote;
 			switch (page) {
 			case Page::NoteByNote: NoteByNotePage(); break;
 			case Page::Mixer: MixerPage(live); break;
@@ -2876,10 +2913,9 @@ namespace Overlay
 			case Page::General: GeneralPage(); break;
 			case Page::Debug: DebugPage(); break;
 			case Page::DropPedal: DropPedalPage(); break;
-			case Page::ExternalAmp: ExternalAmpPage(); break;
-			case Page::ToneDesigner: ToneDesignerPage(); break;
+			case Page::AmpSim: AmpSimPage(); break;
 			}
-			static const char* const pageNames[] = { "Note by Note", "Mixer", "Input", "Output", "Record", "General", "Debug", "Drop Pedal", "External amp", "Tone designer" };
+			static const char* const pageNames[] = { "Note by Note", "Mixer", "Input", "Output", "Record", "General", "Debug", "Drop Pedal", "Amp sim" };
 			g_pageName = pageNames[static_cast<int>(page)];
 			pageContentHeight = ImGui::GetCursorPosY() + 20.0f;   // content plus bottom padding, for next frame's height
 			ImGui::EndChild();
