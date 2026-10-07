@@ -60,6 +60,11 @@ namespace VstHost
 	bool PluginHost::Load(const std::wstring& path, std::string& error)
 	{
 		Unload();
+		// Edits queued for the previous plugin carry its parameter IDs; never hand them to the next one.
+		m_editTransfer.removeChanges();
+		m_inChanges.clearQueue();
+		m_restartRequested = false;
+		m_dirty = false;
 		m_module = VST3::Hosting::Module::create(Utf8(path), error);
 		if (!m_module) { Log("load: %s", error.c_str()); return false; }
 
@@ -160,7 +165,9 @@ namespace VstHost
 	void PluginHost::Suspend()
 	{
 		if (!m_processor) return;
-		if (m_processing.exchange(false))
+		const bool wasProcessing = m_processing.exchange(false);
+		while (m_inProcess.load()) YieldProcessor();   // one block at most
+		if (wasProcessing)
 		{
 			m_processor->setProcessing(false);
 			m_component->setActive(false);
@@ -170,7 +177,14 @@ namespace VstHost
 
 	void PluginHost::Process(const float* guitar, float* left, float* right, int frames)
 	{
-		if (!m_processing.load(std::memory_order_acquire) || frames != m_data.numSamples)
+		struct InProcess
+		{
+			std::atomic<bool>& flag;
+			explicit InProcess(std::atomic<bool>& f) : flag(f) { flag.store(true); }
+			~InProcess() { flag.store(false); }
+		} inProcess(m_inProcess);
+
+		if (!m_processing.load() || frames != m_data.numSamples)
 		{
 			std::fill(left, left + frames, 0.0f);
 			std::fill(right, right + frames, 0.0f);

@@ -750,40 +750,44 @@ namespace Overlay
 				Caption("The VST host is not installed in the game folder.");
 			}
 			else {
-				if (vst.switching) InfoRow("Plugin", "Switching...", Color::Warn);
+				if (vst.switching) InfoRow("Plugin", "Loading...", Color::Warn);
 				else if (vst.hostRunning) InfoRow("Plugin", vst.pluginName.empty() ? "Loading..." : vst.pluginName, Color::Good);
 				else Caption("Play through a VST3 amp sim (AmpliTube 5, Helix Native...) without opening its own app.");
 
-				// Plugin picker: the 64-bit VST3 plugins installed in Common Files\VST3. Starts on the plugin the host
-				// opens by default; picking another and pressing Load restarts the host with it (the current
-				// plugin's settings are saved first, and each plugin keeps its own).
+				// Plugin picker: the 64-bit VST3 plugins installed in Common Files\VST3. While the host runs, picking one
+				// switches to it straight away inside the host (the current plugin's settings are saved first, each
+				// plugin keeps its own, and the popout stays up). Without a host, the pick is what Start opens.
 				const std::vector<VstHostLink::Plugin>& plugins = VstHostLink::Plugins();
 				static std::wstring picked;
+				if (vst.hostRunning && !vst.switching && !vst.currentPlugin.empty()) picked = vst.currentPlugin;
 				if (picked.empty()) picked = vst.lastPlugin;
 				std::string pickedName = "Choose a plugin";
 				for (const auto& plugin : plugins) if (_wcsicmp(plugin.path.c_str(), picked.c_str()) == 0) pickedName = plugin.name;
 				ImGui::SetNextItemWidth(RowWidth() * 0.6f);
+				ImGui::BeginDisabled(vst.switching);
 				if (ImGui::BeginCombo("##vstPlugin", pickedName.c_str())) {
 					for (const auto& plugin : plugins) {
 						const bool selected = _wcsicmp(plugin.path.c_str(), picked.c_str()) == 0;
-						if (ImGui::Selectable(plugin.name.c_str(), selected)) picked = plugin.path;
+						if (ImGui::Selectable(plugin.name.c_str(), selected) && !selected) {
+							picked = plugin.path;
+							if (vst.hostRunning) VstHostLink::LoadPlugin(picked);
+						}
 						if (selected) ImGui::SetItemDefaultFocus();
 					}
 					if (plugins.empty()) ImGui::TextDisabled("No 64-bit VST3 plugins found");
 					ImGui::EndCombo();
 				}
+				ImGui::EndDisabled();
 				ImGui::SameLine();
 				if (Button("Rescan", false, "Looks for newly installed plugins.")) VstHostLink::Rescan();
 
-				const bool pickedIsLoaded = vst.hostRunning && _wcsicmp(picked.c_str(), vst.lastPlugin.c_str()) == 0;
-				ImGui::BeginDisabled(picked.empty() || pickedIsLoaded || vst.switching);
-				if (Button(vst.hostRunning ? "Load" : "Start VST host", true,
-					vst.hostRunning ? "Closes the current plugin (its settings are saved) and loads this one." : "Starts the VST host with this plugin."))
-					VstHostLink::LoadPlugin(picked);
-				ImGui::EndDisabled();
-
-				if (vst.hostRunning) {
-					ImGui::SameLine();
+				if (!vst.hostRunning) {
+					ImGui::BeginDisabled(picked.empty() || vst.switching);
+					if (Button("Start VST host", true, "Starts the VST host with this plugin."))
+						VstHostLink::LoadPlugin(picked);
+					ImGui::EndDisabled();
+				}
+				else {
 					if (Button(vst.popoutWanted ? "Hide amp" : "Pop out amp", !vst.popoutWanted,
 						"Shows the plugin's own window over the game whenever this overlay is open. Drag its top bar to move it; the spot is remembered."))
 						VstHostLink::SetPopout(!vst.popoutWanted);
@@ -791,6 +795,8 @@ namespace Overlay
 					if (Button("Close VST host", false, "Saves the plugin's settings and closes it. The game's amp comes back if fallback is on."))
 						VstHostLink::StopHost();
 				}
+				if (!vst.switching && !vst.loadError.empty())
+					WarnCaption(("That plugin did not load (" + vst.loadError + "); the previous one is still playing.").c_str());
 			}
 			EndCard();
 

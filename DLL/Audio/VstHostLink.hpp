@@ -16,8 +16,10 @@ namespace VstHostLink
 		bool popoutWanted = false;
 		bool popoutShown = false;
 		bool hostInstalled = false;   // the exe is in the game folder
-		bool switching = false;       // closing the host to start it with another plugin
+		bool switching = false;       // a plugin switch is under way (in the running host, or a restart)
 		std::wstring lastPlugin;      // the plugin the host opens by default (HKCU\Software\RSMods\VstHost)
+		std::wstring currentPlugin;   // the plugin the running host plays through
+		std::string loadError;        // why the last switch failed (the previous plugin kept running)
 	};
 
 	struct Plugin
@@ -32,6 +34,6 @@ namespace VstHostLink
 	void Rescan();
 	void SetPopout(bool wanted);
 	void StartHost();                    // reopens the last plugin
-	void LoadPlugin(const std::wstring& path);   // start the host with this plugin, closing a running one first
+	void LoadPlugin(const std::wstring& path);   // switch the running host to this plugin, or start the host with it
 	void StopHost();
 }

@@ -50,6 +50,8 @@ namespace
 	LONG g_lastOverlayBeat = 0;
 	ULONGLONG g_overlayBeatSeenAt = 0;
 	bool g_savedWanted = false;
+	std::wstring g_pluginPath;   // the plugin running now
+	LONG g_handledLoad = 0;      // the overlay's last plugin switch request we acted on
 
 	int Scale(int dip) { return MulDiv(dip, g_popout ? static_cast<int>(GetDpiForWindow(g_popout)) : 96, 96); }
 	int StripHeight() { return Scale(kStripDip); }
@@ -257,6 +259,82 @@ namespace
 		return client.y >= 0 && client.y < StripHeight() && client.x >= rect.right - CloseButtonWidth();
 	}
 
+	std::wstring Wide(const std::string& text)
+	{
+		std::wstring out(text.size(), wchar_t{});
+		out.resize(static_cast<size_t>(MultiByteToWideChar(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), out.data(), static_cast<int>(out.size()))));
+		return out;
+	}
+
+	// The plugin's editor in the popout, sized to it; the popout keeps its place on screen.
+	void AttachEditor()
+	{
+		g_title = Wide(g_plugin.Name());
+		if (!g_plugin.OpenEditor(g_editor, FitPopoutToEditor))
+		{
+			g_title += L" (this plugin has no editor)";
+			FitPopoutToEditor(Scale(420), Scale(60));
+		}
+		SetWindowTextW(g_popout, (g_title + L" - Rocksmith Audio Bridge").c_str());
+		InvalidateRect(g_popout, nullptr, TRUE);
+	}
+
+	// Tells the overlay which plugin runs now.
+	void PublishPlugin()
+	{
+		if (!g_control) return;
+		const std::string& plugin = g_plugin.Name();
+		memset(g_control->pluginName, 0, sizeof(g_control->pluginName));
+		memcpy(g_control->pluginName, plugin.c_str(), std::min(plugin.size(), sizeof(g_control->pluginName) - 1));
+		memset(g_control->pluginPath, 0, sizeof(g_control->pluginPath));
+		wcsncpy_s(g_control->pluginPath, g_pluginPath.c_str(), _TRUNCATE);
+	}
+
+	void SetLoadError(const std::string& text)
+	{
+		if (!g_control) return;
+		memset(g_control->loadError, 0, sizeof(g_control->loadError));
+		memcpy(g_control->loadError, text.c_str(), std::min(text.size(), sizeof(g_control->loadError) - 1));
+	}
+
+	// Plugin switch from the External amp page, inside this process: the audio link stays connected (the game
+	// hears silence for the moment the new plugin takes to load) and the popout stays where it is, so switching
+	// amps is quick. A plugin that will not load leaves the previous one running.
+	void SwapPlugin(const std::wstring& path)
+	{
+		if (path.empty() || _wcsicmp(path.c_str(), g_pluginPath.c_str()) == 0) return;
+		InterlockedExchange(&g_control->loading, 1);
+		SetLoadError({});
+		Log("switch: %ls", path.c_str());
+		g_plugin.SaveState();
+
+		std::string error;
+		bool ok = g_plugin.Load(path, error) && g_plugin.Prepare(g_audio.Frames(), error);
+		if (ok)
+		{
+			g_pluginPath = path;
+			WriteLastPlugin(path);
+		}
+		else
+		{
+			Log("switch: failed (%s); back to %ls", error.c_str(), g_pluginPath.c_str());
+			SetLoadError(error.empty() ? "The plugin failed to load." : error);
+			std::string again;
+			if (!g_plugin.Load(g_pluginPath, again) || !g_plugin.Prepare(g_audio.Frames(), again))
+			{
+				// Nothing can run: close, so the game's amp comes back (fallback) instead of silence.
+				ShowError("Could not load the plugin, nor reopen the previous one:\n" + again);
+				InterlockedExchange(&g_control->loading, 0);
+				PostMessageW(g_popout, WM_CLOSE, 0, 0);
+				return;
+			}
+		}
+		AttachEditor();
+		PublishPlugin();
+		InterlockedIncrement(&g_control->hostBeat);
+		InterlockedExchange(&g_control->loading, 0);
+	}
+
 	// Open (or reopen after the game changed its buffer size) the stream and run the plugin on it.
 	bool StartAudio(HWND window)
 	{
@@ -286,6 +364,14 @@ namespace
 				if (g_keyDown && !down) OnOverlayKeyReleased();
 				g_keyDown = down;
 				UpdatePopout();
+				if (g_control && g_control->loadRequest != g_handledLoad)
+				{
+					g_handledLoad = g_control->loadRequest;
+					wchar_t requested[VstHostControl::kPathChars]{};
+					memcpy(requested, const_cast<const wchar_t*>(g_control->loadPath), sizeof(requested) - sizeof(wchar_t));
+					SwapPlugin(requested);
+					InterlockedExchange(&g_control->loadDone, g_handledLoad);
+				}
 				if (g_control && g_control->quitRequested)
 				{
 					InterlockedExchange(&g_control->quitRequested, 0);
@@ -385,6 +471,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 		return 1;
 	}
 	WriteLastPlugin(path);
+	g_pluginPath = path;
 
 	WNDCLASSEXW popoutClass{ sizeof(popoutClass) };
 	popoutClass.lpfnWndProc = PopoutProc;
@@ -401,12 +488,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 	editorClass.lpszClassName = kEditorClass;
 	RegisterClassExW(&editorClass);
 
-	std::wstring name(g_plugin.Name().size(), wchar_t{});
-	name.resize(static_cast<size_t>(MultiByteToWideChar(CP_UTF8, 0, g_plugin.Name().c_str(), static_cast<int>(g_plugin.Name().size()), name.data(), static_cast<int>(name.size()))));
-	g_title = name;
-
 	// Tool window: no taskbar button or Alt+Tab entry; the overlay key and the close button drive it.
-	g_popout = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, kWindowClass, (name + L" - Rocksmith Audio Bridge").c_str(),
+	g_popout = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, kWindowClass, L"Rocksmith Audio Bridge",
 		WS_POPUP | WS_CLIPCHILDREN, 0, 0, 800, 600, nullptr, nullptr, instance, nullptr);
 	g_editor = CreateWindowExW(0, kEditorClass, nullptr, WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN, 0, Scale(kStripDip), 800, 600 - Scale(kStripDip),
 		g_popout, nullptr, instance, nullptr);
@@ -414,11 +497,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 		CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
 
 	if (!StartAudio(g_popout)) { DestroyWindow(g_popout); g_plugin.Unload(); OleUninitialize(); return 1; }
-	if (!g_plugin.OpenEditor(g_editor, FitPopoutToEditor))
-	{
-		g_title += L" (this plugin has no editor)";
-		FitPopoutToEditor(Scale(420), Scale(60));
-	}
+	AttachEditor();
 	PlacePopout();
 
 	// Tell the overlay's External amp page we are here; the popout follows its "Pop out amp" switch (UpdatePopout).
@@ -430,9 +509,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 		g_savedWanted = wanted != 0;
 		InterlockedExchange(&g_control->popoutWanted, g_savedWanted ? 1 : 0);
 		InterlockedExchange(&g_control->quitRequested, 0);
-		const std::string& plugin = g_plugin.Name();
-		memset(g_control->pluginName, 0, sizeof(g_control->pluginName));
-		memcpy(g_control->pluginName, plugin.c_str(), std::min(plugin.size(), sizeof(g_control->pluginName) - 1));
+		// A request from before this host started is already answered by the plugin it was started with.
+		g_handledLoad = g_control->loadRequest;
+		InterlockedExchange(&g_control->loadDone, g_handledLoad);
+		InterlockedExchange(&g_control->loading, 0);
+		SetLoadError({});
+		PublishPlugin();
 		InterlockedExchange(&g_control->hostPid, static_cast<LONG>(GetCurrentProcessId()));
 		Log("popout: %s; it shows with the overlay once Pop out amp is on", g_savedWanted ? "Pop out amp is on" : "waiting for Pop out amp on the External amp page");
 	}
@@ -450,6 +532,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 	if (g_control)
 	{
 		g_control->popoutShown = 0;
+		InterlockedExchange(&g_control->loading, 0);
 		InterlockedExchange(&g_control->hostPid, 0);
 	}
 	g_audio.Close();

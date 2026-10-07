@@ -33,8 +33,8 @@ namespace VstHost
 
 		bool Load(const std::wstring& path, std::string& error);
 		void Unload();
-		bool Prepare(int frames, std::string& error);   // main thread, audio stopped
-		void Suspend();                                  // main thread, audio stopped
+		bool Prepare(int frames, std::string& error);   // main thread; the stream may be running (it plays silence meanwhile)
+		void Suspend();                                  // main thread; returns once the stream thread is out of the plugin
 
 		// Editor in the child window `editor`, kept at the plugin's size; `onResized` lets the owner fit its frame
 		// around it (on open and whenever the plugin resizes itself).
@@ -89,7 +89,11 @@ namespace VstHost
 		Steinberg::Vst::ProcessContext m_context{};
 		Steinberg::Vst::ParameterChanges m_inChanges;
 		Steinberg::Vst::ParameterChangeTransfer m_editTransfer;   // editor (main thread) -> stream thread
+		// The stream thread keeps calling Process while a plugin is swapped in place. Suspend clears m_processing,
+		// then waits for a Process already running to leave (m_inProcess), so nothing touches a plugin being
+		// unloaded. Both are sequentially consistent; that ordering is what makes the handshake hold.
 		std::atomic<bool> m_processing{ false };
+		std::atomic<bool> m_inProcess{ false };
 		std::atomic<bool> m_dirty{ false };
 		std::atomic<bool> m_restartRequested{ false };
 		int m_inputChannels = 0;

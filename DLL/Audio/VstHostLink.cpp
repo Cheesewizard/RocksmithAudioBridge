@@ -45,14 +45,6 @@ namespace VstHostLink
 			return (slash == std::wstring::npos ? std::wstring() : path.substr(0, slash + 1)) + L"RocksmithAudioBridgeVstHost.exe";
 		}
 
-		bool HostAlive(VstHostControl::Shared* shared)
-		{
-			const ULONGLONG now = GetTickCount64();
-			const LONG beat = shared->hostBeat;
-			if (beat != g_lastHostBeat) { g_lastHostBeat = beat; g_hostBeatSeenAt = now; }
-			return shared->hostPid != 0 && now - g_hostBeatSeenAt < static_cast<ULONGLONG>(VstHostControl::kAliveMs);
-		}
-
 		// The host process is gone only once it releases its single-instance mutex (it clears hostPid earlier,
 		// while it is still saving and unloading).
 		bool HostProcessGone()
@@ -61,6 +53,18 @@ namespace VstHostLink
 			if (!mutex) return true;
 			CloseHandle(mutex);
 			return false;
+		}
+
+		bool HostAlive(VstHostControl::Shared* shared)
+		{
+			const ULONGLONG now = GetTickCount64();
+			const LONG beat = shared->hostBeat;
+			if (beat != g_lastHostBeat) { g_lastHostBeat = beat; g_hostBeatSeenAt = now; }
+			if (shared->hostPid == 0) return false;
+			if (now - g_hostBeatSeenAt < static_cast<ULONGLONG>(VstHostControl::kAliveMs)) return true;
+			// A heavy plugin can take seconds to load, and the host's beat pauses meanwhile; it is still there as
+			// long as the process is.
+			return shared->loading != 0 && !HostProcessGone();
 		}
 
 		void Launch(const std::wstring& plugin)
@@ -161,6 +165,13 @@ namespace VstHostLink
 			char name[sizeof(shared->pluginName) + 1]{};
 			memcpy(name, shared->pluginName, sizeof(shared->pluginName));
 			snapshot.pluginName = name;
+			wchar_t path[VstHostControl::kPathChars + 1]{};
+			memcpy(path, const_cast<const wchar_t*>(shared->pluginPath), sizeof(shared->pluginPath));
+			snapshot.currentPlugin = path;
+			char error[sizeof(shared->loadError) + 1]{};
+			memcpy(error, shared->loadError, sizeof(shared->loadError));
+			snapshot.loadError = error;
+			snapshot.switching = snapshot.switching || shared->loading != 0 || shared->loadRequest != shared->loadDone;
 		}
 		snapshot.popoutWanted = shared->popoutWanted != 0;
 		snapshot.popoutShown = shared->popoutShown != 0;
@@ -186,11 +197,20 @@ namespace VstHostLink
 	{
 		VstHostControl::Shared* shared = Shared();
 		if (!shared || HostProcessGone()) { Launch(path); return; }
-		// Close the running host (it saves the current plugin's settings), then start it with the new plugin.
-		InterlockedExchange(&shared->quitRequested, 1);
+		if (HostAlive(shared))
+		{
+			// The running host swaps the plugin itself (it saves the current one's settings first), keeping the
+			// audio link and the popout up.
+			if (path.size() >= static_cast<size_t>(VstHostControl::kPathChars)) return;
+			memset(shared->loadPath, 0, sizeof(shared->loadPath));
+			memcpy(shared->loadPath, path.c_str(), path.size() * sizeof(wchar_t));
+			InterlockedIncrement(&shared->loadRequest);   // full barrier: the path is written before the request
+			LOG_INFO("(VST HOST) switching plugin in the running host" << std::endl);
+			return;
+		}
+		// A host that is still closing: start the new one once it has saved its settings and exited.
 		g_pendingLaunch = path;
 		g_pendingSince = GetTickCount64();
-		LOG_INFO("(VST HOST) switching plugin; closing the running host first" << std::endl);
 	}
 
 	void StopHost()
