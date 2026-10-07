@@ -3,9 +3,10 @@
   Deploys a project's outputs into the Rocksmith folder after EVERY build, so the game DLL, the proxy
   driver and the GUI can never drift out of sync with each other (what is built is what runs). Each project lists what it ships as @(GameDeployFile) items with a Destination.
 
-  A running game or bridge keeps its files locked, but Windows allows a mapped executable to be renamed,
-  so the live copy is parked as "<file>.previous" and the fresh build lands in its place. The running
-  process keeps using the parked copy until it restarts; nothing is killed here.
+  Each file is overwritten in place. Only when a running game or bridge holds it (it cannot be overwritten,
+  but Windows allows a mapped executable to be renamed) is the live copy parked as "<file>.previous" and the
+  fresh build put in its place; the running process keeps using the parked copy until it restarts, and the
+  next deploy that can overwrite removes the .previous. Nothing is killed here.
 
   Skip with -p:DeployToGame=false. Point elsewhere with -p:RocksmithInstallDir=... . Never runs for the
   "Master" configuration (that is the installer payload, not a dev deploy).
@@ -29,12 +30,26 @@
                       Lines="$(RSModsThisCheckout)" Overwrite="true" />
     <Error Condition="'@(GameDeployFile)'==''" Text="DeployToGame: this project declares no GameDeployFile items." />
     <Error Condition="!Exists('%(GameDeployFile.Identity)')" Text="DeployToGame: build output is missing: %(GameDeployFile.Identity)" />
-    <!-- Park whatever is live. Failures here only mean nothing was there or a stale .previous is itself
-         still in use; the Copy below is the step that must succeed. -->
-    <Delete Files="%(GameDeployFile.Destination).previous" ContinueOnError="true" />
-    <Move SourceFiles="%(GameDeployFile.Destination)" DestinationFiles="%(GameDeployFile.Destination).previous"
-          Condition="Exists('%(GameDeployFile.Destination)')" ContinueOnError="true" />
-    <Copy SourceFiles="@(GameDeployFile)" DestinationFiles="%(GameDeployFile.Destination)" />
+    <!-- Overwrite in place first, so no backup is left in the game folder when nothing holds the file. A copy
+         keeps the build's timestamp, so a destination that still differs afterwards was locked. -->
+    <Copy SourceFiles="%(GameDeployFile.Identity)" DestinationFiles="%(GameDeployFile.Destination)" Retries="0" ContinueOnError="true" />
+    <ItemGroup>
+      <_DeployLocked Include="@(GameDeployFile)"
+                     Condition="!Exists('%(GameDeployFile.Destination)') Or '$([System.IO.File]::GetLastWriteTime(%(GameDeployFile.Destination)).Ticks)' != '$([System.IO.File]::GetLastWriteTime(%(GameDeployFile.Identity)).Ticks)'" />
+    </ItemGroup>
+    <!-- Overwritten: a .previous left by an earlier locked deploy is no longer needed. -->
+    <ItemGroup>
+      <_DeployOverwritten Include="@(GameDeployFile)" Exclude="@(_DeployLocked)" />
+    </ItemGroup>
+    <Delete Files="%(_DeployOverwritten.Destination).previous" Condition="'@(_DeployOverwritten)'!=''" ContinueOnError="true" />
+    <!-- Locked by the running game or bridge: Windows allows a mapped file to be renamed, so the live copy is
+         parked as "<file>.previous" (the running process keeps using it until it restarts) and the build put in
+         its place. -->
+    <Delete Files="%(_DeployLocked.Destination).previous" Condition="'@(_DeployLocked)'!=''" ContinueOnError="true" />
+    <Move SourceFiles="%(_DeployLocked.Destination)" DestinationFiles="%(_DeployLocked.Destination).previous"
+          Condition="'@(_DeployLocked)'!='' And Exists('%(_DeployLocked.Destination)')" ContinueOnError="true" />
+    <Copy SourceFiles="%(_DeployLocked.Identity)" DestinationFiles="%(_DeployLocked.Destination)" Condition="'@(_DeployLocked)'!=''" />
     <Message Importance="high" Text="DeployToGame: %(GameDeployFile.Filename)%(GameDeployFile.Extension) -> %(GameDeployFile.Destination)" />
+    <Message Importance="high" Condition="'@(_DeployLocked)'!=''" Text="DeployToGame: %(_DeployLocked.Filename)%(_DeployLocked.Extension) was in use: the running copy is parked as .previous until it restarts" />
   </Target>
 </Project>
