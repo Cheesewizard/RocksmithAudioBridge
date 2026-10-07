@@ -1453,6 +1453,7 @@ namespace Overlay
 				float x = ImGui::GetCursorScreenPos().x;
 				const ImVec2 rackStart = ImGui::GetCursorScreenPos();
 				auto cable = [&] { list->AddLine(ImVec2(x, midY), ImVec2(x + 14.0f, midY), Ink::Cable, 3.0f); x += 22.0f; };
+				bool overTile = false;   // the mouse is on a pedal (its menu, not the board's)
 
 				Jack(list, ImVec2(x + 21.0f, midY - 6.0f), "In");
 				x += 42.0f + 8.0f;
@@ -1472,6 +1473,7 @@ namespace Overlay
 					const bool pressed = ImGui::InvisibleButton("##pedal", ImVec2(look.width, pedalH));
 					ImGui::SetItemUsingMouseWheel();   // the wheel scrolls the rack, not the page
 					const bool hovered = ImGui::IsItemHovered();
+					overTile |= hovered;
 					const ImVec2 mouse = ImGui::GetIO().MousePos;
 					const bool onSwitch = (mouse.x - footswitch.x) * (mouse.x - footswitch.x) + (mouse.y - footswitch.y) * (mouse.y - footswitch.y) < 15.0f * 15.0f;
 					if (pressed) {
@@ -1564,7 +1566,9 @@ namespace Overlay
 				ImGui::SetCursorScreenPos(rackStart);
 				ImGui::InvisibleButton("##board", ImVec2(x + 10.0f - rackStart.x, std::max(rackH - 6.0f, 1.0f)));
 				ImGui::SetItemUsingMouseWheel();
-				ImGui::OpenPopupOnItemClick("##boardMenu", ImGuiPopupFlags_MouseButtonRight);
+				// Not over a pedal: IsItemHovered here is true under the pedals too (ImGui 1.85 checks only the
+				// rectangle), and opening this menu after a pedal's would replace the pedal's menu.
+				if (!overTile && ImGui::IsItemHovered() && ImGui::IsMouseReleased(ImGuiMouseButton_Right)) ImGui::OpenPopup("##boardMenu");
 
 				// A long chain: the wheel scrolls it sideways (the page does not scroll under the rack), and a
 				// middle-button drag anywhere on it pans it. Shift+wheel and a touchpad's sideways scroll work as usual.
