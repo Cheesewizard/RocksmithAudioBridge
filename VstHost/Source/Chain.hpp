@@ -40,6 +40,7 @@ namespace VstHost
 		bool Bypassed(int index) const { return m_slots[index]->bypass.load(); }
 
 		void SetLevels(int inputTenths, int outputTenths);
+		void SetMuted(bool muted) { m_muted = muted; }
 		int InputTenths() const { return m_inputTenths; }
 		int OutputTenths() const { return m_outputTenths; }
 		float TakeInputPeak() { return m_inputPeak.exchange(0.0f); }
@@ -76,6 +77,7 @@ namespace VstHost
 
 		int m_inputTenths = 0;
 		int m_outputTenths = 0;
+		std::atomic<bool> m_muted{ false };
 		std::atomic<float> m_inputGain{ 1.0f };
 		std::atomic<float> m_outputGain{ 1.0f };
 		std::atomic<float> m_inputPeak{ 0.0f };

@@ -781,6 +781,9 @@ namespace Overlay
 			bool autoStart = vst.autoStart;
 			if (ToggleRow("Start with the game", "Starts the VST host with your last chain when Rocksmith starts.", &autoStart))
 				VstHostLink::SetAutoStart(autoStart);
+			bool muteTuning = vst.muteWhileTuning;
+			if (ToggleRow("Mute while tuning", "The chain goes quiet in the tuner screens.", &muteTuning))
+				VstHostLink::SetMuteWhileTuning(muteTuning);
 			EndCard();
 
 			if (!vst.hostRunning) return;

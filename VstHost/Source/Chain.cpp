@@ -217,7 +217,7 @@ namespace VstHost
 			std::swap(inR, outR);
 		}
 
-		const float outputGain = m_outputGain.load(std::memory_order_relaxed);
+		const float outputGain = m_muted.load(std::memory_order_relaxed) ? 0.0f : m_outputGain.load(std::memory_order_relaxed);
 		for (int i = 0; i < frames; ++i)
 		{
 			left[i] = inL[i] * outputGain;

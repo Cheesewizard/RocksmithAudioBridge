@@ -503,6 +503,10 @@ namespace
 			g_chain.SetLevels(arg, arg2);
 			MarkModified();
 			break;
+		case Command::SetMuted:
+			g_chain.SetMuted(arg != 0);
+			Log("chain: %s", arg ? "muted (tuning)" : "unmuted");
+			break;
 		case Command::ClearChain:
 			if (PluginHost* plugin = g_chain.Plugin(g_shown)) plugin->CloseEditor();
 			g_chain.Clear();

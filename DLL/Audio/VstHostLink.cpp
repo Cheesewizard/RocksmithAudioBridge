@@ -45,6 +45,8 @@ namespace VstHostLink
 		ULONGLONG g_snapshotAt = 0;
 
 		bool g_autoStartChecked = false;
+		bool g_mutedForTuning = false;
+		ULONGLONG g_tuningPolledAt = 0;
 		ULONGLONG g_songPolledAt = 0;
 		std::string g_songKey;           // the song being played, empty outside songs
 		std::string g_appliedSong;       // the song whose tone was last applied
@@ -310,11 +312,25 @@ namespace VstHostLink
 			Launch({});
 		}
 
+		// Mute while tuning: the chain plays nothing in the tuner screens, so tuning is not through a wall of gain.
+		void FollowTuner(bool hostRunning)
+		{
+			const ULONGLONG now = GetTickCount64();
+			if (now - g_tuningPolledAt < kSongPollMs) return;
+			g_tuningPolledAt = now;
+			const bool wanted = hostRunning && ReadDword(L"MuteWhileTuning", 0) != 0 && GameState::GameLoaded
+				&& GameState::Menus::IsInTuningMenus();
+			if (wanted == g_mutedForTuning) return;
+			g_mutedForTuning = wanted;
+			Queue(Command::SetMuted, wanted ? 1 : 0);
+		}
+
 		void Refresh(VstHostControl::Shared* shared)
 		{
 			Snapshot s;
 			s.hostInstalled = GetFileAttributesW(HostPath().c_str()) != INVALID_FILE_ATTRIBUTES;
 			s.autoStart = ReadDword(L"AutoStart", 1) != 0;
+			s.muteWhileTuning = ReadDword(L"MuteWhileTuning", 0) != 0;
 			s.exclusiveFullscreen = ExclusiveFullscreen();
 			s.songKey = g_songKey;
 			s.songTone = SongTone(g_songKey);
@@ -366,6 +382,7 @@ namespace VstHostLink
 		const bool hostRunning = HostAlive(shared);
 		AutoStart(hostRunning);
 		FollowSong(shared, hostRunning);
+		FollowTuner(hostRunning);
 		PumpCommands(shared, hostRunning);
 	}
 
@@ -458,6 +475,7 @@ namespace VstHostLink
 	}
 
 	void SetAutoStart(bool on) { WriteDword(L"AutoStart", on ? 1 : 0); g_snapshotAt = 0; }
+	void SetMuteWhileTuning(bool on) { WriteDword(L"MuteWhileTuning", on ? 1 : 0); g_snapshotAt = 0; }
 
 	void SetPopout(bool wanted)
 	{

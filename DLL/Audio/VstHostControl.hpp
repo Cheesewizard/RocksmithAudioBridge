@@ -36,6 +36,7 @@ namespace VstHostControl
 		DeleteTone = 9,     // text = tone name
 		SetLevels = 10,     // arg = input trim, arg2 = output trim, tenths of a dB
 		ClearChain = 11,
+		SetMuted = 12,      // arg = 0/1: the chain plays silence (mute while tuning)
 	};
 
 	struct Slot

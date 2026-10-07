@@ -32,6 +32,7 @@ namespace VstHostLink
 		bool popoutWanted = false;
 		bool popoutShown = false;
 		bool autoStart = true;
+		bool muteWhileTuning = false;
 		bool exclusiveFullscreen = false;   // Rocksmith.ini: no window can show over the game
 		std::string songKey;          // the song being played, empty outside songs
 		std::string songTone;         // the tone assigned to that song
@@ -61,6 +62,7 @@ namespace VstHostLink
 	void StopHost();
 	void ForceCloseHost();               // only for a host that has stopped answering
 	void SetAutoStart(bool on);
+	void SetMuteWhileTuning(bool on);   // the chain goes quiet in the tuner screens
 	void SetPopout(bool wanted);
 
 	// Chain commands (queued; the host handles them in order). AddPlugin starts the host when it is not running.
