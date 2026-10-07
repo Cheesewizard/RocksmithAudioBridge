@@ -98,4 +98,7 @@ namespace NoteByNoteProbe {
 	void TickLifecycle();
 	bool SetAutomaticEnabled(bool shouldEnable);
 	bool ToggleAutomatic();
+	// Re-arm the enabled state directly, bypassing the Riff Repeater menu gate. For restoring the player's
+	// state across a controller reload, where the gate was already passed.
+	void ForceRestoreAutomatic();
 }

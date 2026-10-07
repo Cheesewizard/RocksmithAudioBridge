@@ -102,6 +102,12 @@ namespace RSMods
 				return;
 			}
 
+			if (ToneDesignerTools.TryRun(arguments, out int toneToolsExitCode))
+			{
+				Environment.ExitCode = toneToolsExitCode;
+				return;
+			}
+
 			if (SpeakerModeCacheExtractor.TryRun(arguments, out int exitCode))
 			{
 				Environment.ExitCode = exitCode;
@@ -130,6 +136,7 @@ namespace RSMods
 		private static bool IsHiddenHelper(string[] arguments)
 		{
 			if (arguments.Length == 0) return false;
+			if (ToneDesignerTools.IsCommand(arguments[0])) return true;
 			switch (arguments[0])
 			{
 				case "--video-take":

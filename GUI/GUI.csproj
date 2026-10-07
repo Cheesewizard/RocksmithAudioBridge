@@ -133,6 +133,7 @@
     <Compile Include="Rocksmith\WriteSettings.cs" />
     <Compile Include="SetAndForgetMods.cs" />
     <Compile Include="SpeakerModeCacheExtractor.cs" />
+    <Compile Include="ToneDesignerTools.cs" />
     <Compile Include="SongManager.cs" />
     <Compile Include="Twitch\EffectServer\EffectMessage.cs" />
     <Compile Include="Twitch\EffectServer\EffectServerTCP.cs" />

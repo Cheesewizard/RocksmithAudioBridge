@@ -5,6 +5,14 @@
 
 
 
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
     <ProjectConfiguration Include="Master|Win32">
       <Configuration>Master</Configuration>
       <Platform>Win32</Platform>
@@ -24,6 +32,10 @@
     <ClCompile Include="Audio\TakeRecorder.cpp" />
     <ClCompile Include="Audio\OutputTap.cpp" />
     <ClCompile Include="Audio\ExternalAmp.cpp" />
+    <ClCompile Include="Audio\VstHostLink.cpp" />
+    <ClCompile Include="Audio\RsModsHelper.cpp" />
+    <ClCompile Include="Audio\SongLibrary.cpp" />
+    <ClCompile Include="Audio\ToneBackup.cpp" />
     <ClCompile Include="Audio\GameAudioRecorder.cpp" />
     <ClCompile Include="Audio\DelayLinePitchShifter.cpp" />
     <ClCompile Include="Audio\SongShift\WwiseMusicHook.cpp">
@@ -143,6 +155,7 @@
       <PrecompiledHeader Condition="('$(Configuration)|$(Platform)'=='Release|Win32') Or ('$(Configuration)|$(Platform)'=='Master|Win32')">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="Menu.cpp" />
+    <ClCompile Include="Extensions.cpp" />
     <ClCompile Include="Overlay\OverlayShell.cpp">
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../stdafx.h</PrecompiledHeaderFile>
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../stdafx.h</PrecompiledHeaderFile>
@@ -244,7 +257,7 @@
     <ClCompile Include="QualityOfLife.cpp" />
 
 
-    <ClCompile Include="Mods\NoteByNoteController.cpp" Condition="'$(Configuration)' == 'Master'"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="Mods\NoteByNoteController.cpp" Condition="'$(RSModsResearchBridge)' != 'true'"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="Mods\NoteByNoteNativeScoring.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">NotUsing</PrecompiledHeader>
@@ -330,6 +343,11 @@
     <ClInclude Include="Audio\TakeRecorder.hpp" />
     <ClInclude Include="Audio\OutputTap.hpp" />
     <ClInclude Include="Audio\ExternalAmp.hpp" />
+    <ClInclude Include="Audio\VstHostLink.hpp" />
+    <ClInclude Include="Audio\RsModsHelper.hpp" />
+    <ClInclude Include="Audio\SongLibrary.hpp" />
+    <ClInclude Include="Audio\ToneBackup.hpp" />
+    <ClInclude Include="Audio\VstHostControl.hpp" />
     <ClInclude Include="Audio\GameAudioRecorder.hpp" />
     <ClInclude Include="Audio\DrySignalRecording.hpp" />
     <ClInclude Include="Audio\HumRemover.hpp" />
@@ -420,6 +438,7 @@
     <ClInclude Include="Lib\Midi\RtMidi.h" />
     <ClInclude Include="Log.hpp" />
     <ClInclude Include="Menu.hpp" />
+    <ClInclude Include="Extensions.hpp" />
     <ClInclude Include="Overlay\OverlayShell.hpp" />
     <ClInclude Include="Overlay\OverlayUi.hpp" />
     <ClInclude Include="Overlay\HudLayout.hpp" />
@@ -914,6 +933,18 @@ if exist "$(OutDir)$(TargetName).map" copy /Y "$(OutDir)$(TargetName).map" "$(Bu
     <OutDir>$(MSBuildThisFileDirectory)..\Installer\Resources\$(Configuration)\</OutDir>
     <IntDir>$(MSBuildThisFileDirectory)..\build\Native\$(Configuration)\</IntDir>
   </PropertyGroup>
+  <!-- What a dev build ships into the game folder (shared DeployToGame.targets; never for Master, the installer
+       payload). Build extensions add their own files here. -->
+  <Target Name="CollectGameDeployFiles" BeforeTargets="DeployToGame"
+          Condition="'$(DeployToGame)'=='true' And Exists('$(RocksmithInstallDir)') And '$(Configuration)'!='Master'">
+    <ItemGroup>
+      <GameDeployFile Include="$(TargetPath)" Destination="$(RocksmithInstallDir)\xinput1_3.dll" />
+    </ItemGroup>
+  </Target>
+  <!-- Optional build extensions that are not part of this repository (see Extensions.hpp). Absent here, so
+       public builds are unaffected. An extension that supplies its own Note by Note bridge sets
+       RSModsResearchBridge=true, which drops the built-in controller above. -->
+  <Import Project="$(MSBuildThisFileDirectory)Research\Private\Private.props" Condition="Exists('$(MSBuildThisFileDirectory)Research\Private\Private.props')" />
   <Target Name="PublishReleaseHost" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
     <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(SolutionDir)Installer\Resources\xinput1_3.dll" />
     <Copy SourceFiles="$(OutDir)$(TargetName).pdb" DestinationFiles="$(SolutionDir)Installer\Resources\xinput1_3.pdb" Condition="Exists('$(OutDir)$(TargetName).pdb')" />

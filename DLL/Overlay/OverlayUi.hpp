@@ -47,6 +47,15 @@ namespace Overlay
 		constexpr unsigned Refresh = 0xE72C;
 		constexpr unsigned Pedal = 0xE8D6;      // "Audio" waveform glyph
 		constexpr unsigned Link = 0xE71B;       // chain link (External amp)
+		constexpr unsigned Library = 0xE8F1;    // Tone designer
+		constexpr unsigned Star = 0xE734;
+		constexpr unsigned StarFilled = 0xE735;
+		constexpr unsigned Add = 0xE710;
+		constexpr unsigned ChevronLeft = 0xE76B;
+		constexpr unsigned ChevronRight = 0xE76C;
+		constexpr unsigned Power = 0xE7E8;
+		constexpr unsigned NewWindow = 0xE8A7;   // the amp window
+		// Every glyph here must also be in kIconRanges (OverlayUi.cpp), or it draws as a blank.
 	}
 
 	struct Fonts

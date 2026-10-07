@@ -910,6 +910,16 @@ namespace RS2014_Mod_Installer.Properties {
         /// <summary>
         ///   Looks up a localized resource of type System.Byte[].
         /// </summary>
+        internal static byte[] RocksmithAudioBridgeVstHost {
+            get {
+                object obj = ResourceManager.GetObject("RocksmithAudioBridgeVstHost", resourceCulture);
+                return ((byte[])(obj));
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized resource of type System.Byte[].
+        /// </summary>
         internal static byte[] RocksmithAudioBridgeLibrary {
             get {
                 object obj = ResourceManager.GetObject("RocksmithAudioBridgeLibrary", resourceCulture);
@@ -932,6 +942,15 @@ namespace RS2014_Mod_Installer.Properties {
         internal static string ProjectNotice {
             get {
                 return ResourceManager.GetString("ProjectNotice", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to the VST host's licence (AGPLv3, it is built with JUCE).
+        /// </summary>
+        internal static string VstHostLicense {
+            get {
+                return ResourceManager.GetString("VstHostLicense", resourceCulture);
             }
         }
         
