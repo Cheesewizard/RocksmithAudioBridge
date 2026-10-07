@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <atomic>
 #include <thread>
+#include <mutex>
 
 namespace VstHostLink
 {
@@ -40,8 +41,8 @@ namespace VstHostLink
 		std::vector<std::wstring> g_failed;   // plugins that did not load this session (the host's failedPath)
 		std::wstring g_lastFailed;
 		std::atomic<bool> g_rescanWanted{ false };   // set by the folder dialog's thread; the render thread rescans
-		std::vector<std::string> g_tones;
-		ULONGLONG g_tonesReadAt = 0;
+		std::vector<std::string> g_tones;   // the render thread's copy of SlowState::tones
+		unsigned g_tonesVersion = ~0u;
 
 		Snapshot g_snapshot;
 		ULONGLONG g_snapshotAt = 0;
@@ -81,12 +82,17 @@ namespace VstHostLink
 
 		std::wstring HostPath() { return GameFolder() + L"RocksmithAudioBridgeVstHost.exe"; }
 
+		// Looked up once: SHGetKnownFolderPath goes through the shell, too slow to repeat on the render thread.
 		std::wstring DataDirectory()
 		{
-			PWSTR appData = nullptr;
-			if (FAILED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, KF_FLAG_CREATE, nullptr, &appData))) return {};
-			std::wstring dir = std::wstring(appData) + L"\\RocksmithAudioBridge\\VstHost";
-			CoTaskMemFree(appData);
+			static const std::wstring dir = []
+			{
+				PWSTR appData = nullptr;
+				if (FAILED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, KF_FLAG_CREATE, nullptr, &appData))) return std::wstring();
+				std::wstring path = std::wstring(appData) + L"\\RocksmithAudioBridge\\VstHost";
+				CoTaskMemFree(appData);
+				return path;
+			}();
 			return dir;
 		}
 
@@ -353,14 +359,14 @@ namespace VstHostLink
 			g_scanned = true;
 		}
 
-		void ReadTones()
+		std::vector<std::string> ReadToneNames()
 		{
-			g_tones.clear();
+			std::vector<std::string> tones;
 			std::error_code error;
 			for (const auto& entry : std::filesystem::directory_iterator(DataDirectory() + L"\\Tones", error))
-				if (_wcsicmp(entry.path().extension().c_str(), L".rabtone") == 0) g_tones.push_back(Utf8(entry.path().stem().wstring()));
-			std::sort(g_tones.begin(), g_tones.end(), [](const std::string& a, const std::string& b) { return _stricmp(a.c_str(), b.c_str()) < 0; });
-			g_tonesReadAt = GetTickCount64();
+				if (_wcsicmp(entry.path().extension().c_str(), L".rabtone") == 0) tones.push_back(Utf8(entry.path().stem().wstring()));
+			std::sort(tones.begin(), tones.end(), [](const std::string& a, const std::string& b) { return _stricmp(a.c_str(), b.c_str()) < 0; });
+			return tones;
 		}
 
 		std::wstring SongTonesFile() { return DataDirectory() + L"\\SongTones.ini"; }
@@ -378,6 +384,86 @@ namespace VstHostLink
 			return GetPrivateProfileIntW(L"Renderer.Win32", L"Fullscreen", 0, (GameFolder() + L"Rocksmith.ini").c_str()) == 2;
 		}
 
+		size_t CountSongTones()
+		{
+			std::vector<wchar_t> section(32768);
+			const DWORD size = GetPrivateProfileSectionW(L"Songs", section.data(), static_cast<DWORD>(section.size()), SongTonesFile().c_str());
+			size_t count = 0;
+			for (const wchar_t* line = section.data(); line < section.data() + size && *line; line += wcslen(line) + 1) ++count;
+			return count;
+		}
+
+		// ---- Slow reads, off the render thread ---------------------------------------------------------------
+		// Everything the page needs from a file or the registry (the tones folder, SongTones.ini, Rocksmith.ini,
+		// the settings) is read on a worker thread, twice a second or at once when a change kicks it. The render
+		// thread only copies the result: a read held up by an antivirus scan must never cost the game a frame.
+		struct SlowState
+		{
+			bool autoStart = true;
+			bool muteWhileTuning = false;
+			bool exclusiveFullscreen = false;
+			std::string songKey;     // the song being played (set by the render thread), and its tone
+			std::string songTone;
+			std::vector<std::string> tones;
+			size_t songToneCount = 0;
+			std::vector<std::wstring> scanFolders;
+			unsigned version = 0;
+		};
+		std::mutex g_slowLock;
+		SlowState g_slow;
+		HANDLE g_slowKick = nullptr;
+		std::once_flag g_slowStarted;
+
+		void SlowWorker()
+		{
+			for (;;)
+			{
+				std::string songKey;
+				{
+					std::lock_guard<std::mutex> lock(g_slowLock);
+					songKey = g_slow.songKey;
+				}
+				SlowState fresh;
+				fresh.autoStart = ReadDword(L"AutoStart", 1) != 0;
+				fresh.muteWhileTuning = ReadDword(L"MuteWhileTuning", 0) != 0;
+				fresh.exclusiveFullscreen = ExclusiveFullscreen();
+				fresh.songTone = SongTone(songKey);
+				fresh.tones = ReadToneNames();
+				fresh.songToneCount = CountSongTones();
+				fresh.scanFolders = ExtraFolders();
+				{
+					std::lock_guard<std::mutex> lock(g_slowLock);
+					fresh.songKey = g_slow.songKey;
+					if (fresh.songKey != songKey) fresh.songTone = g_slow.songTone;   // the song changed meanwhile: next pass
+					fresh.version = g_slow.version + 1;
+					g_slow = std::move(fresh);
+				}
+				WaitForSingleObject(g_slowKick, 500);
+			}
+		}
+
+		void StartSlowWorker()
+		{
+			std::call_once(g_slowStarted, []
+			{
+				g_slowKick = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+				std::thread(SlowWorker).detach();
+			});
+		}
+
+		void KickSlow()
+		{
+			StartSlowWorker();
+			SetEvent(g_slowKick);
+		}
+
+		template <typename Read> auto ReadSlow(Read read)
+		{
+			StartSlowWorker();
+			std::lock_guard<std::mutex> lock(g_slowLock);
+			return read(g_slow);
+		}
+
 		// Song tones: entering a song with an assigned tone loads it; entering one without, after a song tone was
 		// loaded, goes back to the tone the player had before.
 		void FollowSong(VstHostControl::Shared* shared, bool hostRunning)
@@ -385,8 +471,15 @@ namespace VstHostLink
 			const ULONGLONG now = GetTickCount64();
 			if (now - g_songPolledAt < kSongPollMs) return;
 			g_songPolledAt = now;
-			g_songKey = GameState::IsInSong() ? GameState::GetSongKey() : std::string();
+			const std::string songKey = GameState::IsInSong() ? GameState::GetSongKey() : std::string();
+			if (songKey != g_songKey)
+			{
+				g_songKey = songKey;
+				ReadSlow([&](SlowState& slow) { slow.songKey = songKey; slow.songTone.clear(); return 0; });
+				KickSlow();
+			}
 			if (g_songKey.empty() || g_songKey == g_appliedSong || !hostRunning) return;
+			// Entering a song is rare: this one read stays here, so the song's tone loads without waiting a pass.
 			g_appliedSong = g_songKey;
 			const std::string tone = SongTone(g_songKey);
 			char current[sizeof(shared->toneName) + 1]{};
@@ -456,7 +549,7 @@ namespace VstHostLink
 			const ULONGLONG now = GetTickCount64();
 			if (now - g_tuningPolledAt < kSongPollMs) return;
 			g_tuningPolledAt = now;
-			const bool wanted = hostRunning && ReadDword(L"MuteWhileTuning", 0) != 0 && GameState::GameLoaded
+			const bool wanted = hostRunning && ReadSlow([](SlowState& slow) { return slow.muteWhileTuning; }) && GameState::GameLoaded
 				&& GameState::Menus::IsInTuningMenus();
 			if (wanted == g_mutedForTuning) return;
 			g_mutedForTuning = wanted;
@@ -467,11 +560,15 @@ namespace VstHostLink
 		{
 			Snapshot s;
 			s.hostInstalled = GetFileAttributesW(HostPath().c_str()) != INVALID_FILE_ATTRIBUTES;
-			s.autoStart = ReadDword(L"AutoStart", 1) != 0;
-			s.muteWhileTuning = ReadDword(L"MuteWhileTuning", 0) != 0;
-			s.exclusiveFullscreen = ExclusiveFullscreen();
+			ReadSlow([&](SlowState& slow)
+			{
+				s.autoStart = slow.autoStart;
+				s.muteWhileTuning = slow.muteWhileTuning;
+				s.exclusiveFullscreen = slow.exclusiveFullscreen;
+				s.songTone = slow.songKey == g_songKey ? slow.songTone : std::string();
+				return 0;
+			});
 			s.songKey = g_songKey;
-			s.songTone = SongTone(g_songKey);
 		s.crashNote = g_crashNote;
 			if (shared)
 			{
@@ -573,7 +670,7 @@ namespace VstHostLink
 
 	void Rescan() { g_failed.clear(); Scan(); }
 
-	std::vector<std::wstring> ScanFolders() { return ExtraFolders(); }
+	std::vector<std::wstring> ScanFolders() { return ReadSlow([](SlowState& slow) { return slow.scanFolders; }); }
 
 	void ShowPluginFile(const std::wstring& path)
 	{
@@ -618,18 +715,7 @@ namespace VstHostLink
 		return songs;
 	}
 
-	size_t SongToneCount()
-	{
-		static size_t count = 0;
-		static ULONGLONG readAt = 0;
-		if (readAt != 0 && GetTickCount64() - readAt < 1000) return count;
-		readAt = GetTickCount64();
-		std::vector<wchar_t> section(32768);
-		const DWORD size = GetPrivateProfileSectionW(L"Songs", section.data(), static_cast<DWORD>(section.size()), SongTonesFile().c_str());
-		count = 0;
-		for (const wchar_t* line = section.data(); line < section.data() + size && *line; line += wcslen(line) + 1) ++count;
-		return count;
-	}
+	size_t SongToneCount() { return ReadSlow([](SlowState& slow) { return slow.songToneCount; }); }
 
 	bool IsFavouriteTone(const std::string& tone)
 	{
@@ -670,6 +756,7 @@ namespace VstHostLink
 					if (list.find(path) == std::wstring::npos) WriteString(L"ScanFolders", list.empty() ? path : list + L";" + path);
 					CoTaskMemFree(path);
 					g_rescanWanted = true;
+					KickSlow();
 				}
 				if (item) item->Release();
 				dialog->Release();
@@ -680,7 +767,11 @@ namespace VstHostLink
 
 	const std::vector<std::string>& Tones()
 	{
-		if (GetTickCount64() - g_tonesReadAt > 1000) ReadTones();
+		ReadSlow([](SlowState& slow)
+		{
+			if (slow.version != g_tonesVersion) { g_tones = slow.tones; g_tonesVersion = slow.version; }
+			return 0;
+		});
 		return g_tones;
 	}
 
@@ -715,8 +806,19 @@ namespace VstHostLink
 
 	void DismissCrashNote() { g_crashNote.clear(); g_snapshotAt = 0; }
 
-	void SetAutoStart(bool on) { WriteDword(L"AutoStart", on ? 1 : 0); g_snapshotAt = 0; }
-	void SetMuteWhileTuning(bool on) { WriteDword(L"MuteWhileTuning", on ? 1 : 0); g_snapshotAt = 0; }
+	void SetAutoStart(bool on)
+	{
+		WriteDword(L"AutoStart", on ? 1 : 0);
+		ReadSlow([&](SlowState& slow) { slow.autoStart = on; return 0; });
+		g_snapshotAt = 0;
+	}
+
+	void SetMuteWhileTuning(bool on)
+	{
+		WriteDword(L"MuteWhileTuning", on ? 1 : 0);
+		ReadSlow([&](SlowState& slow) { slow.muteWhileTuning = on; return 0; });
+		g_snapshotAt = 0;
+	}
 
 	void SetPopout(bool wanted)
 	{
@@ -742,14 +844,14 @@ namespace VstHostLink
 	void ClearChain() { Queue(Command::ClearChain); }
 	void SetLevels(int inputTenths, int outputTenths) { Queue(Command::SetLevels, inputTenths, outputTenths); }
 	void LoadTone(const std::string& name) { g_toneBeforeSong.clear(); Queue(Command::LoadTone, 0, 0, Wide(name)); }
-	void SaveTone(const std::string& name) { Queue(Command::SaveTone, 0, 0, Wide(name)); g_tonesReadAt = 0; }
+	void SaveTone(const std::string& name) { Queue(Command::SaveTone, 0, 0, Wide(name)); KickSlow(); }
 	void DeleteTone(const std::string& name)
 	{
 		Queue(Command::DeleteTone, 0, 0, Wide(name));
 		// Songs that used it go back to the player's usual tone instead of failing to load a missing file.
 		for (const std::string& song : SongsUsingTone(name))
 			WritePrivateProfileStringW(L"Songs", Wide(song).c_str(), nullptr, SongTonesFile().c_str());
-		g_tonesReadAt = 0;
+		KickSlow();
 		g_snapshotAt = 0;
 	}
 
@@ -761,7 +863,7 @@ namespace VstHostLink
 			WritePrivateProfileStringW(L"Songs", Wide(song).c_str(), Wide(to).c_str(), SongTonesFile().c_str());
 		if (_stricmp(g_toneBeforeSong.c_str(), from.c_str()) == 0) g_toneBeforeSong = to;
 		if (IsFavouriteTone(from)) { SetFavouriteTone(from, false); SetFavouriteTone(to, true); }
-		g_tonesReadAt = 0;
+		KickSlow();
 		g_snapshotAt = 0;
 	}
 
@@ -771,6 +873,8 @@ namespace VstHostLink
 		SHCreateDirectoryExW(nullptr, DataDirectory().c_str(), nullptr);
 		WritePrivateProfileStringW(L"Songs", Wide(g_songKey).c_str(), Wide(tone).c_str(), SongTonesFile().c_str());
 		g_appliedSong = g_songKey;   // it is the tone playing now
+		ReadSlow([&](SlowState& slow) { if (slow.songKey == g_songKey) slow.songTone = tone; return 0; });
+		KickSlow();
 		g_snapshotAt = 0;
 	}
 
@@ -778,6 +882,8 @@ namespace VstHostLink
 	{
 		if (g_songKey.empty()) return;
 		WritePrivateProfileStringW(L"Songs", Wide(g_songKey).c_str(), nullptr, SongTonesFile().c_str());
+		ReadSlow([&](SlowState& slow) { if (slow.songKey == g_songKey) slow.songTone.clear(); return 0; });
+		KickSlow();
 		g_snapshotAt = 0;
 	}
 }

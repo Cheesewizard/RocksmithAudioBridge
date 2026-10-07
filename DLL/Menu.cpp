@@ -54,9 +54,24 @@ namespace Menu {
 
 		// The Rocksmith Audio Bridge overlay (toggled with \). The toggle key, the WndProc input swallow and the
 		// cursor logic all key off audioBridgeMenuEnabled.
+		// Timed: an overlay frame that takes long is logged with how long each part took (at most every 2 s), so a
+		// stutter the player sees can be traced to the overlay or ruled out.
+		LARGE_INTEGER frequency{}, start{}, drawn{}, linked{};
+		QueryPerformanceFrequency(&frequency);
+		QueryPerformanceCounter(&start);
 		if (Menu::audioBridgeMenuEnabled)
 			Overlay::DrawShell(&Menu::audioBridgeMenuEnabled);
-		VstHostLink::OnFrame(Menu::audioBridgeMenuEnabled);   // the VST host's amp popout shows only with the overlay
+		QueryPerformanceCounter(&drawn);
+		VstHostLink::OnFrame(Menu::audioBridgeMenuEnabled);   // the VST host's plugin windows show only with the overlay
+		QueryPerformanceCounter(&linked);
+		const double drawMs = (drawn.QuadPart - start.QuadPart) * 1000.0 / frequency.QuadPart;
+		const double linkMs = (linked.QuadPart - drawn.QuadPart) * 1000.0 / frequency.QuadPart;
+		static ULONGLONG lastSlowLog = 0;
+		if (drawMs + linkMs > 4.0 && GetTickCount64() - lastSlowLog > 2000)
+		{
+			lastSlowLog = GetTickCount64();
+			LOG_WARNING("(OVERLAY PERF) slow overlay frame: page " << Overlay::CurrentPageName() << " " << drawMs << " ms, VST link " << linkMs << " ms" << std::endl);
+		}
 
 		ImGui::EndFrame();
 		ImGui::Render();

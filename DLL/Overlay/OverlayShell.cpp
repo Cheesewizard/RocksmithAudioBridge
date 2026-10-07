@@ -811,6 +811,7 @@ namespace Overlay
 				Dialog dialog = Dialog::None;
 				bool openDialog = false;
 				std::string dialogTone;         // the tone a dialog is about
+				size_t dialogSongs = 0;         // Delete: songs that use it (read once, when the dialog opens)
 				char name[64] = {};
 			};
 
@@ -838,6 +839,7 @@ namespace Overlay
 				s.dialog = dialog;
 				s.openDialog = true;
 				s.dialogTone = tone;
+				s.dialogSongs = dialog == Dialog::Delete ? VstHostLink::SongsUsingTone(tone).size() : 0;
 				strncpy_s(s.name, tone.c_str(), _TRUNCATE);
 			}
 
@@ -1894,7 +1896,7 @@ namespace Overlay
 					}
 					case Dialog::Delete: {
 						heading("Delete \"" + s.dialogTone + "\"?");
-						const size_t songs = VstHostLink::SongsUsingTone(s.dialogTone).size();
+						const size_t songs = s.dialogSongs;
 						std::string text = "The tone file is deleted.";
 						if (songs > 0) text += " " + std::to_string(songs) + (songs == 1 ? " song uses it; it goes" : " songs use it; they go") + " back to your usual tone.";
 						if (_stricmp(s.dialogTone.c_str(), vst.toneName.c_str()) == 0) text += " The chain you hear stays as it is, unsaved.";
@@ -2795,6 +2797,9 @@ namespace Overlay
 		}
 	}
 
+	namespace { const char* g_pageName = "none"; }
+	const char* CurrentPageName() { return g_pageName; }
+
 	void DrawShell(bool* open)
 	{
 		static bool themed = false;
@@ -2854,6 +2859,8 @@ namespace Overlay
 			case Page::ExternalAmp: ExternalAmpPage(); break;
 			case Page::ToneDesigner: ToneDesignerPage(); break;
 			}
+			static const char* const pageNames[] = { "Note by Note", "Mixer", "Input", "Output", "Record", "General", "Debug", "Drop Pedal", "External amp", "Tone designer" };
+			g_pageName = pageNames[static_cast<int>(page)];
 			pageContentHeight = ImGui::GetCursorPosY() + 20.0f;   // content plus bottom padding, for next frame's height
 			ImGui::EndChild();
 			ImGui::PopStyleVar();
