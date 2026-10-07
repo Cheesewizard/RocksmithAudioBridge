@@ -1188,8 +1188,11 @@ namespace Overlay
 			}
 
 			// One row of the tone library: click loads, the star marks a favourite, right-click for the rest.
-			void ToneRow(const VstHostLink::Snapshot& vst, const std::string& tone, float width)
+			// `section` keeps rows apart: a favourite is listed twice (Favourites and its own place), and two rows with
+			// one ImGui ID share their click and hover, so neither could be selected.
+			void ToneRow(const VstHostLink::Snapshot& vst, const std::string& tone, float width, const char* section)
 			{
+				ImGui::PushID(section);
 				ImGui::PushID(tone.c_str());
 				const bool current = _stricmp(tone.c_str(), vst.toneName.c_str()) == 0;
 				const bool favourite = VstHostLink::IsFavouriteTone(tone);
@@ -1261,6 +1264,7 @@ namespace Overlay
 				}
 				ImGui::PopStyleVar();
 				ImGui::PopID();
+				ImGui::PopID();
 			}
 
 			void FoldLabel(const char* text)
@@ -1300,7 +1304,7 @@ namespace Overlay
 				for (const std::string& tone : tones) if (VstHostLink::IsFavouriteTone(tone) && matches(tone)) { anyFavourite = true; break; }
 				if (anyFavourite) {
 					FoldLabel("Favourites");
-					for (const std::string& tone : tones) if (VstHostLink::IsFavouriteTone(tone) && matches(tone)) ToneRow(vst, tone, rowW);
+					for (const std::string& tone : tones) if (VstHostLink::IsFavouriteTone(tone) && matches(tone)) ToneRow(vst, tone, rowW, "favourites");
 				}
 				FoldLabel(ToneFolders(tones).empty() ? "All tones" : "Tones");
 				if (tones.empty()) {
@@ -1312,7 +1316,7 @@ namespace Overlay
 					ImGui::PopStyleColor();
 					ImGui::PopFont();
 				}
-				for (const std::string& tone : tones) if (FolderOf(tone).empty() && matches(tone)) ToneRow(vst, tone, rowW);
+				for (const std::string& tone : tones) if (FolderOf(tone).empty() && matches(tone)) ToneRow(vst, tone, rowW, "tones");
 				// Folders: a header that folds the folder away (click), its tones under it.
 				for (const std::string& folder : ToneFolders(tones)) {
 					size_t count = 0;
@@ -1343,7 +1347,7 @@ namespace Overlay
 					if (open)
 						for (const std::string& tone : tones) if (FolderOf(tone) == folder && matches(tone)) {
 							ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 10.0f);
-							ToneRow(vst, tone, rowW - 10.0f);
+							ToneRow(vst, tone, rowW - 10.0f, "folders");
 						}
 				}
 				FoldLabel("Song tones");
