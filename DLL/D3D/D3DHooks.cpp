@@ -1095,6 +1095,19 @@ namespace {
 			&& data != nullptr)
 		{
 			const auto* bytes = static_cast<const uint8_t*>(data);
+			// Numeral decode trace: during a frozen chord, every glyph flush of one render frame
+			// every ~1.5 s logs each quad's centre and the coordinate it decoded to, so a game
+			// numeral that never registers as "resting" shows why.
+			static ULONGLONG lastGlyphTraceTick = 0;
+			static uint64_t glyphTraceFrame = 0;
+			if (isGlyphFlush && NoteByNoteHighwayRenderer::IsChordHoldFrozen()
+				&& GetTickCount64() - lastGlyphTraceTick >= 1500)
+			{
+				lastGlyphTraceTick = GetTickCount64();
+				glyphTraceFrame = noteByNoteRenderFrame;
+			}
+			const bool shouldTraceGlyph = isGlyphFlush && glyphTraceFrame == noteByNoteRenderFrame;
+			std::ostringstream glyphTrace;
 			for (UINT block = 0; block < blockCount; ++block)
 			{
 				keepBlock[block] = true;
@@ -1102,6 +1115,8 @@ namespace {
 				float maxHeight = 0.0f;
 				float minFret = 0.0f;
 				float maxFret = 0.0f;
+				float minAcross = 0.0f;
+				float maxAcross = 0.0f;
 				bool hasVertices = false;
 				for (UINT corner = 0; corner < 6; ++corner)
 				{
@@ -1117,6 +1132,8 @@ namespace {
 					if (!hasVertices || position[1] > maxHeight) maxHeight = position[1];
 					if (!hasVertices || position[2] < minFret) minFret = position[2];
 					if (!hasVertices || position[2] > maxFret) maxFret = position[2];
+					if (!hasVertices || position[0] < minAcross) minAcross = position[0];
+					if (!hasVertices || position[0] > maxAcross) maxAcross = position[0];
 					hasVertices = true;
 				}
 				if (!hasVertices) continue;
@@ -1168,6 +1185,14 @@ namespace {
 							fretIndex = static_cast<int>(index);
 						}
 					}
+				}
+				if (shouldTraceGlyph && block < 24)
+				{
+					glyphTrace << ' ' << block << '[' << std::fixed << std::setprecision(3)
+						<< (minAcross + maxAcross) * 0.5f << ',' << heightCentre << ',' << fretCentre
+						<< " h=" << (maxHeight - minHeight) << "]=";
+					if (stringIndex >= 0 && fretIndex >= 0) glyphTrace << stringIndex << ':' << fretIndex + 1;
+					else glyphTrace << '?';
 				}
 				// A block that does not decode onto both tables is not provably a
 				// marker quad; it is always kept.
@@ -1223,6 +1248,14 @@ namespace {
 				staleMarkerQuadsDropped.fetch_add(1, std::memory_order_relaxed);
 			}
 			vertexBuffer->Unlock();
+			if (shouldTraceGlyph)
+			{
+				std::ostringstream keepText;
+				for (int keep = 0; keep < keepCount; ++keep) keepText << ' ' << keepStrings[keep] << ':' << keepFrets[keep];
+				LOG_INFO("(NBN NUMERAL DECODE) frame=" << noteByNoteRenderFrame << " stride=" << boundStride
+					<< " blocks=" << blockCount << " keep=[" << keepText.str() << " ] quads[x,y,z]:" << glyphTrace.str()
+					<< std::endl);
+			}
 		}
 		vertexBuffer->Release();
 		if (!didDecode) return false;
