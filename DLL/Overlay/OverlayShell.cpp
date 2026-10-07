@@ -24,12 +24,14 @@
 #include <shellapi.h>
 #include <mutex>
 #include <thread>
+#include <optional>
 
 namespace Overlay
 {
 	namespace
 	{
 		enum class Page { NoteByNote, Mixer, Input, Output, Record, General, Debug, DropPedal, ExternalAmp, ToneDesigner };
+		std::optional<Page> g_pageRequest;   // a page's "Go to ..." button; DrawShell switches next frame
 
 		// ---- Engine access ------------------------------------------------------------------------------
 		// Same operation codes the desktop bridge sends over the pipe; the overlay calls the engine directly.
@@ -1933,7 +1935,7 @@ namespace Overlay
 			// The amp link carries one app at a time; say plainly when another app has it.
 			const std::string guest = amp.link.guestName;
 			const bool otherApp = amp.link.guestPresent && !guest.empty() && !VstHostLink::IsHostGuest(guest);
-			const std::string otherAppText = guest + " is connected to the amp link (External amp page), so Tone designer plays nothing. Close "
+			const std::string otherAppText = guest + " is using the amp link, so Tone designer plays nothing. Close "
 				+ guest + " to use Tone designer.";
 
 			if (vst.hostHung) {
@@ -1981,12 +1983,12 @@ namespace Overlay
 
 			// While Tone designer holds the link, nothing on this page applies to it (it has its own page, trims and
 			// fallback), so the page says only that.
+			// This page never controls Tone designer: it only says the link is busy and points to Tone designer's page.
 			if (toneDesigner) {
 				BeginCard();
-				InfoRow("Amp link", "In use by Tone designer", Color::Good);
-				Caption("You are playing through Tone designer; its settings are on its own page. External apps (AmpliTube, TONE3000, a DAW) can connect once it is closed.");
-				if (Button("Stop Tone designer", false, "Saves its chain and closes it. Start it again from the Tone designer page."))
-					VstHostLink::StopHost();
+				InfoRow("Amp link", "Busy: Tone designer is playing", Color::Warn);
+				Caption("An external app can connect once Tone designer is closed (power button on its page).");
+				if (Button("Go to Tone designer")) g_pageRequest = Page::ToneDesigner;
 				EndCard();
 				return;
 			}
@@ -2723,6 +2725,7 @@ namespace Overlay
 		static bool themed = false;
 		if (!themed) { ApplyTheme(); themed = true; }
 		static Page page = Page::NoteByNote;
+		if (g_pageRequest) { page = *g_pageRequest; g_pageRequest.reset(); }
 #ifdef OVERLAY_PREVIEW
 		// Offscreen preview build only (not built into the DLL): renders each page in turn.
 		extern int g_overlayPreviewPage;
