@@ -98,6 +98,8 @@ namespace RS2014_Mod_Installer
                 WriteFile(Path.Combine(rootModFolder, "RocksmithAudioBridge.dll"), Properties.Resources.RocksmithAudioBridgeLibrary);
                 WriteTextFile(Path.Combine(rootModFolder, "LICENSE.txt"), Properties.Resources.ProjectLicense);
                 WriteTextFile(Path.Combine(rootModFolder, "NOTICE.txt"), Properties.Resources.ProjectNotice);
+                // RocksmithAudioBridgeVstHost.exe is built with JUCE and is AGPLv3; its licence ships with it.
+                WriteTextFile(Path.Combine(rootModFolder, "VstHost-LICENSE.txt"), Properties.Resources.VstHostLicense);
             }
             catch (System.UnauthorizedAccessException ex)
             {

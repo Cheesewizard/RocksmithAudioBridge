@@ -21,7 +21,6 @@
 #include "HostLog.hpp"
 
 #include "../../DLL/Audio/VstHostControl.hpp"
-#include "public.sdk/source/vst/hosting/hostclasses.h"
 
 #include <Windows.h>
 #include <ShlObj.h>
@@ -795,6 +794,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 {
 	SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 	LogOpen();
+	// JUCE hosts the plugins (PluginHost.cpp). This thread is its message thread; the Win32 loop below dispatches
+	// its messages too. Plugins and the format list are released before this goes out of scope.
+	juce::ScopedJuceInitialiser_GUI juce;
 	g_mainThread = GetCurrentThreadId();
 	InstallCrashReporter();
 
@@ -821,9 +823,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 		LocalFree(argv);
 	}
 	Log("host: starting%s%s%ls", fromOverlay ? " from the overlay" : "", plugin.empty() ? "" : ", adding ", plugin.c_str());
-
-	static Steinberg::Vst::HostApplication hostApplication;
-	Steinberg::Vst::PluginContextFactory::instance().setPluginContext(&hostApplication);
 
 	g_control = VstHostControl::Open(g_controlMapping);
 	if (g_control) InterlockedExchange(&g_control->loading, 1);
@@ -852,7 +851,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 	g_font = CreateFontW(-Scale(13), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
 		CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
 
-	if (!StartAudio(g_popout)) { DestroyWindow(g_popout); g_chain.Clear(); OleUninitialize(); return 1; }
+	if (!StartAudio(g_popout)) { DestroyWindow(g_popout); g_chain.Clear(); ReleasePluginFormats(); OleUninitialize(); return 1; }
 	DWORD shown = 0;
 	ShowSlot(ReadDword(L"ShownSlot", shown) ? static_cast<int>(shown) : 0);
 	PlacePopout();
@@ -893,6 +892,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 	}
 	g_audio.Close();
 	g_chain.Clear();
+	ReleasePluginFormats();
 	if (g_font) DeleteObject(g_font);
 	Log("host: closed");
 	OleUninitialize();

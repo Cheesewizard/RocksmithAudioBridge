@@ -31,8 +31,10 @@
       <LanguageStandard>stdcpp17</LanguageStandard>
       <WarningLevel>Level3</WarningLevel>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
-      <AdditionalIncludeDirectories>$(ProjectDir)Lib\vst3sdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_WINDOWS;UNICODE;_UNICODE;NOMINMAX;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir)Lib\JUCE\modules;$(ProjectDir)Lib\JUCE\modules\juce_audio_processors_headless\format_types\VST3_SDK;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_WINDOWS;UNICODE;_UNICODE;NOMINMAX;_CRT_SECURE_NO_WARNINGS;JUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1;JUCE_STANDALONE_APPLICATION=1;JUCE_PLUGINHOST_VST3=1;JUCE_VST3_HOST_CROSS_PLATFORM_UID=1;JUCE_USE_CURL=0;JUCE_WEB_BROWSER=0;JUCE_DISPLAY_SPLASH_SCREEN=0;JUCE_REPORT_APP_USAGE=0;JUCE_MODULE_AVAILABLE_juce_core=1;JUCE_MODULE_AVAILABLE_juce_events=1;JUCE_MODULE_AVAILABLE_juce_data_structures=1;JUCE_MODULE_AVAILABLE_juce_graphics=1;JUCE_MODULE_AVAILABLE_juce_gui_basics=1;JUCE_MODULE_AVAILABLE_juce_gui_extra=1;JUCE_MODULE_AVAILABLE_juce_audio_basics=1;JUCE_MODULE_AVAILABLE_juce_audio_processors_headless=1;JUCE_MODULE_AVAILABLE_juce_audio_processors=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <!-- JUCE: big translation units (one per module), sources in UTF-8, and the real __cplusplus. -->
+      <AdditionalOptions>/bigobj /utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <PreprocessorDefinitions Condition="'$(Configuration)'=='Debug'">DEVELOPMENT=1;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PreprocessorDefinitions Condition="'$(Configuration)'!='Debug'">RELEASE=1;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary Condition="'$(Configuration)'=='Debug'">MultiThreadedDebug</RuntimeLibrary>
@@ -59,28 +61,44 @@
     <ClInclude Include="Source\Chain.hpp" />
     <ClInclude Include="Source\HostLog.hpp" />
   </ItemGroup>
-  <!-- The part of Steinberg's VST3 SDK (MIT, Lib\vst3sdk\LICENSE.txt) a host needs: the interfaces plus the
-       hosting helpers. No VSTGUI, no base library. -->
+  <!-- JUCE 9 (Lib\JUCE, AGPLv3: Lib\JUCE\LICENSE.txt; this program is AGPLv3 because of it, see LICENSE.txt
+       next to this project). One translation unit per module; its own VST3 SDK copy is used, so the
+       standalone Lib\vst3sdk is gone. -->
   <ItemGroup>
-    <ClCompile Include="Lib\vst3sdk\pluginterfaces\base\conststringtable.cpp" />
-    <ClCompile Include="Lib\vst3sdk\pluginterfaces\base\coreiids.cpp" />
-    <ClCompile Include="Lib\vst3sdk\pluginterfaces\base\funknown.cpp" />
-    <ClCompile Include="Lib\vst3sdk\pluginterfaces\base\ustring.cpp" />
-    <ClCompile Include="Lib\vst3sdk\public.sdk\source\common\commoniids.cpp" />
-    <ClCompile Include="Lib\vst3sdk\public.sdk\source\vst\vstinitiids.cpp" />
-    <ClCompile Include="Lib\vst3sdk\public.sdk\source\common\commonstringconvert.cpp" />
-    <ClCompile Include="Lib\vst3sdk\public.sdk\source\common\memorystream.cpp" />
-    <ClCompile Include="Lib\vst3sdk\public.sdk\source\common\threadchecker_win32.cpp" />
-    <ClCompile Include="Lib\vst3sdk\public.sdk\source\vst\hosting\connectionproxy.cpp" />
-    <ClCompile Include="Lib\vst3sdk\public.sdk\source\vst\hosting\eventlist.cpp" />
-    <ClCompile Include="Lib\vst3sdk\public.sdk\source\vst\hosting\hostclasses.cpp" />
-    <ClCompile Include="Lib\vst3sdk\public.sdk\source\vst\hosting\module.cpp" />
-    <ClCompile Include="Lib\vst3sdk\public.sdk\source\vst\hosting\module_win32.cpp" />
-    <ClCompile Include="Lib\vst3sdk\public.sdk\source\vst\hosting\parameterchanges.cpp" />
-    <ClCompile Include="Lib\vst3sdk\public.sdk\source\vst\hosting\pluginterfacesupport.cpp" />
-    <ClCompile Include="Lib\vst3sdk\public.sdk\source\vst\hosting\plugprovider.cpp" />
-    <ClCompile Include="Lib\vst3sdk\public.sdk\source\vst\hosting\processdata.cpp" />
-    <ClCompile Include="Lib\vst3sdk\public.sdk\source\vst\utility\stringconvert.cpp" />
+    <ClCompile Include="Lib\JUCE\modules\juce_core\juce_core.cpp" />
+    <ClCompile Include="Lib\JUCE\modules\juce_core\juce_core_CompilationTime.cpp" />
+    <ClCompile Include="Lib\JUCE\modules\juce_events\juce_events.cpp" />
+    <ClCompile Include="Lib\JUCE\modules\juce_data_structures\juce_data_structures.cpp" />
+    <ClCompile Include="Lib\JUCE\modules\juce_graphics\juce_graphics.cpp" />
+    <ClCompile Include="Lib\JUCE\modules\juce_graphics\juce_graphics_Harfbuzz.cpp" />
+    <ClCompile Include="Lib\JUCE\modules\juce_gui_basics\juce_gui_basics.cpp" />
+    <ClCompile Include="Lib\JUCE\modules\juce_gui_basics\juce_gui_basics_2.cpp" />
+    <ClCompile Include="Lib\JUCE\modules\juce_gui_basics\juce_gui_basics_3.cpp" />
+    <ClCompile Include="Lib\JUCE\modules\juce_gui_basics\juce_gui_basics_4.cpp" />
+    <ClCompile Include="Lib\JUCE\modules\juce_gui_basics\juce_gui_basics_5.cpp" />
+    <ClCompile Include="Lib\JUCE\modules\juce_gui_extra\juce_gui_extra.cpp" />
+    <ClCompile Include="Lib\JUCE\modules\juce_audio_basics\juce_audio_basics.cpp" />
+    <ClCompile Include="Lib\JUCE\modules\juce_audio_processors_headless\juce_audio_processors_headless.cpp" />
+    <ClCompile Include="Lib\JUCE\modules\juce_audio_processors_headless\juce_audio_processors_headless_ara.cpp" />
+    <ClCompile Include="Lib\JUCE\modules\juce_audio_processors_headless\juce_audio_processors_headless_lv2_libs.cpp" />
+    <ClCompile Include="Lib\JUCE\modules\juce_audio_processors\juce_audio_processors.cpp" />
+    <ClCompile Include="Lib\JUCE\modules\juce_core\juce_core_zlib.c" />
+    <ClCompile Include="Lib\JUCE\modules\juce_graphics\juce_graphics_Sheenbidi.c" />
+    <ClCompile Include="Lib\JUCE\modules\juce_graphics\juce_graphics_libjpg_1.c" />
+    <ClCompile Include="Lib\JUCE\modules\juce_graphics\juce_graphics_libjpg_2.c" />
+    <ClCompile Include="Lib\JUCE\modules\juce_graphics\juce_graphics_libjpg_3.c" />
+    <ClCompile Include="Lib\JUCE\modules\juce_graphics\juce_graphics_libpng.c" />
+    <ClCompile Include="Lib\JUCE\modules\juce_graphics\juce_graphics_libwebp_dec.c" />
+    <ClCompile Include="Lib\JUCE\modules\juce_graphics\juce_graphics_libwebp_dsp_dec.c" />
+    <ClCompile Include="Lib\JUCE\modules\juce_graphics\juce_graphics_libwebp_dsp_dec_avx2.c" />
+    <ClCompile Include="Lib\JUCE\modules\juce_graphics\juce_graphics_libwebp_dsp_dec_sse41.c" />
+    <ClCompile Include="Lib\JUCE\modules\juce_graphics\juce_graphics_libwebp_dsp_enc.c" />
+    <ClCompile Include="Lib\JUCE\modules\juce_graphics\juce_graphics_libwebp_dsp_enc_avx2.c" />
+    <ClCompile Include="Lib\JUCE\modules\juce_graphics\juce_graphics_libwebp_dsp_enc_sse41.c" />
+    <ClCompile Include="Lib\JUCE\modules\juce_graphics\juce_graphics_libwebp_enc.c" />
+    <ClCompile Include="Lib\JUCE\modules\juce_graphics\juce_graphics_libwebp_sharpyuv.c" />
+    <ClCompile Include="Lib\JUCE\modules\juce_graphics\juce_graphics_libwebp_utils.c" />
+    <ClCompile Include="Lib\JUCE\modules\juce_graphics\juce_graphics_lunasvg.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <!-- Into the game root after every build, next to the 64-bit bridge driver (shared DeployToGame.targets). -->

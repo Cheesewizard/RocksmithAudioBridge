@@ -10,7 +10,8 @@ namespace VstHost
 {
 	namespace
 	{
-		constexpr char kToneMagic[8] = { 'R', 'A', 'B', 'T', 'O', 'N', 'E', '1' };
+		constexpr char kToneMagic[8] = { 'R', 'A', 'B', 'T', 'O', 'N', 'E', '2' };
+		constexpr char kToneMagicV1[8] = { 'R', 'A', 'B', 'T', 'O', 'N', 'E', '1' };   // before JUCE: raw VST3 states
 
 		float DbToGain(int tenths) { return std::pow(10.0f, static_cast<float>(tenths) / 200.0f); }
 
@@ -133,11 +134,11 @@ namespace VstHost
 	{
 		if (index < 0 || index >= Count()) return false;
 		if (Count() >= kMaxSlots) { error = "The chain is full (" + std::to_string(kMaxSlots) + " plugins)."; return false; }
-		std::vector<char> component, controller;
-		m_slots[index]->plugin->GetStateBlobs(component, controller);
+		std::vector<char> state;
+		m_slots[index]->plugin->GetState(state);
 		auto slot = std::make_unique<Slot>();
 		if (!LoadSlot(*slot, m_slots[index]->path, error)) return false;
-		slot->plugin->SetStateBlobs(std::move(component), std::move(controller));   // before it plays: no stream thread yet
+		slot->plugin->SetState(state);   // before it plays: no stream thread yet
 		slot->bypass = m_slots[index]->bypass.load();
 		Pause();
 		m_slots.insert(m_slots.begin() + index + 1, std::move(slot));
@@ -246,9 +247,11 @@ namespace VstHost
 		RaisePeak(m_outputPeak, std::max(Peak(left, frames), Peak(right, frames)));
 	}
 
-	// Tone file: magic "RABTONE1", input and output trim (int32 tenths of a dB), slot count (uint32), then per slot
-	// the plugin path (uint32 length in UTF-16 units + text), bypass (uint8), and the plugin's component and
-	// controller settings (uint32 length + bytes each).
+	// Tone file: magic "RABTONE2", input and output trim (int32 tenths of a dB), slot count (uint32), then per slot
+	// the plugin path (uint32 length in UTF-16 units + text), bypass (uint8), and the plugin's settings as JUCE
+	// keeps them (uint32 length + bytes). "RABTONE1" files (before JUCE) have two blocks per slot instead, the raw
+	// VST3 component and controller states; they load through PluginHost::StateFromVst3Parts and are written back
+	// as version 2 the next time they are saved.
 	bool Chain::SaveTone(const std::wstring& file)
 	{
 		const std::wstring temp = file + L".tmp";
@@ -264,10 +267,9 @@ namespace VstHost
 			WriteBlob(out, slot->path.data(), static_cast<uint32_t>(slot->path.size() * sizeof(wchar_t)));
 			const uint8_t bypass = slot->bypass ? 1 : 0;
 			fwrite(&bypass, 1, 1, out);
-			std::vector<char> component, controller;
-			slot->plugin->GetStateBlobs(component, controller);
-			WriteBlob(out, component.data(), static_cast<uint32_t>(component.size()));
-			WriteBlob(out, controller.data(), static_cast<uint32_t>(controller.size()));
+			std::vector<char> state;
+			slot->plugin->GetState(state);
+			WriteBlob(out, state.data(), static_cast<uint32_t>(state.size()));
 		}
 		const bool ok = fclose(out) == 0 && MoveFileExW(temp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING);
 		if (ok) m_structureDirty = false;
@@ -282,16 +284,25 @@ namespace VstHost
 		char magic[sizeof(kToneMagic)]{};
 		int32_t levels[2]{};
 		uint32_t count = 0;
-		struct Entry { std::wstring path; bool bypass = false; std::vector<char> component, controller; };
+		struct Entry { std::wstring path; bool bypass = false; std::vector<char> state; };
 		std::vector<Entry> entries;
-		bool ok = fread(magic, 1, sizeof(magic), in) == sizeof(magic) && std::memcmp(magic, kToneMagic, sizeof(magic)) == 0
+		bool ok = fread(magic, 1, sizeof(magic), in) == sizeof(magic);
+		const bool v1 = ok && std::memcmp(magic, kToneMagicV1, sizeof(magic)) == 0;
+		ok = ok && (v1 || std::memcmp(magic, kToneMagic, sizeof(magic)) == 0)
 			&& fread(levels, sizeof(levels), 1, in) == 1 && fread(&count, sizeof(count), 1, in) == 1 && count <= kMaxSlots;
 		for (uint32_t i = 0; ok && i < count; ++i)
 		{
 			Entry entry;
 			std::vector<char> path;
 			uint8_t bypass = 0;
-			ok = ReadBlob(in, path) && fread(&bypass, 1, 1, in) == 1 && ReadBlob(in, entry.component) && ReadBlob(in, entry.controller);
+			ok = ReadBlob(in, path) && fread(&bypass, 1, 1, in) == 1;
+			if (ok && v1)
+			{
+				std::vector<char> component, controller;
+				ok = ReadBlob(in, component) && ReadBlob(in, controller);
+				if (ok && !component.empty()) entry.state = PluginHost::StateFromVst3Parts(component, controller);
+			}
+			else if (ok) ok = ReadBlob(in, entry.state);
 			if (!ok) break;
 			entry.path.assign(reinterpret_cast<const wchar_t*>(path.data()), path.size() / sizeof(wchar_t));
 			entry.bypass = bypass != 0;
@@ -312,7 +323,7 @@ namespace VstHost
 				missing += (missing.empty() ? "" : ", ") + Utf8(slash == std::wstring::npos ? entry.path : entry.path.substr(slash + 1));
 				continue;
 			}
-			slot->plugin->SetStateBlobs(std::move(entry.component), std::move(entry.controller));
+			slot->plugin->SetState(entry.state);
 			slot->bypass = entry.bypass;
 			slots.push_back(std::move(slot));
 		}
@@ -323,7 +334,8 @@ namespace VstHost
 		for (auto& old : slots) old->plugin->SaveState();
 		SetLevels(levels[0], levels[1]);
 		m_structureDirty = false;
-		Log("tone: loaded %ls (%d plugin(s)%s%s)", file.c_str(), Count(), missing.empty() ? "" : ", missing: ", missing.c_str());
+		Log("tone: loaded %ls (%d plugin(s)%s%s%s)", file.c_str(), Count(), v1 ? ", converted from the pre-JUCE format" : "",
+			missing.empty() ? "" : ", missing: ", missing.c_str());
 		return true;
 	}
 }

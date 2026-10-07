@@ -944,6 +944,15 @@ namespace RS2014_Mod_Installer.Properties {
                 return ResourceManager.GetString("ProjectNotice", resourceCulture);
             }
         }
+
+        /// <summary>
+        ///   Looks up a localized string similar to the VST host's licence (AGPLv3, it is built with JUCE).
+        /// </summary>
+        internal static string VstHostLicense {
+            get {
+                return ResourceManager.GetString("VstHostLicense", resourceCulture);
+            }
+        }
         
         /// <summary>
         ///   Looks up a localized resource of type System.Byte[].

@@ -2,177 +2,147 @@
 
 #include "HostLog.hpp"
 
-#include "pluginterfaces/gui/iplugviewcontentscalesupport.h"
-#include "pluginterfaces/vst/vstspeaker.h"
-#include "public.sdk/source/common/memorystream.h"
-
 #include <ShlObj.h>
 #include <algorithm>
 #include <cstring>
-#include <vector>
-
-using namespace Steinberg;
-using namespace Steinberg::Vst;
 
 namespace VstHost
 {
 	namespace
 	{
 		constexpr double kSampleRate = 48000.0;
-		constexpr char kStateMagic[8] = { 'R', 'A', 'B', 'V', 'S', 'T', '1', 0 };
+		constexpr char kStateMagic[8] = { 'R', 'A', 'B', 'J', 'S', 'T', '1', 0 };
+		// Loading settings makes a plugin report parameter changes for a moment; those are not the player's edits.
+		constexpr ULONGLONG kSettleMs = 750;
 
-		std::string Utf8(const std::wstring& text)
-		{
-			if (text.empty()) return {};
-			const int size = WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
-			std::string out(static_cast<size_t>(size), '\0');
-			WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), out.data(), size, nullptr, nullptr);
-			return out;
-		}
+		std::unique_ptr<juce::AudioPluginFormatManager> g_formats;
 
-		std::wstring Wide(const std::string& text)
+		std::wstring Wide(const juce::String& text) { return text.toWideCharPointer(); }
+
+		std::wstring StateFolder()
 		{
-			if (text.empty()) return {};
-			const int size = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0);
-			std::wstring out(static_cast<size_t>(size), L'\0');
-			MultiByteToWideChar(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), out.data(), size);
-			return out;
+			PWSTR appData = nullptr;
+			if (FAILED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, KF_FLAG_CREATE, nullptr, &appData))) return {};
+			std::wstring dir = std::wstring(appData) + L"\\RocksmithAudioBridge\\VstHost\\PluginStates";
+			CoTaskMemFree(appData);
+			SHCreateDirectoryExW(nullptr, dir.c_str(), nullptr);
+			return dir;
 		}
 	}
 
-	PluginHost::PluginHost() : m_inChanges(1024), m_editTransfer(1024) {}
+	juce::AudioPluginFormatManager& PluginFormats()
+	{
+		if (!g_formats)
+		{
+			g_formats = std::make_unique<juce::AudioPluginFormatManager>();
+			juce::addDefaultFormatsToManager(*g_formats);
+		}
+		return *g_formats;
+	}
+
+	void ReleasePluginFormats() { g_formats.reset(); }
+
+	// A steady transport for plugins that ask (tempo-synced delays, LFOs): 120 BPM, 4/4, always playing.
+	class PluginHost::PlayHead final : public juce::AudioPlayHead
+	{
+	public:
+		juce::Optional<PositionInfo> getPosition() const override
+		{
+			PositionInfo info;
+			info.setBpm(120.0);
+			info.setTimeSignature(TimeSignature{ 4, 4 });
+			info.setIsPlaying(true);
+			info.setTimeInSamples(samples);
+			info.setTimeInSeconds(static_cast<double>(samples) / kSampleRate);
+			return info;
+		}
+		int64_t samples = 0;   // stream thread
+	};
+
+	PluginHost::PluginHost() : m_playHead(std::make_unique<PlayHead>()) {}
 
 	PluginHost::~PluginHost() { Unload(); }
-
-	tresult PLUGIN_API PluginHost::queryInterface(const TUID iid, void** obj)
-	{
-		if (FUnknownPrivate::iidEqual(iid, IComponentHandler::iid) || FUnknownPrivate::iidEqual(iid, FUnknown::iid))
-		{
-			*obj = static_cast<IComponentHandler*>(this);
-			return kResultOk;
-		}
-		if (FUnknownPrivate::iidEqual(iid, IComponentHandler2::iid)) { *obj = static_cast<IComponentHandler2*>(this); return kResultOk; }
-		if (FUnknownPrivate::iidEqual(iid, IPlugFrame::iid)) { *obj = static_cast<IPlugFrame*>(this); return kResultOk; }
-		*obj = nullptr;
-		return kNoInterface;
-	}
 
 	bool PluginHost::Load(const std::wstring& path, std::string& error)
 	{
 		Unload();
-		// Edits queued for the previous plugin carry its parameter IDs; never hand them to the next one.
-		m_editTransfer.removeChanges();
-		m_inChanges.clearQueue();
-		m_restartRequested = false;
 		m_dirty = false;
-		m_module = VST3::Hosting::Module::create(Utf8(path), error);
-		if (!m_module) { Log("load: %s", error.c_str()); return false; }
 
-		const auto classes = m_module->getFactory().classInfos();
-		const auto effect = std::find_if(classes.begin(), classes.end(),
-			[](const VST3::Hosting::ClassInfo& info) { return info.category() == kVstAudioEffectClass; });
-		if (effect == classes.end())
+		// A file can hold several plugins (a bundle with an effect and an instrument): take the first effect.
+		juce::OwnedArray<juce::PluginDescription> types;
+		const juce::String file(path.c_str());
+		for (juce::AudioPluginFormat* format : PluginFormats().getFormats())
+			if (format->fileMightContainThisPluginType(file)) format->findAllTypesForFile(types, file);
+		if (types.isEmpty())
 		{
-			error = "This file has no audio plugin in it.";
-			m_module.reset();
+			error = "This file has no plugin in it that can be loaded.";
 			return false;
 		}
-		m_name = effect->name();
-		m_classId = effect->ID().toString();
+		const juce::PluginDescription* chosen = types[0];
+		for (const juce::PluginDescription* type : types)
+			if (!type->isInstrument) { chosen = type; break; }
 
-		m_provider = std::make_unique<PlugProvider>(m_module->getFactory(), *effect, true);
-		if (!m_provider->initialize())
+		juce::String message;
+		m_plugin = PluginFormats().createPluginInstance(*chosen, kSampleRate, std::max(m_frames, 512), message);
+		if (!m_plugin)
 		{
-			error = "The plugin failed to start.";
-			m_provider.reset();
-			m_module.reset();
+			error = message.isNotEmpty() ? message.toStdString() : "The plugin failed to start.";
+			Log("load: %ls failed: %s", path.c_str(), error.c_str());
 			return false;
 		}
-		m_component = m_provider->getComponentPtr();
-		m_controller = m_provider->getControllerPtr();
-		m_processor = FUnknownPtr<IAudioProcessor>(m_component);
-		if (!m_component || !m_processor)
-		{
-			error = "The plugin has no audio processor.";
-			Unload();
-			return false;
-		}
-		if (m_controller) m_controller->setComponentHandler(this);
-
-		SetupBuses();
+		m_name = chosen->name.toStdString();
+		m_identifier = chosen->createIdentifierString().toStdString();
+		m_legacyUid = chosen->pluginFormatName == "VST3" ? chosen->deprecatedUid : 0;
+		m_plugin->setPlayHead(m_playHead.get());
+		m_plugin->addListener(this);
+		ChooseBuses();
 		LoadState();
-		Log("load: %s (%s), %d in / %d out channels", m_name.c_str(), m_classId.c_str(), m_inputChannels, m_outputChannels);
+		m_quietUntil = GetTickCount64() + kSettleMs;
+		Log("load: %s (%s, %s by %s), %d in / %d out channels", m_name.c_str(), m_identifier.c_str(),
+			chosen->pluginFormatName.toRawUTF8(), chosen->manufacturerName.toRawUTF8(), m_inputChannels, m_outputChannels);
 		return true;
 	}
 
-	void PluginHost::SetupBuses()
+	// Main buses only: the guitar into input bus 0, output bus 0 to the game, asked for stereo. Side-chains and
+	// extra outputs stay off. The input keeps the plugin's own choice (guitar amps are often mono).
+	void PluginHost::ChooseBuses()
 	{
-		// Main audio buses only: the guitar into bus 0, bus 0 out to the game. Side-chains and MIDI stay off.
-		for (const BusDirection dir : { kInput, kOutput })
+		juce::AudioProcessor::BusesLayout layout = m_plugin->getBusesLayout();
+		for (int i = 1; i < layout.inputBuses.size(); ++i) layout.inputBuses.getReference(i) = juce::AudioChannelSet::disabled();
+		for (int i = 1; i < layout.outputBuses.size(); ++i) layout.outputBuses.getReference(i) = juce::AudioChannelSet::disabled();
+		if (!layout.outputBuses.isEmpty()) layout.outputBuses.getReference(0) = juce::AudioChannelSet::stereo();
+		if (!m_plugin->setBusesLayout(layout))
 		{
-			const int32 audio = m_component->getBusCount(kAudio, dir);
-			for (int32 i = 0; i < audio; ++i) m_component->activateBus(kAudio, dir, i, i == 0);
-			const int32 events = m_component->getBusCount(kEvent, dir);
-			for (int32 i = 0; i < events; ++i) m_component->activateBus(kEvent, dir, i, false);
+			// Keep the plugin's own output layout, still without the extra buses.
+			layout = m_plugin->getBusesLayout();
+			for (int i = 1; i < layout.inputBuses.size(); ++i) layout.inputBuses.getReference(i) = juce::AudioChannelSet::disabled();
+			for (int i = 1; i < layout.outputBuses.size(); ++i) layout.outputBuses.getReference(i) = juce::AudioChannelSet::disabled();
+			m_plugin->setBusesLayout(layout);
 		}
-
-		const int32 inBuses = m_component->getBusCount(kAudio, kInput);
-		const int32 outBuses = m_component->getBusCount(kAudio, kOutput);
-		std::vector<SpeakerArrangement> ins(static_cast<size_t>(inBuses)), outs(static_cast<size_t>(outBuses));
-		for (int32 i = 0; i < inBuses; ++i) m_processor->getBusArrangement(kInput, i, ins[i]);
-		for (int32 i = 0; i < outBuses; ++i) m_processor->getBusArrangement(kOutput, i, outs[i]);
-
-		// Stereo out is what the game mixes. Input: keep the plugin's own choice (guitar amps are often mono).
-		if (outBuses > 0 && outs[0] != SpeakerArr::kStereo)
-		{
-			outs[0] = SpeakerArr::kStereo;
-			if (m_processor->setBusArrangements(ins.data(), inBuses, outs.data(), outBuses) != kResultTrue)
-				m_processor->getBusArrangement(kOutput, 0, outs[0]);
-		}
-		m_inputChannels = inBuses > 0 ? SpeakerArr::getChannelCount(ins[0]) : 0;
-		m_outputChannels = outBuses > 0 ? SpeakerArr::getChannelCount(outs[0]) : 0;
+		m_inputChannels = m_plugin->getMainBusNumInputChannels();
+		m_outputChannels = m_plugin->getMainBusNumOutputChannels();
 	}
 
 	bool PluginHost::Prepare(int frames, std::string& error)
 	{
 		Suspend();
-		ProcessSetup setup{ kRealtime, kSample32, frames, kSampleRate };
-		if (m_processor->setupProcessing(setup) != kResultOk)
-		{
-			error = "The plugin does not support 48 kHz / " + std::to_string(frames) + " samples.";
-			return false;
-		}
-		if (!m_data.prepare(*m_component, frames, kSample32))
-		{
-			error = "Could not allocate the plugin's audio buffers.";
-			return false;
-		}
-		m_data.numSamples = frames;
-		m_context = {};
-		m_context.sampleRate = kSampleRate;
-		m_context.tempo = 120.0;
-		m_context.timeSigNumerator = 4;
-		m_context.timeSigDenominator = 4;
-		m_context.state = ProcessContext::kPlaying | ProcessContext::kTempoValid | ProcessContext::kTimeSigValid;
-		m_data.processContext = &m_context;
-		m_data.inputParameterChanges = &m_inChanges;
-		m_component->setActive(true);
-		m_processor->setProcessing(true);
+		if (!m_plugin) { error = "No plugin loaded."; return false; }
+		m_frames = frames;
+		m_plugin->setRateAndBufferSizeDetails(kSampleRate, frames);
+		m_plugin->prepareToPlay(kSampleRate, frames);
+		const int channels = std::max({ m_plugin->getTotalNumInputChannels(), m_plugin->getTotalNumOutputChannels(), 2 });
+		m_buffer.setSize(channels, frames, false, true, false);
+		m_midi.ensureSize(256);
 		m_processing = true;
 		return true;
 	}
 
 	void PluginHost::Suspend()
 	{
-		if (!m_processor) return;
+		if (!m_plugin) return;
 		const bool wasProcessing = m_processing.exchange(false);
 		while (m_inProcess.load()) YieldProcessor();   // one block at most
-		if (wasProcessing)
-		{
-			m_processor->setProcessing(false);
-			m_component->setActive(false);
-		}
-		m_data.unprepare();
+		if (wasProcessing) m_plugin->releaseResources();
 	}
 
 	bool PluginHost::Process(const float* inLeft, const float* inRight, float* left, float* right, int frames)
@@ -184,7 +154,7 @@ namespace VstHost
 			~InProcess() { flag.store(false); }
 		} inProcess(m_inProcess);
 
-		if (!m_processing.load() || frames != m_data.numSamples)
+		if (!m_processing.load() || frames != m_frames)
 		{
 			std::fill(left, left + frames, 0.0f);
 			std::fill(right, right + frames, 0.0f);
@@ -193,20 +163,20 @@ namespace VstHost
 
 		// Stereo in: left and right to the first two input channels; a mono input takes the left (the guitar is
 		// mono, so both sides are the same until a stereo plugin earlier in the chain widens it).
-		if (m_data.numInputs > 0)
-			for (int32 ch = 0; ch < m_data.inputs[0].numChannels; ++ch)
-				std::memcpy(m_data.inputs[0].channelBuffers32[ch], ch == 1 ? inRight : inLeft, sizeof(float) * frames);
-
-		m_editTransfer.transferChangesTo(m_inChanges);
-		m_processor->process(m_data);
-		m_inChanges.clearQueue();
-		m_context.projectTimeSamples += frames;
-
-		if (m_data.numOutputs > 0 && m_data.outputs[0].numChannels > 0)
+		for (int ch = 0; ch < m_buffer.getNumChannels(); ++ch)
 		{
-			const AudioBusBuffers& out = m_data.outputs[0];
-			std::memcpy(left, out.channelBuffers32[0], sizeof(float) * frames);
-			std::memcpy(right, out.channelBuffers32[out.numChannels > 1 ? 1 : 0], sizeof(float) * frames);
+			float* channel = m_buffer.getWritePointer(ch);
+			if (ch < m_inputChannels) std::memcpy(channel, ch == 1 ? inRight : inLeft, sizeof(float) * frames);
+			else std::fill(channel, channel + frames, 0.0f);
+		}
+		m_midi.clear();
+		m_plugin->processBlock(m_buffer, m_midi);
+		m_playHead->samples += frames;
+
+		if (m_outputChannels > 0)
+		{
+			std::memcpy(left, m_buffer.getReadPointer(0), sizeof(float) * frames);
+			std::memcpy(right, m_buffer.getReadPointer(m_outputChannels > 1 ? 1 : 0), sizeof(float) * frames);
 		}
 		else
 		{
@@ -216,156 +186,130 @@ namespace VstHost
 		return true;
 	}
 
-	tresult PLUGIN_API PluginHost::performEdit(ParamID id, ParamValue value)
+	void PluginHost::audioProcessorParameterChanged(juce::AudioProcessor*, int, float)
 	{
-		m_editTransfer.addChange(id, value, 0);
-		m_dirty = true;
-		return kResultOk;
+		if (GetTickCount64() >= m_quietUntil) m_dirty = true;
 	}
 
-	tresult PLUGIN_API PluginHost::restartComponent(int32 flags)
+	void PluginHost::audioProcessorChanged(juce::AudioProcessor*, const ChangeDetails& details)
 	{
-		Log("plugin asked for restart, flags 0x%X", static_cast<unsigned>(flags));
-		if (flags & (kReloadComponent | kIoChanged | kLatencyChanged)) m_restartRequested = true;
-		if (flags & kParamValuesChanged) m_dirty = true;
-		return kResultOk;
+		if ((details.programChanged || details.nonParameterStateChanged) && GetTickCount64() >= m_quietUntil) m_dirty = true;
 	}
 
 	bool PluginHost::OpenEditor(HWND window, std::function<void(int, int)> onResized, int maxWidth, int maxHeight)
 	{
-		if (!m_controller) return false;
+		if (!m_plugin) return false;
+		CloseEditor();
 		m_window = window;
 		m_onEditorResized = std::move(onResized);
-		m_view = owned(m_controller->createView(ViewType::kEditor));
-		if (!m_view || m_view->isPlatformTypeSupported(kPlatformTypeHWND) != kResultTrue)
-		{
-			Log("editor: the plugin has no window editor");
-			m_view = nullptr;
-			return false;
-		}
-		m_view->setFrame(this);
-		const float dpiScale = static_cast<float>(GetDpiForWindow(window)) / 96.0f;
-		FUnknownPtr<IPlugViewContentScaleSupport> scale = FUnknownPtr<IPlugViewContentScaleSupport>(m_view);
-		if (scale) scale->setContentScaleFactor(dpiScale);
+		juce::AudioProcessorEditor* editor = m_plugin->hasEditor() ? m_plugin->createEditorAndMakeActive() : nullptr;
+		if (!editor) editor = new juce::GenericAudioProcessorEditor(*m_plugin);
+		m_editor.reset(editor);
+		m_editor->setTopLeftPosition(0, 0);
+		m_editor->addToDesktop(0, window);   // a child window of our popout's editor area
+		m_editor->setVisible(true);
 
-		ViewRect size{};
-		if (m_view->getSize(&size) == kResultOk && maxWidth > 0 && maxHeight > 0
-			&& (size.getWidth() > maxWidth || size.getHeight() > maxHeight))
+		RECT rect{};
+		GetWindowRect(static_cast<HWND>(m_editor->getWindowHandle()), &rect);
+		const int width = rect.right - rect.left, height = rect.bottom - rect.top;
+		if (maxWidth > 0 && maxHeight > 0 && width > 0 && height > 0 && (width > maxWidth || height > maxHeight))
 		{
 			// Too big for the screen (AmpliTube opens at 1710x1050): shrink it. A resizable editor takes a smaller
-			// size; otherwise ask for a smaller content scale, which most plugins honour.
-			const float fit = std::min(static_cast<float>(maxWidth) / size.getWidth(), static_cast<float>(maxHeight) / size.getHeight());
-			if (m_view->canResize() == kResultTrue)
-			{
-				ViewRect smaller(0, 0, static_cast<int32>(size.getWidth() * fit), static_cast<int32>(size.getHeight() * fit));
-				if (m_view->checkSizeConstraint(&smaller) == kResultTrue) size = smaller;
-			}
-			else if (scale)
-			{
-				scale->setContentScaleFactor(dpiScale * fit);
-				m_view->getSize(&size);
-			}
-			Log("editor: scaled to fit the screen (%dx%d)", size.getWidth(), size.getHeight());
+			// size; others get a smaller scale (JUCE passes it on to the plugin).
+			const float fit = std::min(static_cast<float>(maxWidth) / width, static_cast<float>(maxHeight) / height);
+			if (m_editor->isResizable())
+				m_editor->setSize(static_cast<int>(m_editor->getWidth() * fit), static_cast<int>(m_editor->getHeight() * fit));
+			else
+				m_editor->setScaleFactor(fit);
+			Log("editor: scaled to fit the screen (by %.2f)", fit);
 		}
-		FitWindowTo(size);
-		if (m_view->attached(window, kPlatformTypeHWND) != kResultOk)
-		{
-			Log("editor: attach failed");
-			m_view->setFrame(nullptr);
-			m_view = nullptr;
-			return false;
-		}
-		if (m_view->canResize() == kResultTrue) m_view->onSize(&size);
-		Log("editor: open, %dx%d, %s", size.getWidth(), size.getHeight(), m_view->canResize() == kResultTrue ? "resizable" : "fixed size");
+		m_editor->addComponentListener(this);
+		FitWindowToEditor();
+		Log("editor: open, %s%s", m_plugin->hasEditor() ? "the plugin's own" : "generic (the plugin has none)",
+			m_editor->isResizable() ? ", resizable" : "");
 		return true;
 	}
 
 	void PluginHost::CloseEditor()
 	{
-		if (!m_view) return;
-		m_view->removed();
-		m_view->setFrame(nullptr);
-		m_view = nullptr;
+		if (!m_editor) return;
+		m_editor->removeComponentListener(this);
+		m_editor.reset();   // its destructor tells the plugin (editorBeingDeleted)
 	}
 
-	void PluginHost::FitWindowTo(const ViewRect& rect)
+	void PluginHost::componentMovedOrResized(juce::Component&, bool, bool wasResized)
 	{
-		if (!m_window) return;
-		SetWindowPos(m_window, nullptr, 0, 0, rect.getWidth(), rect.getHeight(), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-		if (m_onEditorResized) m_onEditorResized(rect.getWidth(), rect.getHeight());
+		if (wasResized) FitWindowToEditor();
 	}
 
-	tresult PLUGIN_API PluginHost::resizeView(IPlugView* view, ViewRect* newSize)
+	// Our editor area takes the editor's size in physical pixels (the popout around it follows, onResized).
+	void PluginHost::FitWindowToEditor()
 	{
-		if (!view || !newSize || view != m_view.get()) return kInvalidArgument;
-		FitWindowTo(*newSize);
-		view->onSize(newSize);
-		return kResultTrue;
+		if (!m_window || !m_editor) return;
+		RECT rect{};
+		GetWindowRect(static_cast<HWND>(m_editor->getWindowHandle()), &rect);
+		const int width = rect.right - rect.left, height = rect.bottom - rect.top;
+		if (width <= 0 || height <= 0) return;
+		SetWindowPos(m_window, nullptr, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+		if (m_onEditorResized) m_onEditorResized(width, height);
 	}
 
 	std::wstring PluginHost::StatePath() const
 	{
-		PWSTR appData = nullptr;
-		if (FAILED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, KF_FLAG_CREATE, nullptr, &appData))) return {};
-		std::wstring dir = std::wstring(appData) + L"\\RocksmithAudioBridge\\VstHost";
-		CoTaskMemFree(appData);
-		SHCreateDirectoryExW(nullptr, dir.c_str(), nullptr);
-		return dir + L"\\" + Wide(m_classId) + L".state";
+		const std::wstring folder = StateFolder();
+		if (folder.empty() || m_identifier.empty()) return {};
+		std::wstring name = Wide(juce::String(m_identifier));
+		for (wchar_t& c : name) if (c < 32 || wcschr(L"<>:\"/\\|?*", c)) c = L'_';
+		return folder + L"\\" + name + L".state";
 	}
 
-	bool PluginHost::GetStateBlobs(std::vector<char>& component, std::vector<char>& controller)
+	bool PluginHost::GetState(std::vector<char>& state)
 	{
-		component.clear();
-		controller.clear();
-		if (!m_component) return false;
-		IPtr<MemoryStream> componentState = owned(new MemoryStream());
-		IPtr<MemoryStream> controllerState = owned(new MemoryStream());
-		if (m_component->getState(componentState) != kResultOk) { Log("state: %s would not save its settings", m_name.c_str()); return false; }
-		if (m_controller) m_controller->getState(controllerState);
-		for (auto [stream, out] : { std::pair<MemoryStream*, std::vector<char>*>{ componentState.get(), &component }, { controllerState.get(), &controller } })
-		{
-			int64 used = 0;
-			stream->tell(&used);
-			out->assign(stream->getData(), stream->getData() + used);
-		}
+		state.clear();
+		if (!m_plugin) return false;
+		juce::MemoryBlock block;
+		m_plugin->getStateInformation(block);
+		if (block.getSize() == 0) { Log("state: %s gave no settings", m_name.c_str()); return false; }
+		const char* data = static_cast<const char*>(block.getData());
+		state.assign(data, data + block.getSize());
 		return true;
 	}
 
-	bool PluginHost::SetStateBlobs(std::vector<char> component, std::vector<char> controller)
+	bool PluginHost::SetState(const std::vector<char>& state)
 	{
-		if (!m_component || component.empty()) return false;
-		IPtr<MemoryStream> componentState = owned(new MemoryStream(component.data(), static_cast<TSize>(component.size())));
-		if (m_component->setState(componentState) != kResultOk) { Log("state: %s refused its saved settings", m_name.c_str()); return false; }
-		if (m_controller)
-		{
-			componentState->seek(0, IBStream::kIBSeekSet, nullptr);
-			m_controller->setComponentState(componentState);
-			if (!controller.empty())
-			{
-				IPtr<MemoryStream> controllerState = owned(new MemoryStream(controller.data(), static_cast<TSize>(controller.size())));
-				m_controller->setState(controllerState);
-			}
-		}
+		if (!m_plugin || state.empty()) return false;
+		m_quietUntil = GetTickCount64() + kSettleMs;
+		m_plugin->setStateInformation(state.data(), static_cast<int>(state.size()));
 		return true;
 	}
 
-	// File: magic, then the component state and the controller state, each as a uint32 length plus bytes.
+	std::vector<char> PluginHost::StateFromVst3Parts(const std::vector<char>& component, const std::vector<char>& controller)
+	{
+		// The same XML JUCE's VST3 instance writes in getStateInformation (juce_VST3PluginFormatImpl.h).
+		juce::XmlElement xml("VST3PluginState");
+		if (!component.empty())
+			xml.createNewChildElement("IComponent")->addTextElement(juce::MemoryBlock(component.data(), component.size()).toBase64Encoding());
+		if (!controller.empty())
+			xml.createNewChildElement("IEditController")->addTextElement(juce::MemoryBlock(controller.data(), controller.size()).toBase64Encoding());
+		juce::MemoryBlock block;
+		juce::AudioProcessor::copyXmlToBinary(xml, block);
+		const char* data = static_cast<const char*>(block.getData());
+		return { data, data + block.getSize() };
+	}
+
+	// File: magic, then the state as a uint32 length plus bytes.
 	bool PluginHost::SaveState()
 	{
-		std::vector<char> parts[2];
-		if (!GetStateBlobs(parts[0], parts[1])) return false;
-
+		std::vector<char> state;
+		if (!GetState(state)) return false;
 		const std::wstring path = StatePath();
 		const std::wstring temp = path + L".tmp";
 		FILE* file = nullptr;
 		if (path.empty() || _wfopen_s(&file, temp.c_str(), L"wb") != 0 || !file) { Log("state: cannot write %ls", temp.c_str()); return false; }
 		fwrite(kStateMagic, 1, sizeof(kStateMagic), file);
-		for (const auto& part : parts)
-		{
-			const uint32_t size = static_cast<uint32_t>(part.size());
-			fwrite(&size, sizeof(size), 1, file);
-			if (size) fwrite(part.data(), 1, size, file);
-		}
+		const uint32_t size = static_cast<uint32_t>(state.size());
+		fwrite(&size, sizeof(size), 1, file);
+		fwrite(state.data(), 1, state.size(), file);
 		const bool ok = fclose(file) == 0 && MoveFileExW(temp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING);
 		if (ok) m_dirty = false;
 		Log("state: %s %ls", ok ? "saved" : "save FAILED", path.c_str());
@@ -377,14 +321,48 @@ namespace VstHost
 		if (m_dirty) SaveState();
 	}
 
-	bool PluginHost::LoadState()
+	// Before JUCE, each VST3 plugin's settings were kept as %APPDATA%\RocksmithAudioBridge\VstHost\<class id>.state
+	// (magic "RABVST1", then the component and controller states, each a uint32 length plus bytes), the class id
+	// as 32 hex digits in byte order. JUCE does not expose a plugin's class id, but its deprecatedUid is a hash of
+	// those 16 bytes (getHashForRange in juce_VST3PluginFormatImpl.h: value * 31 + byte, bytes as signed char), so
+	// the old file is found by hashing each name. Converted once; the new file then takes over.
+	bool PluginHost::LoadLegacyState()
 	{
-		const std::wstring path = StatePath();
+		if (m_legacyUid == 0) return false;
+		const std::wstring folder = StateFolder();
+		if (folder.empty()) return false;
+		const std::wstring legacyFolder = folder.substr(0, folder.find_last_of(L'\\'));
+		WIN32_FIND_DATAW found{};
+		HANDLE search = FindFirstFileW((legacyFolder + L"\\*.state").c_str(), &found);
+		if (search == INVALID_HANDLE_VALUE) return false;
+		std::wstring match;
+		do
+		{
+			const std::wstring name = found.cFileName;
+			if (name.size() != 32 + 6 || !std::all_of(name.begin(), name.begin() + 32, iswxdigit)) continue;
+			// The name is the SDK's UID::toString in COM format (the Windows default): Data1 (4 bytes), Data2 and
+			// Data3 (2 each) printed as numbers, stored little-endian in the class id; then Data4's 8 bytes in order.
+			unsigned char bytes[16]{};
+			const unsigned long data1 = wcstoul(name.substr(0, 8).c_str(), nullptr, 16);
+			const unsigned long data2 = wcstoul(name.substr(8, 4).c_str(), nullptr, 16);
+			const unsigned long data3 = wcstoul(name.substr(12, 4).c_str(), nullptr, 16);
+			for (int i = 0; i < 4; ++i) bytes[i] = static_cast<unsigned char>(data1 >> (8 * i));
+			for (int i = 0; i < 2; ++i) bytes[4 + i] = static_cast<unsigned char>(data2 >> (8 * i));
+			for (int i = 0; i < 2; ++i) bytes[6 + i] = static_cast<unsigned char>(data3 >> (8 * i));
+			for (int i = 0; i < 8; ++i) bytes[8 + i] = static_cast<unsigned char>(wcstoul(name.substr(16 + i * 2, 2).c_str(), nullptr, 16));
+			uint32_t hash = 0;
+			for (unsigned char byte : bytes) hash = hash * 31 + static_cast<uint32_t>(static_cast<int>(static_cast<signed char>(byte)));
+			if (static_cast<int>(hash) == m_legacyUid) match = legacyFolder + L"\\" + name;
+		} while (match.empty() && FindNextFileW(search, &found));
+		FindClose(search);
+		if (match.empty()) return false;
+
 		FILE* file = nullptr;
-		if (path.empty() || _wfopen_s(&file, path.c_str(), L"rb") != 0 || !file) return false;
+		if (_wfopen_s(&file, match.c_str(), L"rb") != 0 || !file) return false;
+		constexpr char kLegacyMagic[8] = { 'R', 'A', 'B', 'V', 'S', 'T', '1', 0 };
+		char magic[sizeof(kLegacyMagic)]{};
 		std::vector<char> parts[2];
-		char magic[sizeof(kStateMagic)]{};
-		bool ok = fread(magic, 1, sizeof(magic), file) == sizeof(magic) && std::memcmp(magic, kStateMagic, sizeof(magic)) == 0;
+		bool ok = fread(magic, 1, sizeof(magic), file) == sizeof(magic) && std::memcmp(magic, kLegacyMagic, sizeof(magic)) == 0;
 		for (auto& part : parts)
 		{
 			uint32_t size = 0;
@@ -394,8 +372,32 @@ namespace VstHost
 			ok = size == 0 || fread(part.data(), 1, size, file) == size;
 		}
 		fclose(file);
+		if (!ok || parts[0].empty()) return false;
+		SetState(StateFromVst3Parts(parts[0], parts[1]));
+		SaveState();
+		Log("state: converted %ls from the pre-JUCE format", match.c_str());
+		return true;
+	}
+
+	bool PluginHost::LoadState()
+	{
+		const std::wstring path = StatePath();
+		FILE* file = nullptr;
+		if (!path.empty() && GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) return LoadLegacyState();
+		if (path.empty() || _wfopen_s(&file, path.c_str(), L"rb") != 0 || !file) return false;
+		char magic[sizeof(kStateMagic)]{};
+		uint32_t size = 0;
+		std::vector<char> state;
+		bool ok = fread(magic, 1, sizeof(magic), file) == sizeof(magic) && std::memcmp(magic, kStateMagic, sizeof(magic)) == 0
+			&& fread(&size, sizeof(size), 1, file) == 1 && size > 0 && size < (256u << 20);
+		if (ok)
+		{
+			state.resize(size);
+			ok = fread(state.data(), 1, size, file) == size;
+		}
+		fclose(file);
 		if (!ok) { Log("state: %ls is damaged, starting from the plugin's defaults", path.c_str()); return false; }
-		if (!SetStateBlobs(std::move(parts[0]), std::move(parts[1]))) return false;
+		SetState(state);
 		Log("state: restored from %ls", path.c_str());
 		return true;
 	}
@@ -404,11 +406,8 @@ namespace VstHost
 	{
 		CloseEditor();
 		Suspend();
-		if (m_controller) m_controller->setComponentHandler(nullptr);
-		m_processor = nullptr;
-		m_controller = nullptr;
-		m_component = nullptr;
-		m_provider.reset();   // terminates and disconnects the plugin
-		m_module.reset();
+		if (m_plugin) m_plugin->removeListener(this);
+		m_plugin.reset();
+		m_processing = false;
 	}
 }
