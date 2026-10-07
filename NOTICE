@@ -25,6 +25,9 @@ Dear ImGui (v1.85)        MIT License, (c) Omar Cornut. DLL/Lib/ImGUI
 Roboto font               Apache License 2.0, (c) Google. Embedded in
                           DLL/Lib/ImGUI/RobotoFont.cpp.
 JSON for Modern C++       MIT License, (c) Niels Lohmann. DLL/Lib/Json/json.hpp
+VST3 SDK (hosting part)   MIT License, (c) Steinberg Media Technologies GmbH.
+                          VstHost/Lib/vst3sdk/LICENSE.txt. VST is a registered
+                          trademark of Steinberg Media Technologies GmbH.
 SimpleIni                 MIT License, (c) Brodie Thiesfield. DLL/Lib/Ini/SimpleIni.h
 RtMidi                    MIT-style licence, (c) Gary P. Scavone. DLL/Lib/Midi
 NAudio                    MIT License, (c) Mark Heath and contributors.

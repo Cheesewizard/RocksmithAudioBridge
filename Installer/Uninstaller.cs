@@ -23,7 +23,7 @@ namespace RS2014_Mod_Installer
         // RSMods\; earlier 4.0 release candidates put it in the game folder, so both places are listed.
         private static readonly string[] CoreFiles =
         {
-            "xinput1_3.dll", "xinput1_3.pdb", "RocksmithAudioBridgeAsio.dll", "RocksmithAudioBridgeAsio64.dll", ".rsmods-audio-mode.lock",
+            "xinput1_3.dll", "xinput1_3.pdb", "RocksmithAudioBridgeAsio.dll", "RocksmithAudioBridgeAsio64.dll", "RocksmithAudioBridgeVstHost.exe", ".rsmods-audio-mode.lock",
             @"RSMods\RSMods.exe", @"RSMods\RSMods.exe.config", @"RSMods\RocksmithAudioBridge.dll", @"RSMods\RSMods.pdb",
             "RSMods.exe", "RSMods.exe.config", "RocksmithAudioBridge.dll", "RSMods.pdb",
         };

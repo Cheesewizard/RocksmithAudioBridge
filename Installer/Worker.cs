@@ -52,6 +52,8 @@ namespace RS2014_Mod_Installer
                 WriteFile(Path.Combine(@rocksmithLocation, "RocksmithAudioBridgeAsio.dll"), Properties.Resources.RocksmithAudioBridge);
                 // Its 64-bit build, which lets any 64-bit ASIO host (amp sims, DAWs) join the External amp link.
                 WriteFile(Path.Combine(@rocksmithLocation, "RocksmithAudioBridgeAsio64.dll"), Properties.Resources.RocksmithAudioBridgeGuest64);
+                // The VST host: plays the guitar through VST3 plugins over that same link (External amp page).
+                WriteFile(Path.Combine(@rocksmithLocation, "RocksmithAudioBridgeVstHost.exe"), Properties.Resources.RocksmithAudioBridgeVstHost);
 
                 if (File.Exists(Path.Combine(@rocksmithLocation, "D3DX9_42.dll")) && new FileInfo(Path.Combine(@rocksmithLocation, "D3DX9_42.dll")).Length >= 300000)
                     File.Delete(Path.Combine(@rocksmithLocation, "D3DX9_42.dll"));
