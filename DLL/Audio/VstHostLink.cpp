@@ -511,19 +511,26 @@ namespace VstHostLink
 			const ULONGLONG now = GetTickCount64();
 			const DWORD crashedAt = ReadDword(L"LastCrashAt", 0);
 			if (crashedAt == 0 || now / 1000 - crashedAt > 15 || GameState::GameClosing) return;
+			// LastCrash is the plugin the host could name (the faulting module, a plugin frame on the crashing
+			// thread, or the plugin that started the thread); empty when the fault surfaced elsewhere with no plugin
+			// in sight. Say only what is known.
 			const std::string plugin = Utf8(ReadString(L"LastCrash"));
+			const std::string module = Utf8(ReadString(L"LastCrashModule"));
+			const std::string loading = Utf8(ReadString(L"LastCrashLoading"));
 			WriteDword(L"LastCrashAt", 0);   // handled
-			const std::string what = plugin.empty() || _stricmp(plugin.c_str(), "RocksmithAudioBridgeVstHost.exe") == 0
-				? "Tone designer crashed" : plugin + " crashed (a problem inside that plugin)";
+			std::string what;
+			if (!plugin.empty()) what = plugin + " crashed (a fault in that plugin's code)";
+			else if (!loading.empty()) what = "Tone designer crashed while loading " + loading + " (the fault surfaced in " + (module.empty() ? std::string("Windows") : module) + ", so the plugin cannot be named for certain)";
+			else what = "Tone designer crashed (in " + (module.empty() ? std::string("an unknown module") : module) + ")";
 			while (!g_crashRestarts.empty() && now - g_crashRestarts.front() > kCrashWindowMs) g_crashRestarts.pop_front();
 			if (g_crashRestarts.size() >= kMaxCrashRestarts) {
-				g_crashNote = what + " again, so Tone designer stays off. Remove or replace that plugin after starting it.";
-				LOG_WARNING("(VST HOST) " << plugin << " crashed the host again; not restarting" << std::endl);
+				g_crashNote = what + ", for the third time in five minutes, so Tone designer stays off. Start it again when ready; if one plugin keeps crashing, remove or replace it.";
+				LOG_WARNING("(VST HOST) " << what << "; third crash in five minutes, not restarting" << std::endl);
 				return;
 			}
 			g_crashRestarts.push_back(now);
 			g_crashNote = what + ". Tone designer restarted with your last autosave (up to 30 s of changes may be lost).";
-			LOG_WARNING("(VST HOST) " << plugin << " crashed the host; restarting it" << std::endl);
+			LOG_WARNING("(VST HOST) " << what << "; restarting it" << std::endl);
 			g_commands.clear();
 			Launch({});
 		}

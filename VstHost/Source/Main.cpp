@@ -67,6 +67,7 @@ namespace
 	std::wstring g_toneName;          // the tone last loaded or saved
 	bool g_toneModified = false;
 	float g_inputMeter = 0.0f, g_outputMeter = 0.0f;
+	wchar_t g_loadingNow[128] = {};   // the plugin loading now, for a crash report (plain buffer: read in OnCrash)
 
 	bool ReadDword(const wchar_t* name, DWORD& value)
 	{
@@ -574,6 +575,7 @@ namespace
 	{
 		if (!g_control) return;
 		InterlockedIncrement(&g_control->hostBeat);
+		g_loadingNow[0] = 0;
 		CopyText(g_control->loadingText, sizeof(g_control->loadingText), {});
 		InterlockedExchange(&g_control->loading, 0);
 	}
@@ -584,6 +586,7 @@ namespace
 	{
 		std::wstring name = path.substr(path.find_last_of(L"\\/") + 1);
 		if (name.size() > 5 && _wcsicmp(name.c_str() + name.size() - 5, L".vst3") == 0) name.resize(name.size() - 5);
+		wcsncpy_s(g_loadingNow, name.c_str(), _TRUNCATE);
 		Log("load: %ls (%d of %d)", name.c_str(), step, total);
 		if (!g_control) return;
 		CopyText(g_control->loadingText, sizeof(g_control->loadingText), Utf8(name));
@@ -911,6 +914,48 @@ namespace
 	// module crashed and on which thread, keep one minidump (vst-host-crash.dmp in
 	// %APPDATA%\RocksmithAudioBridge\VstHost, replaced each time) for diagnosis, and leave the overlay a note (LastCrash, LastCrashAt
 	// in HKCU\Software\RSMods\VstHost) so it restarts the host and tells the player which plugin it was.
+	// The plugin a module belongs to: anything loaded from inside a .vst3 bundle (the plugin itself or a library
+	// it ships, Helix's HelixCoreWin_x64.dll for one), named by the bundle. Empty for Windows, runtime and our own.
+	std::wstring PluginOf(HMODULE module)
+	{
+		wchar_t path[MAX_PATH]{};
+		if (!module || !GetModuleFileNameW(module, path, MAX_PATH)) return {};
+		std::wstring lower = path;
+		for (wchar_t& c : lower) c = towlower(c);
+		const size_t bundle = lower.find(L".vst3");
+		if (bundle == std::wstring::npos) return {};
+		const std::wstring upToBundle(path, path + bundle);
+		return upToBundle.substr(upToBundle.find_last_of(L"\\/") + 1);
+	}
+
+	HMODULE ModuleAt(const void* address)
+	{
+		HMODULE module = nullptr;
+		GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, static_cast<LPCWSTR>(address), &module);
+		return module;
+	}
+
+	// Which plugin a crash belongs to, when the fault itself is in Windows or the C runtime (a plugin's bad pointer
+	// often surfaces in ntdll): the first plugin frame on the crashing thread's stack, else the plugin that started
+	// the thread. Empty when neither names one; the report then says which plugin was loading, if any.
+	std::wstring CrashingPlugin(const void* faultAddress)
+	{
+		std::wstring plugin = PluginOf(ModuleAt(faultAddress));
+		if (!plugin.empty()) return plugin;
+		void* frames[62]{};
+		const USHORT count = RtlCaptureStackBackTrace(0, 62, frames, nullptr);
+		for (USHORT i = 0; i < count && plugin.empty(); ++i) plugin = PluginOf(ModuleAt(frames[i]));
+		if (!plugin.empty()) return plugin;
+		using QueryThread = LONG(NTAPI*)(HANDLE, ULONG, PVOID, ULONG, PULONG);
+		if (auto query = reinterpret_cast<QueryThread>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryInformationThread")))
+		{
+			void* start = nullptr;
+			if (query(GetCurrentThread(), 9 /* ThreadQuerySetWin32StartAddress */, &start, sizeof(start), nullptr) == 0)
+				plugin = PluginOf(ModuleAt(start));
+		}
+		return plugin;
+	}
+
 	LONG WINAPI OnCrash(EXCEPTION_POINTERS* info)
 	{
 		static LONG reported = 0;
@@ -927,7 +972,12 @@ namespace
 		Log("host: CRASH 0x%08X in %ls+0x%llX on the %s thread", static_cast<unsigned>(info->ExceptionRecord->ExceptionCode), moduleName, offset,
 			windowThread ? "window (plugin editor)" : "audio or plugin worker");
 
-		WriteString(L"LastCrash", moduleName);
+		const std::wstring plugin = CrashingPlugin(address);
+		Log("host: crash attributed to %ls%ls%ls", plugin.empty() ? L"no plugin" : plugin.c_str(),
+			g_loadingNow[0] ? L", while loading " : L"", g_loadingNow);
+		WriteString(L"LastCrash", plugin);              // the plugin, or empty when none could be named
+		WriteString(L"LastCrashModule", moduleName);    // where the fault surfaced
+		WriteString(L"LastCrashLoading", g_loadingNow);
 		WriteDword(L"LastCrashAt", static_cast<DWORD>(GetTickCount64() / 1000));   // seconds since boot, same clock in the game
 
 		const std::wstring folder = DataDirectory();
