@@ -3174,13 +3174,11 @@ HRESULT APIENTRY D3DHooks::Hook_SetStreamSource(LPDIRECT3DDEVICE9 pDevice, UINT 
 /// <param name="pPresentationParameters"> - Pointer to a D3DPRESENT_PARAMETERS structure, describing the new presentation parameters. This value cannot be NULL.</param>
 /// <returns>Possible return values include: D3D_OK, D3DERR_DEVICELOST, D3DERR_DEVICEREMOVED, D3DERR_DRIVERINTERNALERROR, or D3DERR_OUTOFVIDEOMEMORY.</returns>
 HRESULT APIENTRY D3DHooks::Hook_Reset(IDirect3DDevice9* pDevice, D3DPRESENT_PARAMETERS* pPresentationParameters) {
-	// Lost Device
+	// Lost Device - release device-dependent resources before Reset.
 	NoteByNoteHighwayRenderer::ClearSelectedTarget();
 	ImGui_ImplDX9_InvalidateDeviceObjects();
+	GameOverlay::OnLostDevice();
 
-	if (GameOverlay::DX9FontEncapsulation)
-		GameOverlay::DX9FontEncapsulation->OnLostDevice();
-	GameOverlay::fontCache.OnLostDevice();
 	// Reset Device. Call original Reset.
 	HRESULT ResetReturn = oReset(pDevice, pPresentationParameters);
 
@@ -3213,11 +3211,13 @@ HRESULT APIENTRY D3DHooks::Hook_Reset(IDirect3DDevice9* pDevice, D3DPRESENT_PARA
 		}
 	}
 
-	ImGui_ImplDX9_CreateDeviceObjects();
-
-	if (GameOverlay::DX9FontEncapsulation)
-		GameOverlay::DX9FontEncapsulation->OnResetDevice();
-	GameOverlay::fontCache.OnResetDevice();
+	// Only recreate device objects once the device is actually back. If Reset failed
+	// (e.g. still D3DERR_DEVICELOST mid-Alt+Tab out of exclusive fullscreen), the game
+	// retries Reset next frame; recreating against a lost device leaves a broken frame.
+	if (SUCCEEDED(ResetReturn)) {
+		ImGui_ImplDX9_CreateDeviceObjects();
+		GameOverlay::OnResetDevice();
+	}
 
 	return ResetReturn;
 }
@@ -3644,11 +3644,11 @@ HRESULT APIENTRY D3DHooks::Hook_DIP(IDirect3DDevice9* pDevice, D3DPRIMITIVETYPE 
 	//if (Settings::ReturnSettingValue("DiscoModeEnabled") == "on") {
 	//	 //Need Lovro's Help With This :(
 	//	if (DiscoModeInitialSetting.find(pDevice) == DiscoModeInitialSetting.end()) { // We haven't saved this pDevice's initial values yet
-	//		DWORD initialAlphaValue = (DWORD)pDevice, initialSeperateValue = (DWORD)pDevice;
+	//		DWORD initialAlphaValue = (DWORD)pDevice, initialSeparateValue = (DWORD)pDevice;
 	//		pDevice->GetRenderState(D3DRS_ALPHABLENDENABLE, (DWORD*)initialAlphaValue);
-	//		pDevice->GetRenderState(D3DRS_SEPARATEALPHABLENDENABLE, (DWORD*)initialSeperateValue);
+	//		pDevice->GetRenderState(D3DRS_SEPARATEALPHABLENDENABLE, (DWORD*)initialSeparateValue);
 	//		
-	//		DiscoModeInitialSetting.insert({ pDevice, std::make_pair(initialAlphaValue, initialSeperateValue) });
+	//		DiscoModeInitialSetting.insert({ pDevice, std::make_pair(initialAlphaValue, initialSeparateValue) });
 	//	}
 	//	else { // We've seen this pDevice value before.
 	//		if (DiscoModeEnabled) { // Key was pressed to have Disco Mode on

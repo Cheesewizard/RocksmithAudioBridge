@@ -86,11 +86,10 @@ namespace RSMods.ASIO
 
         public static void SaveChanges(string IdentifierToChange, ReadSettings.Sections iniSection, string ChangedSettingValue, bool disableOutput = false, bool disableInput0 = false, bool disableInput1 = false, bool disableInputMic = false)
         {
-            // Right before launch, we switched from the boolean names of (true / false) to (on / off) for users to be able to edit the mods without the GUI (by hand).
-            if (ChangedSettingValue == "true")
-                ChangedSettingValue = "on";
-            else if (ChangedSettingValue == "false")
-                ChangedSettingValue = "off";
+            if (ChangedSettingValue == "true" || ChangedSettingValue == "on" || ChangedSettingValue == "yes")
+                ChangedSettingValue = "1";
+            else if (ChangedSettingValue == "false" || ChangedSettingValue == "off" || ChangedSettingValue == "no")
+                ChangedSettingValue = "0";
 
             foreach (string section in newSettings.Keys)
             {

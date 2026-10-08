@@ -60,7 +60,7 @@ void VolumeControl::IncreaseVolume(int amountToIncrease, std::string mixerToIncr
 	if (volume <= (100.0f - amountToIncrease))
 		volume += amountToIncrease;
 	else
-		volume = 100.0f; // Incase the volume is within the amountToIncrease we can't throw it over 100.
+		volume = 100.0f; // In case the volume is within the amountToIncrease we can't throw it over 100.
 	
 	// Set Volume
 	Wwise::SoundEngine::SetRTPCValue(mixerToIncrease.c_str(), (float)volume, AK_INVALID_GAME_OBJECT, 0, AkCurveInterpolation_Linear);
@@ -91,7 +91,7 @@ void VolumeControl::DecreaseVolume(int amountToDecrease, std::string mixerToDecr
 	if (volume >= (0.0f + amountToDecrease))
 		volume -= amountToDecrease;
 	else
-		volume = 0.0f; // Incase the volume is within the amountToDecrease we can't throw it below 0.
+		volume = 0.0f; // In case the volume is within the amountToDecrease we can't throw it below 0.
 
 	// Set Volume
 	Wwise::SoundEngine::SetRTPCValue(mixerToDecrease.c_str(), (float)volume, AK_INVALID_GAME_OBJECT, 0, AkCurveInterpolation_Linear);

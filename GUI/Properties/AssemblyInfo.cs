@@ -10,7 +10,7 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("The bois at RSMods")]
 [assembly: AssemblyProduct("RSMods")]
-[assembly: AssemblyCopyright("Copyright © 2025")]
+[assembly: AssemblyCopyright("Copyright © 2026")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
@@ -34,5 +34,5 @@ using System.Runtime.InteropServices;
 // [assembly: AssemblyVersion("1.0.*")]
 // Deliberately the upstream RSMods version this build is based on: the window title reads
 // "<product> <ProductInfo.VERSION> (based on RSMods <this>)". The product version is ProductInfo.VERSION.
-[assembly: AssemblyVersion("1.2.8.3")]
-[assembly: AssemblyFileVersion("1.2.8.3")]
+[assembly: AssemblyVersion("1.2.8.4")]
+[assembly: AssemblyFileVersion("1.2.8.4")]

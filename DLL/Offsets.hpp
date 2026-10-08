@@ -214,6 +214,10 @@ namespace Offsets {
 	inline VersioningStruct<uintptr_t> patch_scrollSpeedGTTarget; // Greater than target
 	extern const char* patch_scrollSpeedChange;
 
+	// Calibration meter volume sample count
+	inline VersioningStruct<uintptr_t> ptr_calibrationSampleCountClamp;
+	inline VersioningStruct<uintptr_t> ptr_calibrationSampleCountClampJmpBck;
+
 	// Runtime data.
 	// Scratch for a naked hook's "store computed jmp target, then jmp through it" trampoline.
 	// Each hook that uses this pattern MUST have its OWN scratch: sharing one global lets two

@@ -23,7 +23,7 @@ namespace CrowdControl::Effects {
 	/// The current volume is read by using Wwise_Sound_Query_GetRTPCValue_Char
 	/// New volume is set using Wwise_Sound_Query_SetRTPCValue_Char, the game calls it with both AK_INVALID_GAME_OBJECT and 0x1234 as object IDs 
 	/// </summary>
-	/// <returns> EffectStatus::Retry if we aren't currently in a song or the same effect is running already, or EffectStatus::Sucess if we are in a song</returns>
+	/// <returns> EffectStatus::Retry if we aren't currently in a song or the same effect is running already, or EffectStatus::Success if we are in a song</returns>
 	EffectStatus KillMusicVolumeEffect::Start(const Request& request)
 	{
 		LOG_INFO("KillMusicVolumeEffect::Start()" << std::endl);
@@ -66,7 +66,7 @@ namespace CrowdControl::Effects {
 	}
 
 	/// <summary>
-	/// Restore the volume back to it's original values
+	/// Restore the volume back to its original values
 	/// </summary>
 	/// <returns> EffectStatus::Success</returns>
 	EffectStatus KillMusicVolumeEffect::Stop()

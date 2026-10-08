@@ -116,6 +116,7 @@
   <ItemGroup>
     <Compile Include="ASIO\GetASIODevices.cs" />
     <Compile Include="ASIO\ReadSettings.cs" />
+    <Compile Include="ASIO\RsAsioLimits.cs" />
     <Compile Include="ASIO\WriteSettings.cs" />
     <Compile Include="Data\Constants.cs" />
     <Compile Include="Data\TuningDefinition.cs" />
@@ -193,11 +194,13 @@
     <Compile Include="ProductInfo.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="ReadSettings.cs" />
+    <Compile Include="RsModsLimits.cs" />
     <Compile Include="Util\ExeUtil.cs" />
     <Compile Include="Util\FolderPicker.cs" />
     <Compile Include="Util\GenUtil.cs" />
     <Compile Include="Twitch\RSModderBot.cs" />
     <Compile Include="Util\MessageBoxManager.cs" />
+    <Compile Include="Util\SettingsSanitizer.cs" />
     <Compile Include="Util\WinMsgUtil.cs" />
     <Compile Include="Util\ZipUtils.cs" />
     <Compile Include="WriteSettings.cs" />

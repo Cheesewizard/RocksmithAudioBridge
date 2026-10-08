@@ -129,7 +129,7 @@ namespace Wwise::MemoryMgr {
 	}
 
 	/// <summary>
-	/// NOT THREAD SAFE! Query whether the Memory Manager has been sucessfully initialized.
+	/// NOT THREAD SAFE! Query whether the Memory Manager has been successfully initialized.
 	/// </summary>
 	/// <returns>True if the Memory Manager is initialized, False otherwise</returns>
 	bool IsInitialized() {

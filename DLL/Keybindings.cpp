@@ -281,6 +281,8 @@ namespace Keybindings {
 		for (const auto& [key, value] : commands) {
 
 			if (keyPressed == Settings::GetKeyBind(key)) {
+				if (!value.condition()) return;
+
 				value.action();
 
 				if (!value.logMessage.empty()) {

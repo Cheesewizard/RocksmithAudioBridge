@@ -29,7 +29,7 @@ EXTERN_C NTSTATUS NtProtectVirtualMemory(
 /// </summary>
 /// <param name="pData"> - Data in memory.</param>
 /// <param name="bMask"> - Pattern to look for.</param>
-/// <param name="szMask"> - Mask of what bytes we know (notated with an "x") and what bytes we dont (notated with a "?").</param>
+/// <param name="szMask"> - Mask of what bytes we know (notated with an "x") and what bytes we don't (notated with a "?").</param>
 /// <returns></returns>
 bool MemUtil::bCompare(const BYTE* pData, const byte* bMask, const char* szMask) {
 	for (; *szMask; ++szMask, ++pData, ++bMask) {

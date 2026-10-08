@@ -1271,7 +1271,7 @@ namespace Wwise::SoundEngine {
 	/// <param name="in_gameObjectID"> - Associated game object ID</param>
 	/// <param name="in_uValueChangeDuration"> - Duration during which the game parameter is interpolated towards in_value</param>
 	/// <param name="in_eFadeCruve"> - Curve type to be used for the game parameter interpolation</param>
-	/// <param name="in_bBypassInternalValueInterpolation"> - True if you want to bypass the internal "slew rate" or "over time filtering" specified by the sound designer. This is meant to be used when for example loading a level and you dont want the values to interpolate.</param>
+	/// <param name="in_bBypassInternalValueInterpolation"> - True if you want to bypass the internal "slew rate" or "over time filtering" specified by the sound designer. This is meant to be used when for example loading a level and you don't want the values to interpolate.</param>
 	/// <returns>Always AK_Success</returns>
 	AKRESULT SetRTPCValue(AkRtpcID in_rtpcID, AkRtpcValue in_value, AkGameObjectID in_gameObjectID, AkTimeMs in_uValueChangeDuration, AkCurveInterpolation in_eFadeCruve) {
 		tSetRTPCValue_RTPCID func = (tSetRTPCValue_RTPCID)Wwise::Exports::func_Wwise_Sound_SetRTPCValue_RTPCID.Get();

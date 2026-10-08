@@ -1351,6 +1351,21 @@ void GameOverlay::CheckCurrentFont() {
 	}
 }
 
+// ID3DXFont holds a D3DPOOL_DEFAULT glyph atlas that must be released before an
+// IDirect3DDevice9::Reset and rebuilt after, or draws through it corrupt the frame once
+// the device is back (the Alt+Tab white-screen when "show current note" had drawn a glyph).
+void GameOverlay::OnLostDevice() {
+	if (DX9FontEncapsulation)
+		DX9FontEncapsulation->OnLostDevice();
+	fontCache.OnLostDevice();
+}
+
+void GameOverlay::OnResetDevice() {
+	if (DX9FontEncapsulation)
+		DX9FontEncapsulation->OnResetDevice();
+	fontCache.OnResetDevice();
+}
+
 void GameOverlay::RenderOverlay(IDirect3DDevice9* device) {
 	// Draw text on screen
 	// NOTE: NEVER USE SET VALUES. Always do division of WindowSize width AND heigh so every resolution should have the text in around the same spot.

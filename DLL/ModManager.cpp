@@ -46,6 +46,7 @@ namespace ModManager {
 		// Modern WASAPI capture for the Real Tone Cable: replaces the game's
 		// legacy exclusive/shared input open so the cable works regardless of Rocksmith.ini.
 		Audio::CableInput::Install();
+		BugPrevention::FixCalibrationSampleCount();
 
 		if (Settings::ReturnSettingValue("FixBrokenTones") == "on") {
 			BugPrevention::PreventStuckTone();
@@ -216,6 +217,38 @@ namespace ModManager {
 	// running so the hook's detour stays installed even when Drop Pedal is off.
 	static bool inputConditionerHookActive = false;
 
+	// PatchTwoRTC overwrites 25 bytes of the connection check, so restoring it
+	// needs the 25 bytes that were actually there, captured from the live
+	// process before the first patch. The previous restore wrote 6 bytes from a
+	// 3-byte string literal, stamping 2 out-of-bounds bytes into game code.
+	static unsigned char twoRTCBypassOriginalBytes[25];
+	static bool hasCapturedTwoRTCBypassOriginal = false;
+
+	static void SetTwoRTCBypass(bool enable)
+	{
+		const bool isPatched =
+			*(char*)Offsets::ptr_twoRTCBypass.Get() == Offsets::ptr_twoRTCBypass_patch_call[0];
+		if (enable == isPatched) return;
+
+		if (enable) {
+			if (!hasCapturedTwoRTCBypassOriginal) {
+				memcpy(
+					twoRTCBypassOriginalBytes,
+					(const void*)Offsets::ptr_twoRTCBypass.Get(),
+					sizeof(twoRTCBypassOriginalBytes));
+				hasCapturedTwoRTCBypassOriginal = true;
+			}
+
+			QualityOfLife::PatchTwoRTC();
+		}
+		else if (hasCapturedTwoRTCBypassOriginal) {
+			MemUtil::PatchAdr(
+				(LPVOID)Offsets::ptr_twoRTCBypass.Get(),
+				twoRTCBypassOriginalBytes,
+				sizeof(twoRTCBypassOriginalBytes));
+		}
+	}
+
 	/// <summary>
 	/// Applies all mods and fixes that must run at startup.
 	/// </summary>
@@ -270,7 +303,7 @@ namespace ModManager {
 		LOG_INFO("RS_ASIO Bypass2RTC: " << std::boolalpha << rsAsioBypassTwoRTC << std::endl);
 
 		if (Settings::ReturnSettingValue("BypassTwoRTCMessageBox") == "on") {
-			QualityOfLife::PatchTwoRTC();
+			SetTwoRTCBypass(true);
 		}
 
 		// Patch x86 assembly for Riff Repeater speed logic to make it linear.
@@ -718,12 +751,7 @@ namespace ModManager {
 
 		if (rsAsioBypassTwoRTC) return;
 
-		// Both calls are no-ops when there is nothing to do; see QualityOfLife::PatchTwoRTC for why the old
-		// byte-sniffing toggle crashed with RS_ASIO 0.6.x.
-		if (Settings::ReturnSettingValue("BypassTwoRTCMessageBox") == "on")
-			QualityOfLife::PatchTwoRTC();
-		else
-			QualityOfLife::RestoreTwoRTC();
+		SetTwoRTCBypass(Settings::ReturnSettingValue("BypassTwoRTCMessageBox") == "on");
 	}
 
 

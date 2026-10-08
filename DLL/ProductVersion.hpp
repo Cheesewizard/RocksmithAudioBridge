@@ -6,5 +6,5 @@ namespace ProductVersion
 	// and the corner of the in-game overlay.
 	inline constexpr char VERSION[] = "4.1";
 	inline constexpr char DISPLAY_NAME[] = "Rocksmith Audio Bridge 4.1";
-	inline constexpr char UPSTREAM_VERSION[] = "1.2.8.3";
+	inline constexpr char UPSTREAM_VERSION[] = "1.2.8.4";
 }

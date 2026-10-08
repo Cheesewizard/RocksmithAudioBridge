@@ -48,7 +48,7 @@ template <typename T>
 /// <param name="address"> - Address to start the search at.</param>
 /// <param name="size"> - Size of search.</param>
 /// <param name="pattern"> - Pattern to look for.</param>
-/// <param name="mask"> - Mask of what bytes we know (notated with an "x") and what bytes we dont (notated with a "?").</param>
+/// <param name="mask"> - Mask of what bytes we know (notated with an "x") and what bytes we don't (notated with a "?").</param>
 /// <returns>Value if found or NULL if not.</returns>
 T MemUtil::FindPattern(uint32_t address, size_t size, PBYTE pattern, char* mask) {
 	for (uint32_t i = 0; i < size; i++)

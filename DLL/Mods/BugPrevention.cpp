@@ -113,7 +113,48 @@ namespace BugPrevention {
 	}
 
 	/// <summary>
-	/// Fixes crash when modifying functions in Rocksmith. 
+	/// Clamps the sample count to the buffer's real capacity before it is stored.
+	/// </summary>
+	void __declspec(naked) calibrationSampleCountClampHook() {
+		__asm {
+			mov edx, dword ptr [esp + 0x10]		// The code we are overwriting to place this hook
+			cmp edx, 100						// Capacity of the ring buffer, per player
+			jbe keepCalibrationSampleCount
+			mov edx, 100
+		keepCalibrationSampleCount:
+			mov dword ptr [ebx + 0x788], edx	// The code we are overwriting to place this hook
+
+			pushad
+
+			lea ecx, Offsets::ptr_calibrationSampleCountClampJmpBck
+			call VersioningStruct<uintptr_t>::GetValue
+			mov Offsets::runtimeVersionStructValue, eax
+
+			popad
+
+			jmp Offsets::runtimeVersionStructValue
+		}
+	}
+
+	/// <summary>
+	/// The input calibration screen sizes its volume averaging buffer to the current framerate (1.0 / delta time),
+	/// but the buffer is a fixed 100 floats per player. Above ~100 FPS the sampler writes past the end of it, and
+	/// the mean is then taken over more floats than the array holds, reading neighbouring members as if they were
+	/// samples. The mean never settles in the acceptance window, so the meter never fills and calibration cannot
+	/// be completed - which is why players on high refresh rate displays have to cap their framerate first.
+	/// Clamping that count to the real capacity fixes both the writes and the reads. Nothing at or below 100 FPS
+	/// changes; above it the averaging window just covers less time.
+	/// </summary>
+	void FixCalibrationSampleCount() {
+		MemUtil::PlaceHook(Offsets::ptr_calibrationSampleCountClamp, calibrationSampleCountClampHook, 10);
+
+		FlushInstructionCache(GetCurrentProcess(), (void*)Offsets::ptr_calibrationSampleCountClamp.Get(), 10);
+
+		LOG_INFO("(BUG PREVENTION) Fixed Calibration At High Framerates" << std::endl);
+	}
+
+	/// <summary>
+	/// Fixes crash when modifying functions in Rocksmith.
 	/// </summary>
 	void FixModifyingFunctions() {
 		uintptr_t forceSuccessLSBOffset = Offsets::ptr_ModdedPtrCrashFix.Get() + 0x3; // LSB of the MOV is what we are replacing
