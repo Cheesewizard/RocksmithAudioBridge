@@ -80,14 +80,17 @@ Tuning SongTuning::GetTuningAtTuner() {
 		return Tuning();
 	}
 
-	uintptr_t addrTuningText = MemUtil::FindDMAAddy(Offsets::baseHandle + Offsets::ptr_tuningText, Offsets::ptr_tuningTextOffsets);
+	// Read after a sleep in the pre-song tuner, which a guitar already in tune leaves in under a second, so every link
+	// is checked and the walk and the string copy are guarded against a link freed as the tuner closes.
+	uintptr_t addrTuningText = MemUtil::FindDMAAddyGuarded(Offsets::baseHandle + Offsets::ptr_tuningText, Offsets::ptr_tuningTextOffsets);
+	char tuningTextBuffer[256];
 
-	if (!addrTuningText) {
+	if (!MemUtil::TryReadString(addrTuningText, tuningTextBuffer, sizeof(tuningTextBuffer))) {
 		LOG_ERROR("Invalid Pointer: GetTuningAtTuner" << std::endl);
 		return Tuning();
 	}
 
-	auto unsanitizedTuningText = std::string((const char*)addrTuningText);
+	auto unsanitizedTuningText = std::string(tuningTextBuffer);
 
 	// Rocksmith converts all ASCII "#" to the unicode version. Since we have to use std::string (and can't use std::wstring) with nlohmann, we convert the corrupt character combination to an ASCII "#".
 	while (unsanitizedTuningText.find("\xe2\x99\xaf") != std::string::npos) { // Unicode # (sharp)
@@ -187,7 +190,8 @@ bool SongTuning::TryGetTuningNameForOffsets(const std::array<int, 6>& offsets, s
 
 /// <returns>Should we Display The Extended Range Colors?</returns>
 bool SongTuning::IsExtendedRangeSong() {
-	uintptr_t addrTimerEnabled = MemUtil::FindDMAAddy(Offsets::baseHandle + Offsets::ptr_timer, Offsets::ptr_timerBaseOffsets);
+	// Runs 1.5 seconds after the song starts, which the player can quit in the meantime, so the walk is guarded.
+	uintptr_t addrTimerEnabled = MemUtil::FindDMAAddyGuarded(Offsets::baseHandle + Offsets::ptr_timer, Offsets::ptr_timerBaseOffsets);
 	if (!addrTimerEnabled) {
 		LOG_ERROR("Invalid Pointer: IsExtendedRangeSong" << std::endl);
 		return false;
@@ -243,7 +247,8 @@ bool SongTuning::IsExtendedRangeSong() {
 
 /// <returns>Should we Display The Extended Range Colors In The Tuner?</returns>
 bool SongTuning::IsExtendedRangeTuner() {
-	uintptr_t addrTuningText = MemUtil::FindDMAAddy(Offsets::baseHandle + Offsets::ptr_tuningText, Offsets::ptr_tuningTextOffsets);
+	// Runs 1.5 seconds after the pre-song tuner opens, which can close in the meantime, so the walk is guarded.
+	uintptr_t addrTuningText = MemUtil::FindDMAAddyGuarded(Offsets::baseHandle + Offsets::ptr_tuningText, Offsets::ptr_tuningTextOffsets);
 
 	// Either null or is not in a pre-song tuner
 	if (!addrTuningText) {

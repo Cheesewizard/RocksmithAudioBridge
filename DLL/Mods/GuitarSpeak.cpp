@@ -11,14 +11,17 @@ Open source here: https://github.com/uklooney/G2RS
 /// </summary>
 /// <returns>Current Note (MIDI Number)</returns>
 byte GuitarSpeak::GetCurrentNote() {
-	uintptr_t noteAdr = MemUtil::FindDMAAddy(Offsets::baseHandle + Offsets::ptr_guitarSpeak, Offsets::ptr_guitarSpeakOffets);
+	// Polled on a timer by RunGuitarSpeak while the player moves through menus, so every link is checked and the walk
+	// and the read are guarded against a link freed during a screen change.
+	uintptr_t noteAdr = MemUtil::FindDMAAddyGuarded(Offsets::baseHandle + Offsets::ptr_guitarSpeak, Offsets::ptr_guitarSpeakOffets);
+	byte currentNote = 0;
 
-	if (!noteAdr) { //TODO: check the address 
+	if (!MemUtil::TryRead(noteAdr, currentNote)) {
 		//LOG_ERROR("(GS) Note Address can't be found!" << std::endl);
 		return (BYTE)noNote;
 	}
 
-	return *(byte*)noteAdr;
+	return currentNote;
 }
 
 /// <summary>

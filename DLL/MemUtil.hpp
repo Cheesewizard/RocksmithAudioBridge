@@ -12,6 +12,12 @@ namespace MemUtil {
 	PBYTE TrampHook(PBYTE src, PBYTE dst, unsigned int len);
 	bool IsBadReadPtr(void* pointer);
 	uintptr_t FindDMAAddy(uintptr_t ptr, const std::vector<unsigned int>& offsets, bool safe = false);
+	uintptr_t FindDMAAddyGuarded(uintptr_t ptr, const std::vector<unsigned int>& offsets, bool checkLinks = true);
+	bool TryReadString(uintptr_t address, char* buffer, size_t bufferSize);
+	template <typename T>
+	bool TryRead(uintptr_t address, T& value);
+	template <typename T>
+	bool TryWrite(uintptr_t address, T value);
 	uintptr_t ReadPtr(uintptr_t adr);
 	template <typename T>
 	bool SetStaticValue(uintptr_t staticValue, T data, unsigned int lengthOfData);
@@ -81,6 +87,40 @@ bool MemUtil::SetStaticValue(uintptr_t staticValue, T data, unsigned int lengthO
 	}
 
 	return true;
+}
+
+/// <summary>
+/// Read a value from game memory, returning false instead of crashing when the address is null or not readable.
+/// </summary>
+template <typename T>
+bool MemUtil::TryRead(uintptr_t address, T& value) {
+	if (address == 0)
+		return false;
+
+	__try {
+		value = *reinterpret_cast<const T*>(address);
+		return true;
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		return false;
+	}
+}
+
+/// <summary>
+/// Write a value to game memory, returning false instead of crashing when the address is null or not writable.
+/// </summary>
+template <typename T>
+bool MemUtil::TryWrite(uintptr_t address, T value) {
+	if (address == 0)
+		return false;
+
+	__try {
+		*reinterpret_cast<T*>(address) = value;
+		return true;
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		return false;
+	}
 }
 
 template <typename T>

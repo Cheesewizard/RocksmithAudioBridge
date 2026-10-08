@@ -242,6 +242,59 @@ uintptr_t MemUtil::FindDMAAddy(uintptr_t ptr, const std::vector<unsigned int>& o
 }
 
 /// <summary>
+/// FindDMAAddy for chains read every frame, on a timer or while the game changes screens, where a middle link can be
+/// freed under us. The walk runs inside an SEH guard, so a link freed between the check and the read returns 0 instead
+/// of crashing (GameState::IsMultiplayer crashed this way on the main menu, 2026-10-08).
+/// </summary>
+/// <param name="ptr"> - Memory Pointer</param>
+/// <param name="offsets"> - Cheat Engine Offsets</param>
+/// <param name="checkLinks"> - Check every link with IsBadReadPtr first. Each check is a VirtualQuery call, so callers
+/// that run on every draw call pass false and rely on the guard alone.</param>
+/// <returns>Memory Address, or 0 if the chain does not resolve</returns>
+uintptr_t MemUtil::FindDMAAddyGuarded(uintptr_t ptr, const std::vector<unsigned int>& offsets, bool checkLinks)
+{
+	__try {
+		return FindDMAAddy(ptr, offsets, checkLinks);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		return 0;
+	}
+}
+
+/// <summary>
+/// Copy a C string out of game memory, stopping at bufferSize - 1 characters.
+/// Returns false instead of crashing when the address is null or the string is freed while we copy it.
+/// </summary>
+/// <param name="address"> - Address of the string</param>
+/// <param name="buffer"> - Receives the string, always null terminated</param>
+/// <param name="bufferSize"> - Size of buffer in bytes</param>
+/// <returns>The string was copied</returns>
+bool MemUtil::TryReadString(uintptr_t address, char* buffer, size_t bufferSize)
+{
+	if (buffer == nullptr || bufferSize == 0)
+		return false;
+
+	buffer[0] = '\0';
+	if (address == 0)
+		return false;
+
+	__try {
+		const char* text = reinterpret_cast<const char*>(address);
+		size_t length = 0;
+		while (length + 1 < bufferSize && text[length] != '\0') {
+			buffer[length] = text[length];
+			length++;
+		}
+		buffer[length] = '\0';
+		return true;
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		buffer[0] = '\0';
+		return false;
+	}
+}
+
+/// <summary>
 /// Read Pointer
 /// </summary>
 /// <param name="adr"> - Pointer</param>

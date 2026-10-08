@@ -4,6 +4,8 @@
 namespace
 {
 	constexpr size_t MAX_SONG_EVENT_LENGTH = 50;
+	// Menu and profile names are short; anything longer is cut here instead of read to an unknown end.
+	constexpr size_t MAX_GAME_STRING_LENGTH = 256;
 	constexpr std::string_view SONG_EVENT_PREFIX = "Play_";
 	constexpr std::string_view PREVIEW_EVENT_SUFFIX = "_Preview";
 	constexpr std::string_view INVALID_EVENT_SUFFIX = "_Invalid";
@@ -60,12 +62,20 @@ bool GameState::IsInSong() {
 /// </summary>
 /// <returns>Is the user in multiplayer</returns>
 bool GameState::IsMultiplayer() {
-	const uintptr_t address = MemUtil::FindDMAAddy(
-		Offsets::baseHandle + Offsets::ptr_multiplayer,
-		Offsets::ptr_multiplayerOffsets);
-	if (address == 0 || MemUtil::IsBadReadPtr(reinterpret_cast<void*>(address))) return false;
-
-	return *reinterpret_cast<int*>(address) != 0;
+	// Called every frame by the HUD and overlay. The five-step chain is rebuilt while the game changes screens,
+	// and the unchecked walk crashed on a freed middle link (a read of 0xFFEDC2B0 from DisplayAudioDiagnostics
+	// on the main menu, 2026-10-08). Every link is checked, and a link freed between the check and the read
+	// counts as "not multiplayer" instead of crashing.
+	__try {
+		const uintptr_t address = MemUtil::FindDMAAddy(
+			Offsets::baseHandle + Offsets::ptr_multiplayer,
+			Offsets::ptr_multiplayerOffsets,
+			true);
+		return address != 0 && *reinterpret_cast<int*>(address) != 0;
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		return false;
+	}
 }
 
 /// <summary>
@@ -73,7 +83,9 @@ bool GameState::IsMultiplayer() {
 /// </summary>
 /// <returns>Profile Name</returns>
 std::string GameState::CurrentSelectedUser() {
-	uintptr_t badValue = MemUtil::FindDMAAddy(Offsets::baseHandle + Offsets::ptr_selectedProfileName, Offsets::ptr_selectedProfileNameOffsets);
+	// Polled by the auto profile loader while the profile select screen builds, so every link is checked and the walk
+	// and the string copy are guarded against a link freed under us.
+	uintptr_t badValue = MemUtil::FindDMAAddyGuarded(Offsets::baseHandle + Offsets::ptr_selectedProfileName, Offsets::ptr_selectedProfileNameOffsets);
 
 	// If the pointer is invalid just return nothing
 	if (!badValue) {
@@ -87,10 +99,14 @@ std::string GameState::CurrentSelectedUser() {
 		if (badValue >= 0x10000000)
 			break;
 
-		badValue = MemUtil::FindDMAAddy(Offsets::baseHandle + Offsets::ptr_selectedProfileName, Offsets::ptr_selectedProfileNameOffsets);
+		badValue = MemUtil::FindDMAAddyGuarded(Offsets::baseHandle + Offsets::ptr_selectedProfileName, Offsets::ptr_selectedProfileNameOffsets);
 	}
 
-	return std::string((const char*)badValue);
+	char profileName[MAX_GAME_STRING_LENGTH];
+	if (!MemUtil::TryReadString(badValue, profileName, sizeof(profileName)))
+		return (std::string)"";
+
+	return std::string(profileName);
 }
 
 /// <summary>
@@ -98,12 +114,16 @@ std::string GameState::CurrentSelectedUser() {
 /// </summary>
 /// <returns>Last played Song Key</returns>
 std::string GameState::GetSongKey() {
-	const uintptr_t previewEventAddress = MemUtil::FindDMAAddy(
+	// Polled every 100 ms by the Riff Repeater thread and by the VST host link, in menus and songs alike, so every
+	// link is checked and the event name is copied out under a guard before it is parsed. The copy holds one
+	// character more than the longest accepted event, so an overlong name is still rejected by TryReadSongKey.
+	const uintptr_t previewEventAddress = MemUtil::FindDMAAddyGuarded(
 		Offsets::baseHandle + Offsets::ptr_previewName,
 		Offsets::ptr_previewNameOffsets);
+	char previewEvent[MAX_SONG_EVENT_LENGTH + 2];
 	std::string currentSongKey;
-	const bool hasCurrentSongKey = previewEventAddress != 0
-		&& TryReadSongKey(reinterpret_cast<const char*>(previewEventAddress), currentSongKey);
+	const bool hasCurrentSongKey = MemUtil::TryReadString(previewEventAddress, previewEvent, sizeof(previewEvent))
+		&& TryReadSongKey(previewEvent, currentSongKey);
 
 	std::lock_guard<std::mutex> lock(songKeyMutex);
 	if (hasCurrentSongKey) lastSongKey = std::move(currentSongKey);
@@ -119,12 +139,13 @@ std::string GameState::GetCurrentMenu(bool GameNotLoaded) {
 	// but the second level actually is, and in there it keeps either an empty string, "TitleMenu", "MainOverlay"
 	// (before you reach the login) or some gibberish that's always the same (after that) 
 	if (GameNotLoaded) {
-		uintptr_t preMainMenuAdr = MemUtil::FindDMAAddy(Offsets::ptr_currentMenu, Offsets::ptr_preMainMenuOffsets, GameNotLoaded);
+		uintptr_t preMainMenuAdr = MemUtil::FindDMAAddyGuarded(Offsets::ptr_currentMenu, Offsets::ptr_preMainMenuOffsets);
+		char preMainMenuName[MAX_GAME_STRING_LENGTH];
 
-		if (preMainMenuAdr)
+		if (MemUtil::TryReadString(preMainMenuAdr, preMainMenuName, sizeof(preMainMenuName)))
 		{
 			// I.e. check if its neither one of the possible states
-			std::string currentMenu((char*)preMainMenuAdr);
+			std::string currentMenu(preMainMenuName);
 
 			if (lastMenu == "TitleScreen" && lastMenu != currentMenu)
 				canGetRealMenu = true;
@@ -144,15 +165,18 @@ std::string GameState::GetCurrentMenu(bool GameNotLoaded) {
 		return "pre_enter_prompt";
 
 
-	// If game hasn't loaded, take the safer, but possibly slower route
+	// If game hasn't loaded, take the safer, but possibly slower route.
+	// Once it has, this runs on every draw call (IsInSong from Hook_DIP), so the links are not checked one by one
+	// (each check is a VirtualQuery call); the guard turns a link freed during a screen change into a failed read.
 
-	uintptr_t currentMenuAddr = MemUtil::FindDMAAddy(Offsets::ptr_currentMenu, Offsets::ptr_currentMenuOffsets, GameNotLoaded);
-	if (!currentMenuAddr) {
+	uintptr_t currentMenuAddr = MemUtil::FindDMAAddyGuarded(Offsets::ptr_currentMenu, Offsets::ptr_currentMenuOffsets, GameNotLoaded);
+	char currentMenuName[MAX_GAME_STRING_LENGTH];
+	if (!MemUtil::TryReadString(currentMenuAddr, currentMenuName, sizeof(currentMenuName))) {
 		//LOG_ERROR("Invalid Pointer: GetCurrentMenu(" << std::boolalpha << GameNotLoaded << ") @ LVL 3" << std::endl);
 		return "where are we actually";
 	}
 
-	std::string currentMenu((char*)currentMenuAddr);
+	std::string currentMenu(currentMenuName);
 	return currentMenu;
 }
 
@@ -161,17 +185,20 @@ std::string GameState::GetCurrentMenu(bool GameNotLoaded) {
 /// </summary>
 /// <param name="enabled"> - Should we turn on colors or turn off?</param>
 void GameState::ToggleCB(bool enabled) {
-	uintptr_t addrTimer = MemUtil::FindDMAAddy(Offsets::baseHandle + Offsets::ptr_timer, Offsets::ptr_timerBaseOffsets);
-	uintptr_t cbEnabled = MemUtil::FindDMAAddy(Offsets::baseHandle + Offsets::ptr_colorBlindMode, Offsets::ptr_colorBlindModeOffsets);
+	// Called from the draw hooks on every draw call while Extended Range or custom colors are on, so the links are not
+	// checked one by one (each check is a VirtualQuery call); the guards turn a link freed as the song ends into a skip.
+	uintptr_t addrTimer = MemUtil::FindDMAAddyGuarded(Offsets::baseHandle + Offsets::ptr_timer, Offsets::ptr_timerBaseOffsets, false);
+	uintptr_t cbEnabled = MemUtil::FindDMAAddyGuarded(Offsets::baseHandle + Offsets::ptr_colorBlindMode, Offsets::ptr_colorBlindModeOffsets, false);
 
-	if (!addrTimer || !cbEnabled) {
+	byte currentValue = 0;
+	if (!addrTimer || !MemUtil::TryRead(cbEnabled, currentValue)) {
 		// LOG_ERROR("Invalid Pointers: ToggleCB(" << std::boolalpha << enabled << ")" << std::endl); // Disabled because it causes log to get huge real quick
 		return;
 	}
 
 	// JIC, no need to write the same value constantly
-	if (*(byte*)cbEnabled != (byte)enabled)
-		*(byte*)cbEnabled = enabled;
+	if (currentValue != (byte)enabled)
+		MemUtil::TryWrite<byte>(cbEnabled, enabled);
 }
 
 namespace GameState {

@@ -1203,29 +1203,36 @@ static float ReadAccuracy() {
 	const bool isLAS = GameState::Menus::IsInLearnASongModes();
 	const bool isSA = GameState::Menus::IsInScoreAttackModes();
 
-	uintptr_t addr = 0;
-	if (isLAS) {
-		addr = MemUtil::FindDMAAddy(Offsets::baseHandle + Offsets::ptr_noteData,
-			Offsets::ptr_noteDataOffsets);
+	// Read every frame by the overlay, including the frames where the song is torn down, so every link is checked and
+	// the walk and the read are guarded against a link freed under us.
+	__try {
+		uintptr_t addr = 0;
+		if (isLAS) {
+			addr = MemUtil::FindDMAAddy(Offsets::baseHandle + Offsets::ptr_noteData,
+				Offsets::ptr_noteDataOffsets, true);
+		}
+		else if (isSA) {
+			addr = MemUtil::FindDMAAddy(Offsets::baseHandle + Offsets::ptr_scoreAttackNoteData,
+				Offsets::ptr_scoreAttackNoteDataOffsets, true);
+		}
+		else {
+			return 0.0f;
+		}
+
+		if (!addr) return 0.0f;
+
+		if (isLAS) {
+			const LearnASongNoteData* data = reinterpret_cast<LearnASongNoteData*>(addr);
+
+			return data->getAccuracy();
+		}
+		else if (isSA) {
+			const ScoreAttackNoteData* data = reinterpret_cast<ScoreAttackNoteData*>(addr);
+			return data->getAccuracy();
+		}
 	}
-	else if (isSA) {
-		addr = MemUtil::FindDMAAddy(Offsets::baseHandle + Offsets::ptr_scoreAttackNoteData,
-			Offsets::ptr_scoreAttackNoteDataOffsets);
-	}
-	else {
+	__except (EXCEPTION_EXECUTE_HANDLER) {
 		return 0.0f;
-	}
-
-	if (!addr) return 0.0f;
-
-	if (isLAS) {
-		const LearnASongNoteData* data = reinterpret_cast<LearnASongNoteData*>(addr);
-
-		return data->getAccuracy();
-	}
-	else if (isSA) {
-		const ScoreAttackNoteData* data = reinterpret_cast<ScoreAttackNoteData*>(addr);
-		return data->getAccuracy();
 	}
 
 	return 0.0f;

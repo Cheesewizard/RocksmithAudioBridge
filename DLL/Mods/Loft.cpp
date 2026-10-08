@@ -6,17 +6,20 @@ namespace Loft {
 	/// Turn the background / "map" on or off.
 	/// </summary>
 	void ToggleLoft() {
-		uintptr_t farAddr = MemUtil::FindDMAAddy(Offsets::baseHandle + Offsets::ptr_loft, Offsets::ptr_loft_farOffsets);
+		// Runs as songs start and end (ToggleLoftWhen = song) and from Twitch effects at any time, so every link is
+		// checked and the walk, read and write are guarded against a link freed during the screen change.
+		uintptr_t farAddr = MemUtil::FindDMAAddyGuarded(Offsets::baseHandle + Offsets::ptr_loft, Offsets::ptr_loft_farOffsets);
+		float farValue = 0.f;
 
-		if (!farAddr) {
+		if (!MemUtil::TryRead(farAddr, farValue)) {
 			LOG_ERROR("Invalid Pointer: ToggleLoft()" << std::endl);
 			return;
 		}
 
-		if (*(float*)farAddr == 10000)
-			*(float*)farAddr = 1; // Loft Off
+		if (farValue == 10000)
+			MemUtil::TryWrite(farAddr, 1.f); // Loft Off
 		else
-			*(float*)farAddr = 10000; // Loft On
+			MemUtil::TryWrite(farAddr, 10000.f); // Loft On
 	}
 
 	/// <summary>
@@ -24,11 +27,14 @@ namespace Loft {
 	/// </summary>
 	/// <param name="enable"> - Should we turn it on, or off?</param>
 	void ToggleDrunkMode(bool enable) {
-		uintptr_t noLoft = MemUtil::FindDMAAddy(Offsets::baseHandle + Offsets::ptr_loft, Offsets::ptr_loft_farOffsets);
+		// Twitch and Crowd Control turn this on and off at any time, including as a song ends. The chain used to be
+		// read without a null check; now an unresolved chain leaves the loft alone.
+		uintptr_t noLoft = MemUtil::FindDMAAddyGuarded(Offsets::baseHandle + Offsets::ptr_loft, Offsets::ptr_loft_farOffsets);
+		float farValue = 0.f;
 
 		if (enable) {
 			// Turn on loft so the effects of the mod are actually shown.
-			if (*(float*)noLoft == 1) {
+			if (MemUtil::TryRead(noLoft, farValue) && farValue == 1) {
 				D3DHooks::ToggleOffLoftWhenDoneWithMod = true;
 				ToggleLoft();
 			}

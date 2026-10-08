@@ -3812,13 +3812,14 @@ HRESULT APIENTRY D3DHooks::Hook_DIP(IDirect3DDevice9* pDevice, D3DPRIMITIVETYPE 
 	if (Settings::IsTwitchSettingEnabled("FYourFC")) {
 		uintptr_t currentNoteStreak = 0;
 
+		// Runs on every draw call while the effect is on, so the links are not checked one by one (each check is a
+		// VirtualQuery call); the guards turn a link freed as the song ends into a skipped write.
 		if (GameState::Menus::IsInLearnASongModes())
-			currentNoteStreak = MemUtil::FindDMAAddy(Offsets::baseHandle + Offsets::ptr_currentNoteStreak, Offsets::ptr_currentNoteStreakLASOffsets);
+			currentNoteStreak = MemUtil::FindDMAAddyGuarded(Offsets::baseHandle + Offsets::ptr_currentNoteStreak, Offsets::ptr_currentNoteStreakLASOffsets, false);
 		else if (GameState::Menus::IsInScoreAttackModes())
-			currentNoteStreak = MemUtil::FindDMAAddy(Offsets::baseHandle + Offsets::ptr_currentNoteStreak, Offsets::ptr_currentNoteStreakSAOffsets);
+			currentNoteStreak = MemUtil::FindDMAAddyGuarded(Offsets::baseHandle + Offsets::ptr_currentNoteStreak, Offsets::ptr_currentNoteStreakSAOffsets, false);
 
-		if (currentNoteStreak != 0)
-			*(BYTE*)currentNoteStreak = 0;
+		MemUtil::TryWrite<BYTE>(currentNoteStreak, 0);
 	}
 
 	// Twitch wants to see the user play in Drunk Mode.

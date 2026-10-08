@@ -31,15 +31,16 @@ namespace CrowdControl::Effects { // Kills user's current note streak
 
 		uintptr_t currentNoteStreak = 0;
 
+		// Crowd Control requests arrive at any time, including as the song ends, so every link is checked and the
+		// walk and the write are guarded against a link freed under us.
 		if (GameState::Menus::IsInLearnASongModes()) {
-			currentNoteStreak = MemUtil::FindDMAAddy(Offsets::baseHandle + Offsets::ptr_currentNoteStreak, Offsets::ptr_currentNoteStreakLASOffsets);
+			currentNoteStreak = MemUtil::FindDMAAddyGuarded(Offsets::baseHandle + Offsets::ptr_currentNoteStreak, Offsets::ptr_currentNoteStreakLASOffsets);
 		}
 		else if (GameState::Menus::IsInScoreAttackModes()) {
-			currentNoteStreak = MemUtil::FindDMAAddy(Offsets::baseHandle + Offsets::ptr_currentNoteStreak, Offsets::ptr_currentNoteStreakSAOffsets);
+			currentNoteStreak = MemUtil::FindDMAAddyGuarded(Offsets::baseHandle + Offsets::ptr_currentNoteStreak, Offsets::ptr_currentNoteStreakSAOffsets);
 		}
 
-		if (currentNoteStreak != 0)
-			*(int32_t*)currentNoteStreak = 0;
+		MemUtil::TryWrite<int32_t>(currentNoteStreak, 0);
 
 		return EffectStatus::Success;
 	}
