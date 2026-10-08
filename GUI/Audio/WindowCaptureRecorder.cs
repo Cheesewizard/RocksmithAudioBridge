@@ -63,7 +63,7 @@ namespace RSMods.Audio
 				throw new InvalidOperationException("Rocksmith has no capture window.");
 			Directory.CreateDirectory(directory);
 			videoPath = Path.Combine(directory, "Rocksmith-video-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N") + ".mp4");
-			Check(RsCaptureStart(window, videoPath, BITS_PER_SECOND, FRAMES_PER_SECOND), "Video capture could not start");
+			Check(RsCaptureStartQuality(window, videoPath, BITS_PER_SECOND, FRAMES_PER_SECOND, ReadVideoQuality()), "Video capture could not start");
 			capturing = true;
 		}
 
@@ -148,7 +148,29 @@ namespace RSMods.Audio
 		private static extern int RsCaptureSupported();
 
 		[DllImport("rswindowcapture.dll", CharSet = CharSet.Unicode)]
-		private static extern int RsCaptureStart(IntPtr window, string path, uint bitsPerSecond, uint framesPerSecond);
+		private static extern int RsCaptureStartQuality(IntPtr window, string path, uint bitsPerSecond, uint framesPerSecond, uint qualityPreset);
+
+		[DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+		private static extern uint GetPrivateProfileStringW(string section, string key, string defaultValue, System.Text.StringBuilder value, uint size, string file);
+
+		/// <summary>RSMods.ini [Audio Bridge] VideoQuality, set from the overlay's Record page (DLL/Audio/TakeRecorder.cpp):
+		/// 0 High (default), 1 Standard, 2 Small (1080p). Read at each take start, so a change applies to the next take.</summary>
+		private static uint ReadVideoQuality()
+		{
+			try
+			{
+				var value = new System.Text.StringBuilder(16);
+				GetPrivateProfileStringW("Audio Bridge", "VideoQuality", "High", value, (uint)value.Capacity,
+					Path.Combine(RSMods.Util.GenUtil.GetRSDirectory(), "RSMods.ini"));
+				switch (value.ToString().Trim().ToLowerInvariant())
+				{
+					case "standard": return 1;
+					case "small": return 2;
+					default: return 0;
+				}
+			}
+			catch { return 0; }
+		}
 
 		[DllImport("rswindowcapture.dll")]
 		private static extern int RsCaptureStop(out ulong startFileTime, out ulong frames);

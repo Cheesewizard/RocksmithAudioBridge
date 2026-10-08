@@ -234,6 +234,24 @@ namespace Audio::Takes
 		WritePrivateProfileStringW(L"Audio Bridge", L"CaptureMode", video ? L"Video" : L"Audio", SettingsFile().c_str());
 	}
 
+	// Read by the video helper (GUI/Audio/WindowCaptureRecorder.cs) when a take starts; the presets themselves
+	// live in GUI/Native/WindowCapture (Quality).
+	int VideoQuality()
+	{
+		wchar_t value[16]{};
+		GetPrivateProfileStringW(L"Audio Bridge", L"VideoQuality", L"High", value, 16, SettingsFile().c_str());
+		if (_wcsicmp(value, L"Standard") == 0) return 1;
+		if (_wcsicmp(value, L"Small") == 0) return 2;
+		return 0;
+	}
+
+	void SetVideoQuality(int quality)
+	{
+		static const wchar_t* const names[] = { L"High", L"Standard", L"Small" };
+		WritePrivateProfileStringW(L"Audio Bridge", L"VideoQuality", names[quality >= 0 && quality <= 2 ? quality : 0],
+			SettingsFile().c_str());
+	}
+
 	std::wstring Folder()
 	{
 		wchar_t value[MAX_PATH]{};

@@ -86,8 +86,10 @@ namespace
 		Direct3D11CaptureFramePool::FrameArrived_revoker frameArrived;
 		std::mutex writing;
 		DWORD stream = 0;
-		UINT width = 0;
+		UINT width = 0;        // captured window size (the frame pool and the BGRA copy)
 		UINT height = 0;
+		UINT outWidth = 0;     // encoded size; smaller than the window for the Small preset (GPU path only)
+		UINT outHeight = 0;
 		LONGLONG frequency = 0;
 		LONGLONG startCounter = 0;
 		UINT64 startFileTime = 0;
@@ -191,8 +193,8 @@ namespace
 		content.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
 		content.InputWidth = capture.width;
 		content.InputHeight = capture.height;
-		content.OutputWidth = capture.width;
-		content.OutputHeight = capture.height;
+		content.OutputWidth = capture.outWidth;
+		content.OutputHeight = capture.outHeight;
 		content.Usage = D3D11_VIDEO_USAGE_OPTIMAL_QUALITY;
 		result = capture.videoDevice->CreateVideoProcessorEnumerator(&content, capture.enumerator.put());
 		if (FAILED(result))
@@ -230,10 +232,11 @@ namespace
 		}
 		capture.videoContext->VideoProcessorSetStreamFrameFormat(capture.processor.get(), 0, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE);
 		capture.videoContext->VideoProcessorSetStreamAutoProcessingMode(capture.processor.get(), 0, FALSE);
-		RECT rectangle{ 0, 0, static_cast<LONG>(capture.width), static_cast<LONG>(capture.height) };
-		capture.videoContext->VideoProcessorSetStreamSourceRect(capture.processor.get(), 0, TRUE, &rectangle);
-		capture.videoContext->VideoProcessorSetStreamDestRect(capture.processor.get(), 0, TRUE, &rectangle);
-		capture.videoContext->VideoProcessorSetOutputTargetRect(capture.processor.get(), TRUE, &rectangle);
+		RECT source{ 0, 0, static_cast<LONG>(capture.width), static_cast<LONG>(capture.height) };
+		RECT target{ 0, 0, static_cast<LONG>(capture.outWidth), static_cast<LONG>(capture.outHeight) };
+		capture.videoContext->VideoProcessorSetStreamSourceRect(capture.processor.get(), 0, TRUE, &source);
+		capture.videoContext->VideoProcessorSetStreamDestRect(capture.processor.get(), 0, TRUE, &target);
+		capture.videoContext->VideoProcessorSetOutputTargetRect(capture.processor.get(), TRUE, &target);
 
 		D3D11_TEXTURE2D_DESC description{};
 		description.Width = capture.width;
@@ -283,10 +286,21 @@ namespace
 	// level 5.2 take (the encoder overshooting an uncapped target) stuttered in Windows Media Player,
 	// and 40 Mbps still looks clean at 1440p/1600p60 and plays everywhere.
 	constexpr double MAXIMUM_AUTOMATIC_BITRATE = 40000000.0;
-	UINT32 AutomaticBitrate(UINT width, UINT height, UINT32 framesPerSecond)
+
+	// Video quality presets (RSMods.ini [Audio Bridge] VideoQuality): High is the default above; Standard halves
+	// the bits per pixel at full size; Small scales to at most 1080 lines (GPU path) at a middling bit density.
+	// At 2560x1600x60 that is about 37, 20 and 11 Mbps (about 250, 140 and 80 MB a minute).
+	enum class CaptureQuality : UINT32 { High = 0, Standard = 1, Small = 2 };
+	constexpr UINT SMALL_MAXIMUM_HEIGHT = 1080;
+
+	UINT32 AutomaticBitrate(UINT width, UINT height, UINT32 framesPerSecond, CaptureQuality quality = CaptureQuality::High)
 	{
-		double bits = static_cast<double>(width) * height * framesPerSecond * 0.15;
-		return static_cast<UINT32>(std::clamp(bits, 8000000.0, MAXIMUM_AUTOMATIC_BITRATE));
+		const double bitsPerPixel = quality == CaptureQuality::Standard ? 0.08 : quality == CaptureQuality::Small ? 0.10 : 0.15;
+		const double cap = quality == CaptureQuality::Standard ? 20000000.0 : quality == CaptureQuality::Small ? 16000000.0
+			: MAXIMUM_AUTOMATIC_BITRATE;
+		const double floor = quality == CaptureQuality::High ? 8000000.0 : 4000000.0;
+		double bits = static_cast<double>(width) * height * framesPerSecond * bitsPerPixel;
+		return static_cast<UINT32>(std::clamp(bits, floor, cap));
 	}
 
 	void TagColour(IMFMediaType* type)
@@ -352,7 +366,7 @@ namespace
 		if (highProfile)
 			output->SetUINT32(MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_High);
 		TagColour(output.get());
-		MFSetAttributeSize(output.get(), MF_MT_FRAME_SIZE, capture.width, capture.height);
+		MFSetAttributeSize(output.get(), MF_MT_FRAME_SIZE, capture.outWidth, capture.outHeight);
 		MFSetAttributeRatio(output.get(), MF_MT_FRAME_RATE, framesPerSecond, 1);
 		MFSetAttributeRatio(output.get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
 		result = capture.writer->AddStream(output.get(), &capture.stream);
@@ -374,7 +388,7 @@ namespace
 			input->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
 			input->SetUINT32(MF_MT_DEFAULT_STRIDE, capture.width * 4);
 		}
-		MFSetAttributeSize(input.get(), MF_MT_FRAME_SIZE, capture.width, capture.height);
+		MFSetAttributeSize(input.get(), MF_MT_FRAME_SIZE, capture.outWidth, capture.outHeight);
 		MFSetAttributeRatio(input.get(), MF_MT_FRAME_RATE, framesPerSecond, 1);
 		MFSetAttributeRatio(input.get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
 		// Rate control goes in with the input type, while the sink writer creates and configures the encoder.
@@ -407,8 +421,8 @@ namespace
 	HRESULT CreateSurface(Capture& capture, com_ptr<IMFSample>& sample)
 	{
 		D3D11_TEXTURE2D_DESC description{};
-		description.Width = capture.width;
-		description.Height = capture.height;
+		description.Width = capture.outWidth;
+		description.Height = capture.outHeight;
 		description.MipLevels = 1;
 		description.ArraySize = 1;
 		description.Format = DXGI_FORMAT_NV12;
@@ -591,9 +605,21 @@ extern "C"
 		catch (...) { return FALSE; }
 	}
 
-	/// bitrate 0 = pick from the window size and frame rate (AutomaticBitrate).
+	__declspec(dllexport) HRESULT RsCaptureStartQuality(HWND window, const wchar_t* path, UINT32 bitrate,
+		UINT32 framesPerSecond, UINT32 qualityPreset);
+
+	/// bitrate 0 = pick from the window size and frame rate (AutomaticBitrate). Same as the High preset.
 	__declspec(dllexport) HRESULT RsCaptureStart(HWND window, const wchar_t* path, UINT32 bitrate, UINT32 framesPerSecond)
 	{
+		return RsCaptureStartQuality(window, path, bitrate, framesPerSecond, static_cast<UINT32>(CaptureQuality::High));
+	}
+
+	/// qualityPreset: 0 High, 1 Standard, 2 Small (see CaptureQuality). bitrate 0 = pick from the encoded size and preset.
+	__declspec(dllexport) HRESULT RsCaptureStartQuality(HWND window, const wchar_t* path, UINT32 bitrate,
+		UINT32 framesPerSecond, UINT32 qualityPreset)
+	{
+		const CaptureQuality quality = qualityPreset <= static_cast<UINT32>(CaptureQuality::Small)
+			? static_cast<CaptureQuality>(qualityPreset) : CaptureQuality::High;
 		std::lock_guard<std::mutex> lock(guard);
 		if (active != nullptr)
 			return HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS);
@@ -622,21 +648,37 @@ extern "C"
 			capture->height = static_cast<UINT>(size.Height) & ~1u;
 			if (capture->width == 0 || capture->height == 0)
 				return E_INVALIDARG;
+			capture->outWidth = capture->width;
+			capture->outHeight = capture->height;
+			if (quality == CaptureQuality::Small && capture->height > SMALL_MAXIMUM_HEIGHT)
+			{
+				capture->outHeight = SMALL_MAXIMUM_HEIGHT;
+				capture->outWidth = static_cast<UINT>(static_cast<double>(capture->width) * SMALL_MAXIMUM_HEIGHT / capture->height + 0.5) & ~1u;
+			}
 			LARGE_INTEGER frequency{};
 			QueryPerformanceFrequency(&frequency);
 			capture->frequency = frequency.QuadPart;
-			if (bitrate == 0)
-				bitrate = AutomaticBitrate(capture->width, capture->height, framesPerSecond);
-
 			// GPU path first; anything it cannot do falls back to the CPU path. High profile falls back to
-			// the encoder default only if the encoder rejects it outright.
+			// the encoder default only if the encoder rejects it outright. Only the GPU path can scale, so the
+			// CPU path records the Small preset at full size (with the Small bit density).
 			capture->gpu = SUCCEEDED(CreateConverter(*capture));
 			if (!capture->gpu)
+			{
 				ReleaseConverter(*capture);
+				capture->outWidth = capture->width;
+				capture->outHeight = capture->height;
+			}
+			const bool chosenBitrate = bitrate != 0;
+			if (!chosenBitrate)
+				bitrate = AutomaticBitrate(capture->outWidth, capture->outHeight, framesPerSecond, quality);
 			result = CreateWriter(*capture, path, bitrate, framesPerSecond, true);
 			if (FAILED(result) && capture->gpu)
 			{
 				ReleaseConverter(*capture);
+				capture->outWidth = capture->width;
+				capture->outHeight = capture->height;
+				if (!chosenBitrate)
+					bitrate = AutomaticBitrate(capture->outWidth, capture->outHeight, framesPerSecond, quality);
 				result = CreateWriter(*capture, path, bitrate, framesPerSecond, true);
 			}
 			if (FAILED(result))
