@@ -104,7 +104,8 @@ void NoteByNoteHudLabel::Initialize()
 	if (!MatchesBytes(LOC_RESOLVER, RESOLVER_PROLOGUE, sizeof(RESOLVER_PROLOGUE)))
 	{
 		LOG_ERROR("(NBN HUD LABEL) The localized-string resolver does not match the expected"
-			<< " game build; the MISSED row keeps its label." << std::endl);
+			<< " game build; the MISSED row keeps its label. Found "
+			<< MemUtil::DescribeCodeBytes(LOC_RESOLVER, sizeof(RESOLVER_PROLOGUE)) << "." << std::endl);
 		return;
 	}
 

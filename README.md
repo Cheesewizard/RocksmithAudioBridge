@@ -61,6 +61,11 @@ Requirements: the Steam version of Rocksmith 2014 Remastered on Windows, and
 the MS Visual C++ 2015-2019 redistributable. Works with a Real Tone Cable or an
 ASIO interface through [RS_ASIO](https://github.com/mdias/rs_asio).
 
+**ASIO users need RS_ASIO 0.6.1 or newer**; the
+[latest release](https://github.com/mdias/rs_asio/releases/latest) is
+recommended. Your version is on the first line of `RS_ASIO-log.txt`. To update,
+replace `RS_ASIO.dll` and `avrt.dll` and keep your `RS_ASIO.ini`.
+
 ### After installing
 
 With Rocksmith closed, open RSMods (`RSMods\RSMods.exe` in your Rocksmith
@@ -188,7 +193,10 @@ The recording is exactly what you hear: the song, your guitar and, with
 [External amp](#external-amp), your amp sim's tone. It works the same whichever
 playback device the sound goes to. The dry take is your clean guitar, ready to
 re-amp later. Each game launch saves into its own dated folder under
-`Videos\Rocksmith Audio Bridge`.
+`Recordings` in your Rocksmith folder. Pick another folder on the Rocksmith Audio
+Bridge page in RSMods. For video, the overlay's Record page sets the quality:
+**High** (sharpest), **Standard** (about half the size) or **Small** (1080p, for
+sharing).
 
 Press `F6`, or the record button on the overlay's Record page. A red REC
 indicator shows while recording.
@@ -248,7 +256,7 @@ the RSMods tracker. A bug in an inherited RSMods feature that also happens on
 plain RSMods belongs [upstream](https://github.com/Lovrom8/RSMods/issues).
 
 Attach the logs from `%LOCALAPPDATA%\Rocksmith Audio Bridge\Logs` and `RSMods_debug.txt` from
-the Rocksmith folder. The debug log is locked while the game runs, so quit
+the Rocksmith folder. With an ASIO interface, also attach `RS_ASIO-log.txt` and `RS_ASIO.ini`. The debug log is locked while the game runs, so quit
 first.
 
 ## Credits

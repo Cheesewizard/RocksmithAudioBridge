@@ -322,8 +322,11 @@ namespace RSMods
 		// RecordingDirectory, read by DLL/Audio/TakeRecorder.cpp. Picked here because a folder dialog cannot show
 		// over fullscreen Rocksmith. It can be changed while the game runs; the next take uses it.
 
-		private static string DefaultRecordingFolder =>
-			Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "Rocksmith Audio Bridge");
+		// Recordings in the Rocksmith folder, next to the game (DLL/Audio/TakeRecorder.cpp uses the same default).
+		// The settings app lives in <game>\RSMods, so its parent is the game folder when RSFolder isn't known yet.
+		internal static string DefaultRecordingFolder =>
+			Path.Combine(!string.IsNullOrEmpty(Data.Constants.RSFolder) ? Data.Constants.RSFolder
+				: Path.GetDirectoryName(Path.GetDirectoryName(Application.ExecutablePath)), "Recordings");
 
 		private static string ReadRecordingFolder()
 		{

@@ -104,6 +104,11 @@ void Offsets::Initialize() {
 
 	ptr_noteData = { {0x00F5F62C, 0x00F6062C} };
 	ptr_scoreAttackNoteData = { {0x00F5F62C, 0x00F6062C} };
+
+	// Calibration meter volume sample count. Both sit in the block that sizes the volume-averaging ring
+	// buffer to the current framerate, even though the buffer is a fixed 100 floats per player.
+	ptr_calibrationSampleCountClamp = { {0x005EA378, baseHandle + 0x001EADF1} };		// Code | d9 81 c0 00 00 00 d9 e8 de f1 (0x4D bytes after the first byte in the mask - the 10 byte load + store pair 8b 54 24 10 89 93 88 07 00 00)
+	ptr_calibrationSampleCountClampJmpBck = { {0x005EA382, baseHandle + 0x001EADFB} };	// Code | ptr_calibrationSampleCountClamp + 0xA, the first byte after the 10 stolen ones (d9 6c 24 0e)
 }
 
 namespace Offsets { // Addresses for pre-2021 patch are in the comments

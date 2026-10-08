@@ -183,6 +183,7 @@ namespace RSMods
                     { ReadSettings.UseCustomNSPTimerIdentifier, CreateDefaultOnOldINI(ReadSettings.UseCustomNSPTimerIdentifier, "off") }, // Allows the user to have a custom timer for Non-stop Play instead of the 10.9 seconds that it defaults to.
                     { ReadSettings.DisplayCurrentAccuracyIdentifier, CreateDefaultOnOldINI(ReadSettings.DisplayCurrentAccuracyIdentifier, "off") },
                     { ReadSettings.PreventMidSongPauseIdentifier, CreateDefaultOnOldINI(ReadSettings.PreventMidSongPauseIdentifier, "off") },
+                    { ReadSettings.RemoveFingerprintsIdentifier, CreateDefaultOnOldINI(ReadSettings.RemoveFingerprintsIdentifier, "off") },
                 }
             );
             saveSettingsOrDefaults.Add(

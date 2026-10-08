@@ -1006,7 +1006,10 @@ void NoteByNoteMenu::Initialize()
 		|| !MatchesBytes(RIFF_REPEATER_ADJUST_SLIDER, ADJUST_SLIDER_PROLOGUE, sizeof(ADJUST_SLIDER_PROLOGUE)))
 	{
 		LOG_ERROR("(NBN MENU) The Riff Repeater functions do not match the expected game build;"
-			<< " the NOTE BY NOTE rocker is not wired (N key and the bridge still work)." << std::endl);
+			<< " the NOTE BY NOTE rocker is not wired (N key and the bridge still work)."
+			<< " Found dispatcher=" << MemUtil::DescribeCodeBytes(RIFF_REPEATER_INPUT_DISPATCHER, sizeof(DISPATCHER_PROLOGUE))
+			<< ", adjust=" << MemUtil::DescribeCodeBytes(RIFF_REPEATER_ADJUST_SLIDER, sizeof(ADJUST_SLIDER_PROLOGUE))
+			<< "." << std::endl);
 		return;
 	}
 

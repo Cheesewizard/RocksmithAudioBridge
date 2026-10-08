@@ -12,6 +12,20 @@
 #include "Audio/CableInput.hpp"
 
 namespace ModManager {
+	bool IsHookGroupSkipped(const char* group) {
+		static const std::string skipList = [] {
+			char buffer[256] = {};
+			GetPrivateProfileStringA("Debug", "SkipHooks", "", buffer, sizeof(buffer), ".\\RSMods.ini");
+			std::string text = buffer;
+			for (char& c : text) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+			return "," + text + ",";
+		}();
+		if (skipList == ",,") return false;
+		const bool skipped = skipList.find(std::string(",") + group + ",") != std::string::npos;
+		if (skipped) LOG_WARNING("(DEBUG) SkipHooks: not installing the '" << group << "' hook group." << std::endl);
+		return skipped;
+	}
+
 	void InitializeConfiguration() {
 		if (!(std::ifstream("RSMods.ini"))) {
 			std::ofstream RSModsFileOutput("RSMods.ini");
@@ -32,6 +46,7 @@ namespace ModManager {
 		// Modern WASAPI capture for the Real Tone Cable: replaces the game's
 		// legacy exclusive/shared input open so the cable works regardless of Rocksmith.ini.
 		Audio::CableInput::Install();
+		BugPrevention::FixCalibrationSampleCount();
 
 		if (Settings::ReturnSettingValue("FixBrokenTones") == "on") {
 			BugPrevention::PreventStuckTone();
@@ -39,6 +54,66 @@ namespace ModManager {
 
 		if (Settings::ReturnSettingValue("FixOculusCrash") == "on") {
 			BugPrevention::PreventOculusCrash();
+		}
+	}
+
+	/// <summary>
+	/// Logs the RS_ASIO version, so a report from someone on an old RS_ASIO shows it. RS_ASIO.dll carries no
+	/// version resource; RS_ASIO writes "Wrapper DLL loaded (vX.Y.Z)" as the first line of RS_ASIO-log.txt when it
+	/// loads. Cable mode renames RS_ASIO.dll, leaving a log from an earlier launch behind, so the module must be
+	/// loaded and the log written since this process started before the version counts.
+	/// </summary>
+	void LogRsAsioVersion() {
+		if (GetModuleHandleA("RS_ASIO.dll") == NULL) {
+			LOG_INFO("RS_ASIO: not loaded" << std::endl);
+			return;
+		}
+
+		std::string version;
+		bool patchingFailed = false;
+		std::ifstream rsAsioLog("RS_ASIO-log.txt");
+		std::string line;
+		if (rsAsioLog && std::getline(rsAsioLog, line)) {
+			const size_t start = line.find("(v");
+			const size_t end = start == std::string::npos ? std::string::npos : line.find(')', start);
+			if (end != std::string::npos) version = line.substr(start + 1, end - start - 1);
+			// RS_ASIO reports a failed patch within its first few lines, before any audio is set up.
+			for (int lineNumber = 0; lineNumber < 50 && std::getline(rsAsioLog, line); ++lineNumber) {
+				if (line.find("No valid locations for patching were found") != std::string::npos) {
+					patchingFailed = true;
+					break;
+				}
+			}
+		}
+
+		FILETIME created{}, exited{}, kernel{}, user{};
+		WIN32_FILE_ATTRIBUTE_DATA logInfo{};
+		const bool logIsCurrent = GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)
+			&& GetFileAttributesExA("RS_ASIO-log.txt", GetFileExInfoStandard, &logInfo)
+			&& CompareFileTime(&logInfo.ftLastWriteTime, &created) >= 0;
+
+		if (version.empty() || !logIsCurrent) {
+			LOG_INFO("RS_ASIO: loaded, version unknown (RS_ASIO-log.txt has no version from this launch)" << std::endl);
+			return;
+		}
+		LOG_INFO("RS_ASIO: " << version << std::endl);
+
+		// Below 0.6.0 RS_ASIO cannot patch the current game build (distorted sound, no guitar input, or a crash).
+		// 0.6.0 itself crashes when RSMods is loaded (fixed in 0.6.1; reproduced here). 0.6.1 to 0.7.1 remove the
+		// two-cable message by NOPing a call that our two-RTC bypass then corrupted (crash after profile select,
+		// fixed in 4.1); 0.7.2 and later patch a jump instead. 0.7.4 and 0.7.5 are tested.
+		int major = 0, minor = 0, patch = 0;
+		const int parts = sscanf_s(version.c_str(), "v%d.%d.%d", &major, &minor, &patch);
+		const bool tooOld = parts >= 2 && major == 0 && (minor < 6 || (minor == 6 && patch < 1));
+		const bool olderThanRecommended = parts >= 2 && major == 0 && (minor < 7 || (minor == 7 && patch < 2));
+		if (tooOld || patchingFailed) {
+			LOG_ERROR("RS_ASIO " << version << (patchingFailed ? " could not patch this game version" : " is too old for this game version and this mod")
+				<< ". Update to RS_ASIO 0.7.2 or newer (the latest release is recommended): https://github.com/mdias/rs_asio/releases"
+				<< " Replace RS_ASIO.dll and avrt.dll and keep RS_ASIO.ini." << std::endl);
+		}
+		else if (olderThanRecommended) {
+			LOG_WARNING("RS_ASIO " << version << " is older than the recommended 0.7.2. If audio or input misbehaves, update to the latest RS_ASIO:"
+				<< " https://github.com/mdias/rs_asio/releases" << std::endl);
 		}
 	}
 
@@ -130,9 +205,9 @@ namespace ModManager {
 		UpdateSettings();
 		OverlayToggles::ApplyIniDefaults();   // per-feature overlay .ini gates ("Overlay_<name>")
 		ERMode::Initialize();
-		GUI();
+		if (!IsHookGroupSkipped("d3d")) GUI();
 		Midi::InitMidi();
-		Enumeration::HookEnumerationService();
+		if (!IsHookGroupSkipped("enum")) Enumeration::HookEnumerationService();
 
 		CrowdControl::StartServer();
 	}
@@ -142,19 +217,52 @@ namespace ModManager {
 	// running so the hook's detour stays installed even when Drop Pedal is off.
 	static bool inputConditionerHookActive = false;
 
+	// PatchTwoRTC overwrites 25 bytes of the connection check, so restoring it
+	// needs the 25 bytes that were actually there, captured from the live
+	// process before the first patch. The previous restore wrote 6 bytes from a
+	// 3-byte string literal, stamping 2 out-of-bounds bytes into game code.
+	static unsigned char twoRTCBypassOriginalBytes[25];
+	static bool hasCapturedTwoRTCBypassOriginal = false;
+
+	static void SetTwoRTCBypass(bool enable)
+	{
+		const bool isPatched =
+			*(char*)Offsets::ptr_twoRTCBypass.Get() == Offsets::ptr_twoRTCBypass_patch_call[0];
+		if (enable == isPatched) return;
+
+		if (enable) {
+			if (!hasCapturedTwoRTCBypassOriginal) {
+				memcpy(
+					twoRTCBypassOriginalBytes,
+					(const void*)Offsets::ptr_twoRTCBypass.Get(),
+					sizeof(twoRTCBypassOriginalBytes));
+				hasCapturedTwoRTCBypassOriginal = true;
+			}
+
+			QualityOfLife::PatchTwoRTC();
+		}
+		else if (hasCapturedTwoRTCBypassOriginal) {
+			MemUtil::PatchAdr(
+				(LPVOID)Offsets::ptr_twoRTCBypass.Get(),
+				twoRTCBypassOriginalBytes,
+				sizeof(twoRTCBypassOriginalBytes));
+		}
+	}
+
 	/// <summary>
 	/// Applies all mods and fixes that must run at startup.
 	/// </summary>
 	void ApplyStartupMods()
 	{
-		if (DropPedal::IsConfiguredEnabled())
+		const bool skipAudio = IsHookGroupSkipped("audio");
+		if (!skipAudio && DropPedal::IsConfiguredEnabled())
 		{
 			Audio::SongShift::WwiseMusicHook::Install();
 		}
 
 		// Runs before the game instantiates its ASIO driver, so the detour is in place
 		// when RS_ASIO loads the same module.
-		DropPedal::InstallInputHooks();
+		if (!skipAudio) DropPedal::InstallInputHooks();
 
 		// Configure the front-of-chain input conditioner before RS_ASIO starts delivering capture buffers.
 		// Applying these values later from the post-load game loop leaves the initial ASIO stream unconditioned.
@@ -172,17 +280,17 @@ namespace ModManager {
 			<< "%, hum filter " << humFilterBaseHz << " Hz." << std::endl);
 
 		// The conditioner shares the Drop Pedal capture hook, but it must also run when Drop Pedal is off.
-		if (inputGainTenths != 0 || suppressorThresholdTenths != 0
-			|| compressorStrength != 0 || humFilterBaseHz != 0)
+		if (!skipAudio && (inputGainTenths != 0 || suppressorThresholdTenths != 0
+			|| compressorStrength != 0 || humFilterBaseHz != 0))
 		{
 			Audio::AsioHook::Install();
 			inputConditionerHookActive = true;
 		}
 
 
-		AudioDevices::SetupMicrophones();
-		ApplyBugPrevention();
-		ApplyAudioDeviceConfiguration();
+		if (!skipAudio) AudioDevices::SetupMicrophones();
+		if (!IsHookGroupSkipped("bugfix")) ApplyBugPrevention();
+		if (!skipAudio) ApplyAudioDeviceConfiguration();
 
 		#ifdef _WWISE_LOGS
 				Wwise::Logging::Init();
@@ -191,10 +299,11 @@ namespace ModManager {
 		// Look to see if RS_ASIO applied the 2 RTC input bypass.
 		// If they did, then we disregard the results from our version of the mod.
 		bool rsAsioBypassTwoRTC = false;
+		LogRsAsioVersion();
 		LOG_INFO("RS_ASIO Bypass2RTC: " << std::boolalpha << rsAsioBypassTwoRTC << std::endl);
 
 		if (Settings::ReturnSettingValue("BypassTwoRTCMessageBox") == "on") {
-			QualityOfLife::PatchTwoRTC();
+			SetTwoRTCBypass(true);
 		}
 
 		// Patch x86 assembly for Riff Repeater speed logic to make it linear.
@@ -642,12 +751,7 @@ namespace ModManager {
 
 		if (rsAsioBypassTwoRTC) return;
 
-		if (Settings::ReturnSettingValue("BypassTwoRTCMessageBox") == "off" && *(char*)Offsets::ptr_twoRTCBypass.Get() == Offsets::ptr_twoRTCBypass_patch_call[0]) {
-			MemUtil::PatchAdr((LPVOID)Offsets::ptr_twoRTCBypass.Get(), (LPVOID)Offsets::ptr_twoRTCBypass_original, 6);
-		}
-		else if (Settings::ReturnSettingValue("BypassTwoRTCMessageBox") == "on" && *(char*)Offsets::ptr_twoRTCBypass.Get() == Offsets::ptr_twoRTCBypass_original[0]) {
-			QualityOfLife::PatchTwoRTC();
-		}
+		SetTwoRTCBypass(Settings::ReturnSettingValue("BypassTwoRTCMessageBox") == "on");
 	}
 
 

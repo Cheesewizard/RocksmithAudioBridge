@@ -1,3 +1,32 @@
+# Rocksmith Audio Bridge 4.1 release notes
+
+A bug-fix release on top of 4.0. To update, run the installer over your existing install; your `RSMods.ini` settings and key bindings are kept.
+
+## RS_ASIO
+ASIO users need [RS_ASIO](https://github.com/mdias/rs_asio/releases) 0.6.1 or newer; the latest release is recommended. Your version is on the first line of `RS_ASIO-log.txt`.
+
+## Improved
+- Video recordings are now 60 fps and sharper: the GPU converts and encodes each frame directly, and the bitrate follows the window size. Frames land on a steady clock, so the scrolling highway no longer judders. PCs where the GPU path can't be set up fall back to the previous CPU path at the same frame rate.
+- Video quality setting on the overlay's Record page: **High** (the default, about 250 MB a minute at 1440p), **Standard** (about half that) or **Small** (1080p, about 80 MB a minute, for sharing). It is remembered between launches. Bitrates are capped, so takes play smoothly in Windows Media Player. On PCs that use the CPU recording path, Small keeps the full resolution and only lowers the bitrate.
+- Recordings are now saved in a `Recordings` folder inside the Rocksmith folder by default, next to the game (4.0 used `Videos\Rocksmith Audio Bridge`). A folder you picked yourself is kept. Uninstalling never touches it.
+
+## Fixes
+- **No more crash right after the profile screen with RS_ASIO 0.6.1 to 0.7.1.** Those RS_ASIO versions and the inherited "two Real Tone Cables" message bypass patch the same game code. With the bypass off, it mistook RS_ASIO's patch for its own and wrote over it, leaving a broken instruction the game ran into at the profile screen. The bypass now only ever undoes its own patch.
+- **A rare crash on the main menu or while the game changes screens is fixed.** The top-right audio readout asked the game every frame whether multiplayer was on, through a chain of game pointers that is briefly invalid during a screen change. That read, and the other game reads that run every frame, now check every step and skip the read instead of crashing.
+- **Windows no longer logs a Rocksmith error about 40 seconds into every launch.** An inherited hook on the Steam DLC scan left the game's error-handling chain broken, so the game's own internal check tripped over it on every boot. The game kept running, but Windows wrote an error report each time; on PCs set to save full crash dumps, the freeze while writing it could stop the guitar input or the game sound for the rest of the session. Updating the song list from the overlay still works.
+- **No more total silence when RS_ASIO is loaded but its settings are not read.** If `RS_ASIO.ini` is misnamed (for example `RS_ASIO.ini.txt`), saved as UTF-16, or missing its `[Config]` line, RS_ASIO runs with everything switched off and the mod fell back to Cable mode, which cannot install over RS_ASIO and then blocked the game's own sound. The game sound is now left alone in that case, and `RSMods_debug.txt` says exactly what is wrong with `RS_ASIO.ini`.
+- The log (`RSMods_debug.txt`) now records the RS_ASIO version, or `RS_ASIO: not loaded` in Cable mode, and says so when that version is too old. When Note by Note cannot wire its Riff Repeater switch or its MISSED label, the log shows what it found in the game code, and names the program that hooked it if another mod or overlay got there first.
+
+## Known issues
+- Speaker Mode: on a heavily loaded PC, a short high-pitched tone can play while a song loads. Starting at a moderate volume is a good habit.
+- Two-player Drop Pedal works when both players use the same kind of input, both ASIO or both Real Tone Cable.
+- With auto-tuning on, the Drop Pedal / Speaker Mode shift is sometimes applied when the song loads rather than while you browse the song list.
+- Note by Note is in beta. Some visuals are still being polished: note markers during holds, bends and loop restarts, and the section colour on the Riff Repeater timeline.
+
+Report problems on [this repository](https://github.com/Cheesewizard/RocksmithAudioBridge/issues). Attach `RSMods_debug.txt` from the Rocksmith folder (logging is on when that file exists, so create an empty one if it is missing), `RS_ASIO-log.txt` and `RS_ASIO.ini` if you use ASIO, and the logs in `%LOCALAPPDATA%\Rocksmith Audio Bridge\Logs`.
+
+---
+
 # Rocksmith Audio Bridge 4.0.0 release notes
 
 RSModsPlus is now **Rocksmith Audio Bridge**. The old name was easily mistaken for Rocksmith+, and the mod has grown into a full suite: play any song without retuning, run your own amp sim, record your playing and practise note by note, all controlled from an in-game overlay.

@@ -79,7 +79,7 @@ void AudioDevices::SetupMicrophones() {
 		PropVariantInit(&microphoneName);
 		microphoneProperties->GetValue(PKEY_Device_FriendlyName, &microphoneName);
 
-		// Get the Device ID of the microphone. We use this later so we don't need to keep a pointer to the device, utilizting IMMDeviceEnumerator->GetDevice().
+		// Get the Device ID of the microphone. We use this later so we don't need to keep a pointer to the device, utilizing IMMDeviceEnumerator->GetDevice().
 		LPWSTR microphoneId = NULL;
 		selectedMicrophone->GetId(&microphoneId);
 

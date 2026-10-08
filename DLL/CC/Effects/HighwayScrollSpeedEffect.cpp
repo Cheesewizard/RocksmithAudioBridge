@@ -23,7 +23,7 @@ namespace CrowdControl::Effects {
 	/// <summary>
 	/// Change scroll speed multiplier to let the user have more, or less, time to react to the notes appearing on screen.
 	/// </summary>
-	/// <returns> EffectStatus::Retry if we aren't currently in a song or incompatible effects are running, or EffectStatus::Sucess if we are</returns>
+	/// <returns> EffectStatus::Retry if we aren't currently in a song or incompatible effects are running, or EffectStatus::Success if we are</returns>
 	EffectStatus HighwayScrollSpeedEffect::Start(const Request& request)
 	{
 		LOG_INFO("HighwayScrollSpeedEffect::Start()" << std::endl);

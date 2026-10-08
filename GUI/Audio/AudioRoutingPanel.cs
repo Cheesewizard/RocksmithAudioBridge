@@ -268,7 +268,7 @@ namespace RSMods.Audio
 			// The bridge power state is the GUI's own (RSMods.ini [Audio Bridge]); it never touches RS_ASIO.ini. The user
 			// owns that file, so opening this window must not silently rewrite the ASIO driver either way.
 			StudioTheme.EnableDoubleBuffering(this);
-			recordingDirectory.Text = ReadSetting("RecordingDirectory", Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "Rocksmith Audio Bridge"));
+			recordingDirectory.Text = ReadSetting("RecordingDirectory", MainForm.DefaultRecordingFolder);
 			// Default new setups to Video (MP4). Audio-only stays a one-click choice and is remembered.
 			captureMode.SelectedIndex = ReadSetting("CaptureMode", "Video") == "Audio" ? 0 : 1;
 			foreach (Keys key in recordingHotkeys)

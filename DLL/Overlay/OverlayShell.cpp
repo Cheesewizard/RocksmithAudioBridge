@@ -1224,8 +1224,23 @@ namespace Overlay
 			static const char* const formats[] = { "Audio", "Video" };
 			ImGui::BeginDisabled(recording);
 			if (SegmentedRow("Format", &format, formats, 2, "Audio saves WAVs. Video also records the Rocksmith window into an MP4 with the game sound."))
+			{
 				Audio::Takes::SetPreferVideo(format == 1);
 				cachedFormat = format;
+			}
+			if (format == 1)
+			{
+				static int cachedQuality = -1;
+				static ULONGLONG qualityReadAt = 0;
+				if (cachedQuality < 0 || GetTickCount64() - qualityReadAt >= 1000) { cachedQuality = Audio::Takes::VideoQuality(); qualityReadAt = GetTickCount64(); }
+				int quality = cachedQuality;
+				static const char* const qualities[] = { "High", "Standard", "Small" };
+				if (SegmentedRow("Quality", &quality, qualities, 3, "High is the sharpest (about 250 MB a minute at 1440p). Standard is about half that. Small records at 1080p, about 80 MB a minute, for sharing."))
+				{
+					Audio::Takes::SetVideoQuality(quality);
+					cachedQuality = quality;
+				}
+			}
 			ImGui::EndDisabled();
 			Caption("The full game mix and Player 1's dry guitar are always saved together as a pair.");
 			if (!take.message.empty()) {

@@ -8,7 +8,7 @@ namespace QualityOfLife {
 	void PatchTwoRTC()
 	{
 		char patch[25];
-		std::fill_n(patch, 25, 0x90);
+		std::fill_n(patch, 25, static_cast<char>(0x90));
 		MemUtil::PatchAdr(Offsets::ptr_twoRTCBypass, patch, sizeof(patch));
 	}
 

@@ -74,14 +74,17 @@ float SongTimer::SongTimer() {
 /// </summary>
 /// <returns>Time where all notes before it are grey / deactivated.</returns>
 float SongTimer::GetGreyNoteTimer() {
-	uintptr_t greyNoteTimer = MemUtil::FindDMAAddy(Offsets::baseHandle + Offsets::ptr_greyOutNoteTimer, Offsets::ptr_greyOutNoteTimerOffsets);
+	// Read every frame by the loop overlay while paused and by the research draw feed, so every link is checked and
+	// the walk and the read are guarded against a link freed as the song ends.
+	uintptr_t greyNoteTimer = MemUtil::FindDMAAddyGuarded(Offsets::baseHandle + Offsets::ptr_greyOutNoteTimer, Offsets::ptr_greyOutNoteTimerOffsets);
+	float greyNoteTime = 0.f;
 
-	if (!greyNoteTimer) {
+	if (!MemUtil::TryRead(greyNoteTimer, greyNoteTime)) {
 		LOG_ERROR("Invalid Pointer: GetGreyNoteTimer = NULL" << std::endl);
 		return NULL;
 	}
 
-	return *(float*)greyNoteTimer;
+	return greyNoteTime;
 }
 
 /// <summary>
@@ -89,14 +92,13 @@ float SongTimer::GetGreyNoteTimer() {
 /// </summary>
 /// <param name="timeInSeconds"> - Time to set the "deactivate before" at.</param>
 void SongTimer::SetGreyNoteTimer(float timeInSeconds) {
-	uintptr_t greyNoteTimer = MemUtil::FindDMAAddy(Offsets::baseHandle + Offsets::ptr_greyOutNoteTimer, Offsets::ptr_greyOutNoteTimerOffsets);
+	// Written every frame by the loop overlay while paused, so it is guarded the same way as GetGreyNoteTimer.
+	uintptr_t greyNoteTimer = MemUtil::FindDMAAddyGuarded(Offsets::baseHandle + Offsets::ptr_greyOutNoteTimer, Offsets::ptr_greyOutNoteTimerOffsets);
 
-	if (!greyNoteTimer) {
+	if (!MemUtil::TryWrite(greyNoteTimer, timeInSeconds)) {
 		LOG_ERROR("Invalid Pointer: SetGreyNoteTimer = NULL" << std::endl);
 		return;
 	}
-
-	*(float*)greyNoteTimer = timeInSeconds;
 }
 
 /// <summary>

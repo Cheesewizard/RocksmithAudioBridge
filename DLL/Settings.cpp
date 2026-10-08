@@ -276,14 +276,13 @@ void Settings::Initialize()
 		{"MutePlayer1Key", "X"},
 		{"MutePlayer2Key", "C"},
 
-		{"ForceReEnumerationEnabled", "automatic"},
+		{"ForceReEnumerationEnabled", "off"},
 
 		{"ToggleLoftEnabled", "off"},
 		{"VolumeControlEnabled", "off"},
-		{"ShowSongTimerEnabled", "on"},
-		{"ForceReEnumerationEnabled", "off"},
+		{"ShowSongTimerEnabled", "off"},
 		{"RainbowStringsEnabled", "off"},
-		{"ExtendedRangeEnabled", "on"},
+		{"ExtendedRangeEnabled", "off"},
 		{"ExtendedRangeDropTuning", "off"},
 		{"ExtendedRangeFixBassTuning", "off"},
 		{"SeparateNoteColors", "off"},
@@ -345,7 +344,7 @@ void Settings::Initialize()
 	customSettings = {
 		{"ExtendedRangeMode", -5},
 		{"CheckForNewSongsInterval", 5000},
-		{"RRSpeedInterval", 0},
+		{"RRSpeedInterval", 2},
 		{"TuningPedal", 0},
 		{"TuningOffset", 0},
 		{"VolumeControlInterval", 5},
@@ -366,8 +365,8 @@ void Settings::Initialize()
 		{"CustomStringColors", 0},
 		{"AlternativeOutputSampleRate", 48000},
 		{"LoopingLeadUp", 0},
-		{"RewindBy", 0},
-		{"RewindLeadup", 0},
+		{"RewindBy", 5000},
+		{"RewindLeadup", 2000},
 		{"CustomNSPTimeLimit", 10000},
 		{"OnScreenFontSize", 24},
 
@@ -488,7 +487,7 @@ void Settings::ReadModSettings() {
 	customSettings = {
 		{"ExtendedRangeMode", reader.GetLongValue("Mod Settings", "ExtendedRangeModeAt", -5)},
 		{"CheckForNewSongsInterval", reader.GetLongValue("Mod Settings", "CheckForNewSongsInterval", 5000)},
-		{"RRSpeedInterval", reader.GetLongValue("Mod Settings", "RRSpeedInterval", 0)},
+		{"RRSpeedInterval", reader.GetLongValue("Mod Settings", "RRSpeedInterval", 2)},
 		{"TuningPedal", reader.GetLongValue("Mod Settings", "TuningPedal", 0)},
 		{"TuningOffset", reader.GetLongValue("Mod Settings", "TuningOffset", 0)},
 		{"VolumeControlInterval", reader.GetLongValue("Mod Settings", "VolumeControlInterval", 5)},
@@ -509,8 +508,8 @@ void Settings::ReadModSettings() {
 		{"AudioBridgeLoudnessTarget", reader.GetLongValue("Mod Settings", "AudioBridgeLoudnessTarget", -200)}, // AGC target loudness in tenths of a dBFS RMS (-200 = -20.0 dBFS)
 		{"AlternativeOutputSampleRate", reader.GetLongValue("Mod Settings", "AlternativeOutputSampleRate", 48000)},
 		{"LoopingLeadUp", reader.GetLongValue("Mod Settings", "LoopingLeadUp", 0)},
-		{"RewindBy", reader.GetLongValue("Mod Settings", "RewindBy", 0)},
-		{"RewindLeadup", reader.GetLongValue("Mod Settings", "RewindLeadup", 0)},
+		{"RewindBy", reader.GetLongValue("Mod Settings", "RewindBy", 5000)},
+		{"RewindLeadup", reader.GetLongValue("Mod Settings", "RewindLeadup", 2000)},
 		{"CustomNSPTimeLimit", reader.GetLongValue("Mod Settings", "CustomNSPTimeLimit", 10000)},
 		{"OnScreenFontSize", reader.GetLongValue("Mod Settings", "OnScreenFontSize", 24)},
 
@@ -531,11 +530,10 @@ void Settings::ReadModSettings() {
 		{"GuitarSpeakAlt", reader.GetLongValue("Guitar Speak", "GuitarSpeakAltWhen", 0)},
 	};
 
-	// Mods Enabled / Disabled
-	modSettings["ToggleLoftEnabled"] = reader.GetValue("Toggle Switches", "ToggleLoft", "on");
+	modSettings["ToggleLoftEnabled"] = reader.GetValue("Toggle Switches", "ToggleLoft", "off");
 	modSettings["VolumeControlEnabled"] = reader.GetValue("Toggle Switches", "VolumeControl", "off");
 	modSettings["ShowSongTimerEnabled"] = reader.GetValue("Toggle Switches", "ShowSongTimer", "off");
-	modSettings["ForceReEnumerationEnabled"] = reader.GetValue("Toggle Switches", "ForceReEnumeration", "automatic");
+	modSettings["ForceReEnumerationEnabled"] = reader.GetValue("Toggle Switches", "ForceReEnumeration", "off");
 	modSettings["RainbowStringsEnabled"] = reader.GetValue("Toggle Switches", "RainbowStrings", "off");
 	modSettings["RainbowNotesEnabled"] = reader.GetValue("Toggle Switches", "RainbowNotes", "off");
 	modSettings["ExtendedRangeEnabled"] = reader.GetValue("Toggle Switches", "ExtendedRange", "off");
@@ -571,7 +569,7 @@ void Settings::ReadModSettings() {
 	modSettings["ShowCurrentNoteOnScreen"] = reader.GetValue("Toggle Switches", "ShowCurrentNoteOnScreen", "off");
 	modSettings["OnScreenFont"] = reader.GetValue("Toggle Switches", "OnScreenFont", "Arial");
 	modSettings["ProfileToLoad"] = reader.GetValue("Toggle Switches", "ProfileToLoad", "");
-	modSettings["CustomHighwayColors"] = reader.GetValue("Highway Colors", "CustomHighwayColors", "");
+	modSettings["CustomHighwayColors"] = reader.GetValue("Highway Colors", "CustomHighwayColors", "off");
 	modSettings["ShowSongTimerWhen"] = reader.GetValue("Toggle Switches", "ShowSongTimerWhen", "manual");
 	modSettings["ShowSelectedVolumeWhen"] = reader.GetValue("Toggle Switches", "ShowSelectedVolumeWhen", "manual");
 	modSettings["SecondaryMonitor"] = reader.GetValue("Toggle Switches", "SecondaryMonitor", "off");
@@ -846,7 +844,7 @@ std::string Settings::ReturnNotewayColor(const std::string& name) {
 /// Split input into list of strings, based on spaces
 /// </summary>
 /// <param name="input"> - Input string</param>
-/// <returns>List of strings taken from input, that were seperated by spaces.</returns>
+/// <returns>List of strings taken from input, that were separated by spaces.</returns>
 std::vector<std::string> Settings::SplitByWhitespace(const std::string& input) {
 	std::regex re("\\s+");
 	std::sregex_token_iterator first{ input.begin(), input.end(), re, -1 };

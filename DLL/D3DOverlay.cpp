@@ -1203,29 +1203,36 @@ static float ReadAccuracy() {
 	const bool isLAS = GameState::Menus::IsInLearnASongModes();
 	const bool isSA = GameState::Menus::IsInScoreAttackModes();
 
-	uintptr_t addr = 0;
-	if (isLAS) {
-		addr = MemUtil::FindDMAAddy(Offsets::baseHandle + Offsets::ptr_noteData,
-			Offsets::ptr_noteDataOffsets);
+	// Read every frame by the overlay, including the frames where the song is torn down, so every link is checked and
+	// the walk and the read are guarded against a link freed under us.
+	__try {
+		uintptr_t addr = 0;
+		if (isLAS) {
+			addr = MemUtil::FindDMAAddy(Offsets::baseHandle + Offsets::ptr_noteData,
+				Offsets::ptr_noteDataOffsets, true);
+		}
+		else if (isSA) {
+			addr = MemUtil::FindDMAAddy(Offsets::baseHandle + Offsets::ptr_scoreAttackNoteData,
+				Offsets::ptr_scoreAttackNoteDataOffsets, true);
+		}
+		else {
+			return 0.0f;
+		}
+
+		if (!addr) return 0.0f;
+
+		if (isLAS) {
+			const LearnASongNoteData* data = reinterpret_cast<LearnASongNoteData*>(addr);
+
+			return data->getAccuracy();
+		}
+		else if (isSA) {
+			const ScoreAttackNoteData* data = reinterpret_cast<ScoreAttackNoteData*>(addr);
+			return data->getAccuracy();
+		}
 	}
-	else if (isSA) {
-		addr = MemUtil::FindDMAAddy(Offsets::baseHandle + Offsets::ptr_scoreAttackNoteData,
-			Offsets::ptr_scoreAttackNoteDataOffsets);
-	}
-	else {
+	__except (EXCEPTION_EXECUTE_HANDLER) {
 		return 0.0f;
-	}
-
-	if (!addr) return 0.0f;
-
-	if (isLAS) {
-		const LearnASongNoteData* data = reinterpret_cast<LearnASongNoteData*>(addr);
-
-		return data->getAccuracy();
-	}
-	else if (isSA) {
-		const ScoreAttackNoteData* data = reinterpret_cast<ScoreAttackNoteData*>(addr);
-		return data->getAccuracy();
 	}
 
 	return 0.0f;
@@ -1342,6 +1349,21 @@ void GameOverlay::CheckCurrentFont() {
 			LOG_ERROR("Failed to create and cache new default font!" << std::endl);
 		}
 	}
+}
+
+// ID3DXFont holds a D3DPOOL_DEFAULT glyph atlas that must be released before an
+// IDirect3DDevice9::Reset and rebuilt after, or draws through it corrupt the frame once
+// the device is back (the Alt+Tab white-screen when "show current note" had drawn a glyph).
+void GameOverlay::OnLostDevice() {
+	if (DX9FontEncapsulation)
+		DX9FontEncapsulation->OnLostDevice();
+	fontCache.OnLostDevice();
+}
+
+void GameOverlay::OnResetDevice() {
+	if (DX9FontEncapsulation)
+		DX9FontEncapsulation->OnResetDevice();
+	fontCache.OnResetDevice();
 }
 
 void GameOverlay::RenderOverlay(IDirect3DDevice9* device) {

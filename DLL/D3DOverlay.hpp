@@ -54,6 +54,9 @@ namespace GameOverlay {
 	void CheckCurrentFont();
 	void RenderOverlay(IDirect3DDevice9* pDevice);
 
+	void OnLostDevice();
+	void OnResetDevice();
+
 	const inline std::vector<std::string> mixerInternalNames = { // Needs to be char* as that's what SetRTPCValue needs.
 		{"Master_Volume"}, // Master Volume
 		{"Mixer_Music"}, // Song Volume
