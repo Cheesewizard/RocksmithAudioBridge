@@ -114,7 +114,7 @@ std::string GameState::CurrentSelectedUser() {
 /// </summary>
 /// <returns>Last played Song Key</returns>
 std::string GameState::GetSongKey() {
-	// Polled every 100 ms by the Riff Repeater thread and by the VST host link, in menus and songs alike, so every
+	// Polled every 100 ms by the Riff Repeater thread, in menus and songs alike, so every
 	// link is checked and the event name is copied out under a guard before it is parsed. The copy holds one
 	// character more than the longest accepted event, so an overlong name is still rejected by TryReadSongKey.
 	const uintptr_t previewEventAddress = MemUtil::FindDMAAddyGuarded(
