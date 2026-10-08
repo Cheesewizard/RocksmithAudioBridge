@@ -1632,6 +1632,10 @@ namespace Audio::CableInput
 				routingConfiguration.outputDeviceId, true, replaceOutput, source, true);
 			if (!installed)
 			{
+				// Pa_OpenStream is already detoured. With routing still forced on, every game output open would
+				// be refused for want of the permanent output, leaving the player with no sound at all. Hand the
+				// opens back to the game instead (the usual cause is RS_ASIO loaded with an unreadable ini).
+				routingConfiguration.enabled = false;
 				SetStatus("permanent Cable installation failed: unsupported or modified game calls");
 				LOG_ERROR("(PERSISTENT INPUT) Could not verify the device-enumeration call sites. Cable capture was not installed." << std::endl);
 				return;

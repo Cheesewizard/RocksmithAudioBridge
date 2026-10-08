@@ -18,6 +18,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <type_traits>
 
@@ -298,22 +299,63 @@ namespace Audio::AsioHook
 		// Cable mode deliberately leaves RS_ASIO installed but disables its host. Only an
 		// explicitly enabled configuration may own the unmarshal path; otherwise install
 		// the native Cable hook before the game's one boot-time stream unmarshal.
-		bool IsRsAsioEnabled()
+		std::string GameDirectory()
 		{
 			char path[MAX_PATH];
 			const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
-			std::string directory;
-			if (length > 0 && length < MAX_PATH)
-			{
-				const std::string modulePath(path, length);
-				const size_t slash = modulePath.find_last_of("\\/");
-				if (slash != std::string::npos) directory = modulePath.substr(0, slash + 1);
-			}
+			if (length == 0 || length >= MAX_PATH) return "";
+			const std::string modulePath(path, length);
+			const size_t slash = modulePath.find_last_of("\\/");
+			return slash == std::string::npos ? "" : modulePath.substr(0, slash + 1);
+		}
+
+		bool IsRsAsioEnabled()
+		{
+			const std::string directory = GameDirectory();
 			if (GetFileAttributesA((directory + "RS_ASIO.dll").c_str()) == INVALID_FILE_ATTRIBUTES) return false;
 
 			CSimpleIniA reader;
 			if (reader.LoadFile((directory + "RS_ASIO.ini").c_str()) < 0) return false;
 			return reader.GetBoolValue("Config", "EnableAsio", false);
+		}
+
+		// RS_ASIO loaded while its ini does not enable ASIO means RS_ASIO is running with nothing switched on: the
+		// game sees no audio devices at all, and this mod falls back to Cable mode, which cannot install over
+		// RS_ASIO's patches either. Seen in the field as a misnamed RS_ASIO.ini.txt and as a file with no [Config]
+		// header. Say exactly which, since nothing else in either log points at the ini.
+		void ReportUnreadableRsAsioConfiguration()
+		{
+			if (GetModuleHandleA("RS_ASIO.dll") == nullptr) return;   // Cable mode renames RS_ASIO away: expected
+
+			const std::string directory = GameDirectory();
+			const std::string ini = directory + "RS_ASIO.ini";
+			std::string reason;
+			if (GetFileAttributesA(ini.c_str()) == INVALID_FILE_ATTRIBUTES)
+			{
+				reason = GetFileAttributesA((ini + ".txt").c_str()) != INVALID_FILE_ATTRIBUTES
+					? "the file is named RS_ASIO.ini.txt; rename it to RS_ASIO.ini (turn on file name extensions in Explorer to see this)"
+					: "RS_ASIO.ini is missing from " + directory;
+			}
+			else
+			{
+				unsigned char bom[2]{};
+				if (FILE* file = std::fopen(ini.c_str(), "rb"))
+				{
+					const size_t read = std::fread(bom, 1, sizeof(bom), file);
+					std::fclose(file);
+					if (read == 2 && ((bom[0] == 0xFF && bom[1] == 0xFE) || (bom[0] == 0xFE && bom[1] == 0xFF)))
+						reason = "RS_ASIO.ini is saved as UTF-16 (\"Unicode\"); save it as UTF-8 or ANSI";
+				}
+				CSimpleIniA reader;
+				if (reason.empty() && reader.LoadFile(ini.c_str()) < 0)
+					reason = "RS_ASIO.ini could not be read";
+				else if (reason.empty() && reader.GetSection("Config") == nullptr)
+					reason = "RS_ASIO.ini has no [Config] section; its first line must be [Config], above EnableWasapiOutputs, EnableWasapiInputs and EnableAsio";
+				else if (reason.empty())
+					reason = "RS_ASIO.ini [Config] does not set EnableAsio=1 (Cable mode is chosen in the Audio Bridge tab, which turns RS_ASIO off)";
+			}
+			LOG_ERROR("[AsioHook] RS_ASIO.dll is loaded but its settings do not enable ASIO: " << reason
+				<< ". The game will see no ASIO devices and Cable input cannot install over RS_ASIO." << std::endl);
 		}
 
 		bool IsRangeInsideModule(const void* address, size_t size, const MODULEINFO& moduleInfo)
@@ -1709,6 +1751,7 @@ namespace Audio::AsioHook
 
 		if (!hasRsAsio)
 		{
+			ReportUnreadableRsAsioConfiguration();
 			configuredInputs[0] = true;
 			selectedInputChannels[0] = 0;
 			hasConfiguredInput = true;
