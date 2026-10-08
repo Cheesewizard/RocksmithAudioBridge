@@ -10,6 +10,9 @@ ASIO users need [RS_ASIO](https://github.com/mdias/rs_asio/releases) 0.7.2 or ne
 
 To check your version, open `RS_ASIO-log.txt` in the Rocksmith folder: the first line reads `Wrapper DLL loaded (vX.Y.Z)`. To update, download the release from the RS_ASIO releases page, replace both `RS_ASIO.dll` and `avrt.dll`, and keep your own `RS_ASIO.ini`.
 
+## Improved
+- Video recordings are now 60 fps and sharper: the GPU converts and encodes each frame directly, and the bitrate follows the window size. Frames land on a steady clock, so the scrolling highway no longer judders. PCs where the GPU path can't be set up fall back to the previous CPU path at the same frame rate.
+
 ## Fixes
 - **No more crash right after the profile screen with RS_ASIO 0.6.1 to 0.7.1.** Those RS_ASIO versions and the inherited "two Real Tone Cables" message bypass patch the same game code. With the bypass off, it mistook RS_ASIO's patch for its own and wrote over it, leaving a broken instruction the game ran into at the profile screen. The bypass now only ever undoes its own patch.
 - **A rare crash on the main menu or while the game changes screens is fixed.** The top-right audio readout asked the game every frame whether multiplayer was on, through a chain of game pointers that is briefly invalid during a screen change. That read, and the other game reads that run every frame, now check every step and skip the read instead of crashing.
