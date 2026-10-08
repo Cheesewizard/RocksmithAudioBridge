@@ -2,8 +2,8 @@
 
 A bug-fix release on top of 4.0. To update, run the installer over your existing install; your `RSMods.ini` settings and key bindings are kept.
 
-## RS_ASIO: use 0.7.2 or newer
-ASIO users need [RS_ASIO](https://github.com/mdias/rs_asio/releases) 0.7.2 or newer; the latest release is recommended (0.7.4 and 0.7.5 are tested).
+## RS_ASIO: 0.6.1 or newer, 0.7.2 or newer recommended
+ASIO users need [RS_ASIO](https://github.com/mdias/rs_asio/releases) 0.6.1 or newer. 0.7.2 or newer is recommended, and the latest release is best (0.7.4 and 0.7.5 are tested).
 - Before 0.6.0, RS_ASIO cannot patch the current Rocksmith game patch: the sound is distorted and there is no guitar input, or the game closes.
 - 0.6.0 crashes on the title screen when used with RSMods.
 - With 0.6.1 to 0.7.1, 4.0 crashes right after the profile screen. 4.1 fixes that (see below), but 0.7.2 or newer is still recommended, and 0.6.2 has known compatibility issues.
