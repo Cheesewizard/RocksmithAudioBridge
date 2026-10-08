@@ -257,13 +257,9 @@ namespace Audio::Takes
 		wchar_t value[MAX_PATH]{};
 		GetPrivateProfileStringW(L"Audio Bridge", L"RecordingDirectory", L"", value, MAX_PATH, SettingsFile().c_str());
 		if (value[0]) return value;
-		// Same default as the settings app (UI.AudioBridgeSetup: MyVideos\Rocksmith Audio Bridge).
-		PWSTR videos = nullptr;
-		std::wstring folder;
-		if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Videos, 0, nullptr, &videos)) && videos)
-			folder = (std::filesystem::path(videos) / L"Rocksmith Audio Bridge").wstring();
-		CoTaskMemFree(videos);
-		return folder;
+		// Same default as the settings app (UI.AudioBridgeSetup.DefaultRecordingFolder): Recordings in the
+		// Rocksmith folder, next to the game. The uninstaller never removes it.
+		return (GameFolder() / L"Recordings").wstring();
 	}
 
 	// One subfolder per game launch, named by when the game started ("2026-10-06 21-14-05"), so takes group by
