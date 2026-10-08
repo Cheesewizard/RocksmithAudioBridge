@@ -61,23 +61,10 @@ Requirements: the Steam version of Rocksmith 2014 Remastered on Windows, and
 the MS Visual C++ 2015-2019 redistributable. Works with a Real Tone Cable or an
 ASIO interface through [RS_ASIO](https://github.com/mdias/rs_asio).
 
-**ASIO users need RS_ASIO 0.6.1 or newer; 0.7.2 or newer is recommended** (the
-[latest release](https://github.com/mdias/rs_asio/releases/latest) is best;
-0.7.4 and 0.7.5 are tested). Older versions cause problems with the current
-Rocksmith game patch:
-
-- Before 0.6.0: RS_ASIO cannot patch the game. The sound is distorted and there
-  is no guitar input, or the game closes.
-- 0.6.0: crashes on the title screen when used with RSMods.
-- 0.6.1 to 0.7.1: Rocksmith Audio Bridge 4.0 crashes after the profile screen.
-  4.1 fixes this, but 0.7.2 or newer is still recommended (0.6.2 also has known
-  compatibility issues).
-
-To check your version, open `RS_ASIO-log.txt` in the Rocksmith folder; the
-first line reads `Wrapper DLL loaded (vX.Y.Z)`. `RSMods_debug.txt` also names
-the version and warns when it is too old. To update, download the release from
-the official [RS_ASIO releases page](https://github.com/mdias/rs_asio/releases),
-replace both `RS_ASIO.dll` and `avrt.dll`, and keep your own `RS_ASIO.ini`.
+**ASIO users need RS_ASIO 0.6.1 or newer**; the
+[latest release](https://github.com/mdias/rs_asio/releases/latest) is
+recommended. Your version is on the first line of `RS_ASIO-log.txt`. To update,
+replace `RS_ASIO.dll` and `avrt.dll` and keep your `RS_ASIO.ini`.
 
 ### After installing
 
