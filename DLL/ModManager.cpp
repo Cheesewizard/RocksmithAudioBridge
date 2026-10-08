@@ -43,6 +43,66 @@ namespace ModManager {
 	}
 
 	/// <summary>
+	/// Logs the RS_ASIO version, so a report from someone on an old RS_ASIO shows it. RS_ASIO.dll carries no
+	/// version resource; RS_ASIO writes "Wrapper DLL loaded (vX.Y.Z)" as the first line of RS_ASIO-log.txt when it
+	/// loads. Cable mode renames RS_ASIO.dll, leaving a log from an earlier launch behind, so the module must be
+	/// loaded and the log written since this process started before the version counts.
+	/// </summary>
+	void LogRsAsioVersion() {
+		if (GetModuleHandleA("RS_ASIO.dll") == NULL) {
+			LOG_INFO("RS_ASIO: not loaded" << std::endl);
+			return;
+		}
+
+		std::string version;
+		bool patchingFailed = false;
+		std::ifstream rsAsioLog("RS_ASIO-log.txt");
+		std::string line;
+		if (rsAsioLog && std::getline(rsAsioLog, line)) {
+			const size_t start = line.find("(v");
+			const size_t end = start == std::string::npos ? std::string::npos : line.find(')', start);
+			if (end != std::string::npos) version = line.substr(start + 1, end - start - 1);
+			// RS_ASIO reports a failed patch within its first few lines, before any audio is set up.
+			for (int lineNumber = 0; lineNumber < 50 && std::getline(rsAsioLog, line); ++lineNumber) {
+				if (line.find("No valid locations for patching were found") != std::string::npos) {
+					patchingFailed = true;
+					break;
+				}
+			}
+		}
+
+		FILETIME created{}, exited{}, kernel{}, user{};
+		WIN32_FILE_ATTRIBUTE_DATA logInfo{};
+		const bool logIsCurrent = GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)
+			&& GetFileAttributesExA("RS_ASIO-log.txt", GetFileExInfoStandard, &logInfo)
+			&& CompareFileTime(&logInfo.ftLastWriteTime, &created) >= 0;
+
+		if (version.empty() || !logIsCurrent) {
+			LOG_INFO("RS_ASIO: loaded, version unknown (RS_ASIO-log.txt has no version from this launch)" << std::endl);
+			return;
+		}
+		LOG_INFO("RS_ASIO: " << version << std::endl);
+
+		// Below 0.6.0 RS_ASIO cannot patch the current game build (distorted sound, no guitar input, or a crash).
+		// 0.6.0 itself crashes when RSMods is loaded (fixed in 0.6.1; reproduced here). 0.6.1 to 0.7.1 remove the
+		// two-cable message by NOPing a call that our two-RTC bypass then corrupted (crash after profile select,
+		// fixed in 4.1); 0.7.2 and later patch a jump instead. 0.7.4 and 0.7.5 are tested.
+		int major = 0, minor = 0, patch = 0;
+		const int parts = sscanf_s(version.c_str(), "v%d.%d.%d", &major, &minor, &patch);
+		const bool tooOld = parts >= 2 && major == 0 && (minor < 6 || (minor == 6 && patch < 1));
+		const bool olderThanRecommended = parts >= 2 && major == 0 && (minor < 7 || (minor == 7 && patch < 2));
+		if (tooOld || patchingFailed) {
+			LOG_ERROR("RS_ASIO " << version << (patchingFailed ? " could not patch this game version" : " is too old for this game version and this mod")
+				<< ". Update to RS_ASIO 0.7.2 or newer (the latest release is recommended): https://github.com/mdias/rs_asio/releases"
+				<< " Replace RS_ASIO.dll and avrt.dll and keep RS_ASIO.ini." << std::endl);
+		}
+		else if (olderThanRecommended) {
+			LOG_WARNING("RS_ASIO " << version << " is older than the recommended 0.7.2. If audio or input misbehaves, update to the latest RS_ASIO:"
+				<< " https://github.com/mdias/rs_asio/releases" << std::endl);
+		}
+	}
+
+	/// <summary>
 	/// Hook Game Functions For Our Own Uses (On Alt-Tab, Draw UI, etc).
 	/// </summary>
 	void GUI() {
@@ -191,6 +251,7 @@ namespace ModManager {
 		// Look to see if RS_ASIO applied the 2 RTC input bypass.
 		// If they did, then we disregard the results from our version of the mod.
 		bool rsAsioBypassTwoRTC = false;
+		LogRsAsioVersion();
 		LOG_INFO("RS_ASIO Bypass2RTC: " << std::boolalpha << rsAsioBypassTwoRTC << std::endl);
 
 		if (Settings::ReturnSettingValue("BypassTwoRTCMessageBox") == "on") {
