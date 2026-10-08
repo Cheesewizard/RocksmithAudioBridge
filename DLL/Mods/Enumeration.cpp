@@ -9,12 +9,19 @@ void SaveSteamServicePointer(uint32_t eax) {
 }
 
 uint32_t hookBackAddr;
+// The operand of the "push imm8" the hook overwrites (sign-extended, as the CPU pushes it).
+int32_t enumerationPushValue = -1;
 
+// The hook overwrites "push ebp; mov ebp, esp; push imm8", the start of the function's SEH frame, so the stub
+// must replay exactly those three instructions. Upstream replayed "and esp, -8" instead of the push, which
+// shifted the frame: on return the function restored fs:[0] from the wrong slot and left the main thread's
+// SEH chain head as garbage. The next exception on that thread (the game's own trap-flag check, ~40 s in)
+// then failed chain validation (0xc0000409, FAST_FAIL_INVALID_EXCEPTION_CHAIN at Rocksmith2014.exe+0x38b73a).
 void __declspec(naked) Hook_EnumerationService() {
 	__asm {
 		push ebp
 		mov ebp, esp
-		and esp, 0FFFFFFF8h
+		push dword ptr[enumerationPushValue]
 
 		pushad
 
@@ -44,6 +51,7 @@ void Enumeration::HookEnumerationService() {
 	}
 
 	hookBackAddr = hookAddr + len;
+	enumerationPushValue = *reinterpret_cast<const int8_t*>(hookAddr + 4);
 	if (MemUtil::PlaceHook((void*)hookAddr, Hook_EnumerationService, len)) {
 		LOG_INFO("Hooked Steam enumeration function successfully!" << std::endl);
 	}
