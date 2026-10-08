@@ -642,12 +642,12 @@ namespace ModManager {
 
 		if (rsAsioBypassTwoRTC) return;
 
-		if (Settings::ReturnSettingValue("BypassTwoRTCMessageBox") == "off" && *(char*)Offsets::ptr_twoRTCBypass.Get() == Offsets::ptr_twoRTCBypass_patch_call[0]) {
-			MemUtil::PatchAdr((LPVOID)Offsets::ptr_twoRTCBypass.Get(), (LPVOID)Offsets::ptr_twoRTCBypass_original, 6);
-		}
-		else if (Settings::ReturnSettingValue("BypassTwoRTCMessageBox") == "on" && *(char*)Offsets::ptr_twoRTCBypass.Get() == Offsets::ptr_twoRTCBypass_original[0]) {
+		// Both calls are no-ops when there is nothing to do; see QualityOfLife::PatchTwoRTC for why the old
+		// byte-sniffing toggle crashed with RS_ASIO 0.6.x.
+		if (Settings::ReturnSettingValue("BypassTwoRTCMessageBox") == "on")
 			QualityOfLife::PatchTwoRTC();
-		}
+		else
+			QualityOfLife::RestoreTwoRTC();
 	}
 
 
