@@ -12,6 +12,20 @@
 #include "Audio/CableInput.hpp"
 
 namespace ModManager {
+	bool IsHookGroupSkipped(const char* group) {
+		static const std::string skipList = [] {
+			char buffer[256] = {};
+			GetPrivateProfileStringA("Debug", "SkipHooks", "", buffer, sizeof(buffer), ".\\RSMods.ini");
+			std::string text = buffer;
+			for (char& c : text) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+			return "," + text + ",";
+		}();
+		if (skipList == ",,") return false;
+		const bool skipped = skipList.find(std::string(",") + group + ",") != std::string::npos;
+		if (skipped) LOG_WARNING("(DEBUG) SkipHooks: not installing the '" << group << "' hook group." << std::endl);
+		return skipped;
+	}
+
 	void InitializeConfiguration() {
 		if (!(std::ifstream("RSMods.ini"))) {
 			std::ofstream RSModsFileOutput("RSMods.ini");
@@ -190,9 +204,9 @@ namespace ModManager {
 		UpdateSettings();
 		OverlayToggles::ApplyIniDefaults();   // per-feature overlay .ini gates ("Overlay_<name>")
 		ERMode::Initialize();
-		GUI();
+		if (!IsHookGroupSkipped("d3d")) GUI();
 		Midi::InitMidi();
-		Enumeration::HookEnumerationService();
+		if (!IsHookGroupSkipped("enum")) Enumeration::HookEnumerationService();
 
 		CrowdControl::StartServer();
 	}
@@ -207,14 +221,15 @@ namespace ModManager {
 	/// </summary>
 	void ApplyStartupMods()
 	{
-		if (DropPedal::IsConfiguredEnabled())
+		const bool skipAudio = IsHookGroupSkipped("audio");
+		if (!skipAudio && DropPedal::IsConfiguredEnabled())
 		{
 			Audio::SongShift::WwiseMusicHook::Install();
 		}
 
 		// Runs before the game instantiates its ASIO driver, so the detour is in place
 		// when RS_ASIO loads the same module.
-		DropPedal::InstallInputHooks();
+		if (!skipAudio) DropPedal::InstallInputHooks();
 
 		// Configure the front-of-chain input conditioner before RS_ASIO starts delivering capture buffers.
 		// Applying these values later from the post-load game loop leaves the initial ASIO stream unconditioned.
@@ -232,17 +247,17 @@ namespace ModManager {
 			<< "%, hum filter " << humFilterBaseHz << " Hz." << std::endl);
 
 		// The conditioner shares the Drop Pedal capture hook, but it must also run when Drop Pedal is off.
-		if (inputGainTenths != 0 || suppressorThresholdTenths != 0
-			|| compressorStrength != 0 || humFilterBaseHz != 0)
+		if (!skipAudio && (inputGainTenths != 0 || suppressorThresholdTenths != 0
+			|| compressorStrength != 0 || humFilterBaseHz != 0))
 		{
 			Audio::AsioHook::Install();
 			inputConditionerHookActive = true;
 		}
 
 
-		AudioDevices::SetupMicrophones();
-		ApplyBugPrevention();
-		ApplyAudioDeviceConfiguration();
+		if (!skipAudio) AudioDevices::SetupMicrophones();
+		if (!IsHookGroupSkipped("bugfix")) ApplyBugPrevention();
+		if (!skipAudio) ApplyAudioDeviceConfiguration();
 
 		#ifdef _WWISE_LOGS
 				Wwise::Logging::Init();

@@ -25,6 +25,10 @@ struct GameLoopState {
 };
 
 namespace ModManager {
+	// Developer bisect switch: RSMods.ini [Debug] SkipHooks=d3d,nbn,audio,bugfix,enum. Empty (the default)
+	// skips nothing. Each skipped group is logged once.
+	bool IsHookGroupSkipped(const char* group);
+
     inline const double DefaultNSPTimeLimit = 10.9899997711182; // The default time for NSP.
 
     void InitializeConfiguration();

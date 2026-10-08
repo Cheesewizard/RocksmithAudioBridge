@@ -312,10 +312,12 @@ unsigned WINAPI MainThread() {
 	// Note by Note must initialize in every configuration: its Riff Repeater menu item
 	// renders unconditionally, and without its backing state the rocker is dead. The probe
 	// host lives inside ResearchBridge, so the bridge initializes in Release too.
-	ResearchBridge::Initialize();
-	NoteByNoteProbe::Initialize();
-	NoteByNoteMenu::Initialize();
-	NoteByNoteHudLabel::Initialize();
+	if (!ModManager::IsHookGroupSkipped("nbn")) {
+		ResearchBridge::Initialize();
+		NoteByNoteProbe::Initialize();
+		NoteByNoteMenu::Initialize();
+		NoteByNoteHudLabel::Initialize();
+	}
 
 	// The FretNet ML string/fret companion (bound to this game's lifetime) is what Note-by-Note reads for
 	// its ML "stuck hold" rescue. It is a separate process with the model loaded, so it starts only the first
