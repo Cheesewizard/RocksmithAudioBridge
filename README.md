@@ -206,7 +206,10 @@ The recording is exactly what you hear: the song, your guitar and, with
 [External amp](#external-amp), your amp sim's tone. It works the same whichever
 playback device the sound goes to. The dry take is your clean guitar, ready to
 re-amp later. Each game launch saves into its own dated folder under
-`Videos\Rocksmith Audio Bridge`.
+`Recordings` in your Rocksmith folder. Pick another folder on the Rocksmith Audio
+Bridge page in RSMods. For video, the overlay's Record page sets the quality:
+**High** (sharpest), **Standard** (about half the size) or **Small** (1080p, for
+sharing).
 
 Press `F6`, or the record button on the overlay's Record page. A red REC
 indicator shows while recording.

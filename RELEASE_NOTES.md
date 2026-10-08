@@ -12,6 +12,8 @@ To check your version, open `RS_ASIO-log.txt` in the Rocksmith folder: the first
 
 ## Improved
 - Video recordings are now 60 fps and sharper: the GPU converts and encodes each frame directly, and the bitrate follows the window size. Frames land on a steady clock, so the scrolling highway no longer judders. PCs where the GPU path can't be set up fall back to the previous CPU path at the same frame rate.
+- Video quality setting on the overlay's Record page: **High** (the default, about 250 MB a minute at 1440p), **Standard** (about half that) or **Small** (1080p, about 80 MB a minute, for sharing). It is remembered between launches. Bitrates are capped, so takes play smoothly in Windows Media Player. On PCs that use the CPU recording path, Small keeps the full resolution and only lowers the bitrate.
+- Recordings are now saved in a `Recordings` folder inside the Rocksmith folder by default, next to the game (4.0 used `Videos\Rocksmith Audio Bridge`). A folder you picked yourself is kept. Uninstalling never touches it.
 
 ## Fixes
 - **No more crash right after the profile screen with RS_ASIO 0.6.1 to 0.7.1.** Those RS_ASIO versions and the inherited "two Real Tone Cables" message bypass patch the same game code. With the bypass off, it mistook RS_ASIO's patch for its own and wrote over it, leaving a broken instruction the game ran into at the profile screen. The bypass now only ever undoes its own patch.
