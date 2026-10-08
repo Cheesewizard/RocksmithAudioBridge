@@ -61,6 +61,24 @@ Requirements: the Steam version of Rocksmith 2014 Remastered on Windows, and
 the MS Visual C++ 2015-2019 redistributable. Works with a Real Tone Cable or an
 ASIO interface through [RS_ASIO](https://github.com/mdias/rs_asio).
 
+**ASIO users need RS_ASIO 0.7.2 or newer** (the
+[latest release](https://github.com/mdias/rs_asio/releases/latest) is
+recommended; 0.7.4 and 0.7.5 are tested). Older versions cause problems with
+the current Rocksmith game patch:
+
+- Before 0.6.0: RS_ASIO cannot patch the game. The sound is distorted and there
+  is no guitar input, or the game closes.
+- 0.6.0: crashes on the title screen when used with RSMods.
+- 0.6.1 to 0.7.1: Rocksmith Audio Bridge 4.0 crashes after the profile screen.
+  4.1 fixes this, but 0.7.2 or newer is still recommended (0.6.2 also has known
+  compatibility issues).
+
+To check your version, open `RS_ASIO-log.txt` in the Rocksmith folder; the
+first line reads `Wrapper DLL loaded (vX.Y.Z)`. `RSMods_debug.txt` also names
+the version and warns when it is too old. To update, download the release from
+the official [RS_ASIO releases page](https://github.com/mdias/rs_asio/releases),
+replace both `RS_ASIO.dll` and `avrt.dll`, and keep your own `RS_ASIO.ini`.
+
 ### After installing
 
 With Rocksmith closed, open RSMods (`RSMods\RSMods.exe` in your Rocksmith
@@ -248,7 +266,7 @@ the RSMods tracker. A bug in an inherited RSMods feature that also happens on
 plain RSMods belongs [upstream](https://github.com/Lovrom8/RSMods/issues).
 
 Attach the logs from `%LOCALAPPDATA%\Rocksmith Audio Bridge\Logs` and `RSMods_debug.txt` from
-the Rocksmith folder. The debug log is locked while the game runs, so quit
+the Rocksmith folder. With an ASIO interface, also attach `RS_ASIO-log.txt` and `RS_ASIO.ini`. The debug log is locked while the game runs, so quit
 first.
 
 ## Credits
