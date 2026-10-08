@@ -279,11 +279,14 @@ namespace
 	}
 
 	// Constant-quality-ish target: ~0.15 bits per pixel per frame (about 37 Mbps at 2560x1600x60,
-	// 19 Mbps at 1080p60), clamped so tiny windows still look clean and 4K stays a sane size.
+	// 19 Mbps at 1080p60), clamped so tiny windows still look clean. Capped at 40 Mbps: a 66 Mbps,
+	// level 5.2 take (the encoder overshooting an uncapped target) stuttered in Windows Media Player,
+	// and 40 Mbps still looks clean at 1440p/1600p60 and plays everywhere.
+	constexpr double MAXIMUM_AUTOMATIC_BITRATE = 40000000.0;
 	UINT32 AutomaticBitrate(UINT width, UINT height, UINT32 framesPerSecond)
 	{
 		double bits = static_cast<double>(width) * height * framesPerSecond * 0.15;
-		return static_cast<UINT32>(std::clamp(bits, 8000000.0, 60000000.0));
+		return static_cast<UINT32>(std::clamp(bits, 8000000.0, MAXIMUM_AUTOMATIC_BITRATE));
 	}
 
 	void TagColour(IMFMediaType* type)
@@ -374,7 +377,20 @@ namespace
 		MFSetAttributeSize(input.get(), MF_MT_FRAME_SIZE, capture.width, capture.height);
 		MFSetAttributeRatio(input.get(), MF_MT_FRAME_RATE, framesPerSecond, 1);
 		MFSetAttributeRatio(input.get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
-		result = capture.writer->SetInputMediaType(capture.stream, input.get(), nullptr);
+		// Rate control goes in with the input type, while the sink writer creates and configures the encoder.
+		// Set later through ICodecAPI (ConfigureEncoder) AMD's encoder ignored it and ran at about 1.8x the
+		// target (66 Mbps for 37). ConfigureEncoder stays as a fallback for encoders that only take it late.
+		com_ptr<IMFAttributes> encoding;
+		if (SUCCEEDED(MFCreateAttributes(encoding.put(), 4)))
+		{
+			encoding->SetUINT32(CODECAPI_AVEncCommonRateControlMode, eAVEncCommonRateControlMode_PeakConstrainedVBR);
+			encoding->SetUINT32(CODECAPI_AVEncCommonMeanBitRate, bitrate);
+			encoding->SetUINT32(CODECAPI_AVEncCommonMaxBitRate, bitrate / 2 * 3);
+			encoding->SetUINT32(CODECAPI_AVEncMPVGOPSize, framesPerSecond * 2);
+		}
+		result = capture.writer->SetInputMediaType(capture.stream, input.get(), encoding.get());
+		if (FAILED(result) && encoding)
+			result = capture.writer->SetInputMediaType(capture.stream, input.get(), nullptr);
 		if (FAILED(result))
 			return result;
 		ConfigureEncoder(capture, bitrate, framesPerSecond);
