@@ -1,5 +1,5 @@
 #pragma once
-#include "Mods/DetectionFeedback.hpp"
+#include "NoteByNote/Detection/DetectionFeedback.hpp"
 #include <functional> 
 
 namespace Settings {

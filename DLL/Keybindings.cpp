@@ -1,8 +1,8 @@
 #include "stdafx.h"
 #include "Keybindings.hpp"
-#include "Mods/DropPedal/DropPedalInput.hpp"
-#include "Audio/TakeRecorder.hpp"
-#include "Audio/SharedOutput.hpp"
+#include "DropPedal/DropPedalInput.hpp"
+#include "Recorder/TakeRecorder.hpp"
+#include "AudioBridge/Engine/AudioBridgeEngine.hpp"
 
 namespace Keybindings {
 	std::map<std::string, ModCommand, std::less<>> keyUpCommands;

@@ -1,12 +1,12 @@
 #include "../stdafx.h"
 #include "D3DHooks.hpp"
-#include "NoteByNoteHighwayRenderer.hpp"
-#include "../Mods/NoteByNoteNativeScoring.hpp"
-#include "../Mods/ArrangementInstrument.hpp"
+#include "NoteByNote/Ui/NoteByNoteHighwayRenderer.hpp"
+#include "NoteByNote/Controller/NoteByNoteNativeScoring.hpp"
+#include "NoteByNote/Detection/ArrangementInstrument.hpp"
 #include "../Lib/DirectX/d3dx9shader.h"
-#include "../Mods/NoteByNoteProbe.hpp"
-#include "../Mods/NoteByNoteMenu.hpp"
-#include "../Research/ResearchBridge.hpp"
+#include "NoteByNote/Host/NoteByNoteMode.hpp"
+#include "NoteByNote/Ui/NoteByNoteMenu.hpp"
+#include "NoteByNote/Host/ControllerBridge.hpp"
 
 #include <intrin.h>
 

@@ -47,4 +47,4 @@ SevenZipSharp, BouncyCastle, SharpZipLib, Newtonsoft.Json, NLog, Ookii.Dialogs,
 Pfim, ddc and others). Each remains under its own licence.
 
 No part of aubio is included. Note by Note's onset detector
-(DLL/Audio/HfcOnsetDetector.hpp) is an independent implementation.
+(DLL/NoteByNote/Detection/HfcOnsetDetector.hpp) is an independent implementation.

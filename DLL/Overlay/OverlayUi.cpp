@@ -1,4 +1,4 @@
-#include "../stdafx.h"
+#include "stdafx.h"
 #include "OverlayUi.hpp"
 #include "AudioBridgeLogo.h"
 #include <filesystem>

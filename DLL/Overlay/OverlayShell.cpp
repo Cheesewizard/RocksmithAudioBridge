@@ -1,27 +1,27 @@
-#include "../stdafx.h"
+#include "stdafx.h"
 #include "OverlayShell.hpp"
 #include "OverlayUi.hpp"
-#include "../Lib/ImGUI/imgui_internal.h"   // SetItemUsingMouseWheel (the pedalboard scrolls sideways)
-#include "HudLayout.hpp"
-#include "../Audio/SharedOutput.hpp"
-#include "../Audio/CableInput.hpp"
-#include "../Audio/OutputDevices.hpp"
-#include "../Audio/OutputTap.hpp"
-#include "../Audio/TakeRecorder.hpp"
-#include "../Audio/MlServiceLauncher.hpp"
-#include "../Audio/ExternalAmp.hpp"
-#include "../Audio/VstHostLink.hpp"
-#include "../Audio/VstHostControl.hpp"
-#include "../Audio/SongLibrary.hpp"
-#include "../Audio/ToneBackup.hpp"
-#include "../Extensions.hpp"
-#include "../Research/ResearchBridge.hpp"
-#include "../Mods/DropPedal/DropPedal.hpp"
-#include "../Mods/NoteByNoteMenu.hpp"
-#include "../Mods/DropPedal/DropPedalOverlay.hpp"
-#include "../GameState.hpp"
-#include "../Keybindings.hpp"
-#include "../ProductVersion.hpp"
+#include "Lib/ImGUI/imgui_internal.h"   // SetItemUsingMouseWheel (the pedalboard scrolls sideways)
+#include "NoteByNote/Ui/NoteByNoteHudLayout.hpp"
+#include "AudioBridge/Engine/AudioBridgeEngine.hpp"
+#include "AudioBridge/Cable/CableInput.hpp"
+#include "AudioBridge/Engine/OutputDevices.hpp"
+#include "AudioBridge/Engine/OutputTap.hpp"
+#include "Recorder/TakeRecorder.hpp"
+#include "NoteByNote/Ml/MlServiceLauncher.hpp"
+#include "ExternalAmp/ExternalAmp.hpp"
+#include "ToneDesigner/VstHostLink.hpp"
+#include "Shared/VstHostControl.hpp"
+#include "ToneDesigner/SongLibrary.hpp"
+#include "ToneDesigner/ToneBackup.hpp"
+#include "Core/Extensions.hpp"
+#include "NoteByNote/Host/ControllerBridge.hpp"
+#include "DropPedal/DropPedal.hpp"
+#include "NoteByNote/Ui/NoteByNoteMenu.hpp"
+#include "DropPedal/DropPedalOverlay.hpp"
+#include "GameState.hpp"
+#include "Keybindings.hpp"
+#include "Shared/ProductVersion.hpp"
 #include <filesystem>
 #include <cmath>
 #include <shellapi.h>
@@ -705,7 +705,7 @@ namespace Overlay
 		}
 
 		// ---- External amp ---------------------------------------------------------------------------------
-		// Play through an amp sim on the bridge's ASIO driver (Audio/ExternalAmp.hpp, AsioProxy/AmpLink.hpp).
+		// Play through an amp sim on the bridge's ASIO driver (ExternalAmp/ExternalAmp.hpp, AsioProxy/AmpLink.hpp).
 
 		// Label on the left, value on the right of the card row.
 		void InfoRow(const char* label, const std::string& value, ImU32 valueColor = Color::Text)
@@ -732,7 +732,7 @@ namespace Overlay
 		}
 
 		// ---- Tone designer --------------------------------------------------------------------------------
-		// The VST host (VstHost/, Audio/VstHostLink.hpp) plays the guitar through a chain of VST3 plugins and shows the
+		// The VST host (VstHost/, ToneDesigner/VstHostLink.hpp) plays the guitar through a chain of VST3 plugins and shows the
 		// selected pedal's own window over the game. This page is laid out like a chain loader, in one framed panel:
 		//   - a bar: File / Edit / View, the tone's name between previous / next arrows (amber dot = unsaved),
 		//     VST | Game amp (A/B), the amp window and power buttons;

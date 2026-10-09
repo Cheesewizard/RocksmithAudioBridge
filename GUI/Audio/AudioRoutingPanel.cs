@@ -1750,7 +1750,7 @@ namespace RSMods.Audio
 		}
 
 		// One subfolder per game launch, named by the game's start time ("2026-10-06 21-14-05"). The overlay's
-		// recorder (DLL/Audio/TakeRecorder.cpp SessionFolder) names it from the same process start time, so
+		// recorder (DLL/Recorder/TakeRecorder.cpp SessionFolder) names it from the same process start time, so
 		// desktop and in-game takes from one launch share a folder. Falls back to now if the game can't be read.
 		private static string SessionFolder(string baseFolder, int gameProcessId)
 		{

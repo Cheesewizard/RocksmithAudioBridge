@@ -5,8 +5,8 @@
 #include "Mods/VolumeControl.hpp"
 #include "Mods/Midi.hpp"
 #include "Overlay/OverlayShell.hpp"
-#include "Audio/VstHostLink.hpp"
-#include "Audio/ToneBackup.hpp"
+#include "ToneDesigner/VstHostLink.hpp"
+#include "ToneDesigner/ToneBackup.hpp"
 #include "GameState.hpp"
 #include "Overlay/OverlayUi.hpp"
 

@@ -3,7 +3,7 @@
 #include "stdafx.h"
 #include "Mods/GuitarSpeak.hpp"
 #include "Mods/RiffRepeater.hpp"
-#include "Mods/NoteByNoteProbe.hpp"
+#include "NoteByNote/Host/NoteByNoteMode.hpp"
 #include "Mods/Midi.hpp"
 #include <atlbase.h>
 #include <algorithm>

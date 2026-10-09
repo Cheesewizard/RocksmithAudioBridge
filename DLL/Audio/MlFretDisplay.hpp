@@ -1,6 +1,6 @@
 #pragma once
 
-#include "MlStringFretReader.hpp"
+#include "NoteByNote/Ml/MlStringFretReader.hpp"
 #include <cmath>
 
 namespace MlFretDisplay

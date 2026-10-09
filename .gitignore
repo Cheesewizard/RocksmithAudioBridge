@@ -290,11 +290,6 @@ Installer/Resources/
 # Developer-only material, kept out of the release repository.
 /Research/
 /DLL/Research/*
-!/DLL/Research/ResearchBridge.hpp
-!/DLL/Research/ResearchProtocol.hpp
-!/DLL/Research/NoteByNoteProbe/
-/DLL/Research/NoteByNoteProbe/*
-!/DLL/Research/NoteByNoteProbe/NoteByNoteResearchProbe.cpp
 /Tests
 /docs
 /tools

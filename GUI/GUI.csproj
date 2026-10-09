@@ -125,15 +125,15 @@
     </Compile>
     <Compile Include="GuitarSpeak.cs" />
     <Compile Include="MemoryStream.cs" />
-	<Compile Include="NoteByNoteChartExtractor.cs" />
-    <Compile Include="NoteByNoteMenuInstaller.cs" />
+	<Compile Include="Features\NoteByNote\Dev\NoteByNoteChartExtractor.cs" />
+    <Compile Include="Features\NoteByNote\NoteByNoteMenuInstaller.cs" />
     <Compile Include="Profiles.cs" />
-    <Compile Include="PsarcEntryPath.cs" />
+    <Compile Include="Shared\PsarcEntryPath.cs" />
     <Compile Include="Rocksmith\ReadSettings.cs" />
     <Compile Include="Rocksmith\WriteSettings.cs" />
     <Compile Include="SetAndForgetMods.cs" />
-    <Compile Include="SpeakerModeCacheExtractor.cs" />
-    <Compile Include="ToneDesignerTools.cs" />
+    <Compile Include="Features\DropPedal\SpeakerModeCacheExtractor.cs" />
+    <Compile Include="Features\ToneDesigner\ToneDesignerTools.cs" />
     <Compile Include="SongManager.cs" />
     <Compile Include="Twitch\EffectServer\EffectMessage.cs" />
     <Compile Include="Twitch\EffectServer\EffectServerTCP.cs" />
@@ -153,12 +153,12 @@
     <Compile Include="Audio\StudioSelector.cs" />
     <Compile Include="Audio\StudioNav.cs" />
     <Compile Include="Audio\StudioVolumeSlider.cs" />
-    <Compile Include="Audio\WindowCaptureRecorder.cs" />
-    <Compile Include="Audio\VideoTakeHost.cs" />
-    <Compile Include="Audio\StudioTheme.cs" />
-    <Compile Include="Audio\StudioButton.cs" />
+    <Compile Include="Features\VideoRecorder\WindowCaptureRecorder.cs" />
+    <Compile Include="Features\VideoRecorder\VideoTakeHost.cs" />
+    <Compile Include="Shared\Controls\StudioTheme.cs" />
+    <Compile Include="Shared\Controls\StudioButton.cs" />
     <Compile Include="Audio\StatusChip.cs" />
-    <Compile Include="Audio\SegmentedControl.cs" />
+    <Compile Include="Shared\Controls\SegmentedControl.cs" />
 	<Compile Include="Audio\RockerToggle.cs" />
     <Compile Include="Audio\StudioCard.cs" />
     <Compile Include="Audio\StudioExpander.cs" />
@@ -166,18 +166,18 @@
     <Compile Include="Audio\TakeList.cs" />
     <Compile Include="Audio\StudioFormat.cs" />
     <Compile Include="Audio\AudioControlClient.cs" />
-    <Compile Include="Audio\AsioProxySetup.cs" />
+    <Compile Include="Features\AudioBridge\BridgeDriverSetup.cs" />
     <Compile Include="Audio\OutputApplyPlan.cs" />
     <Compile Include="Audio\AudioBufferSnapshot.cs" />
-    <Compile Include="Audio\AudioInputMode.cs" />
+    <Compile Include="Features\AudioBridge\AudioInputMode.cs" />
     <Compile Include="Audio\AudioRoutingWindow.cs" />
     <Compile Include="Audio\AudioBridgeWindow.cs" />
     <Compile Include="Audio\StudioSlider.cs" />
     <Compile Include="Audio\StudioCheck.cs" />
     <Compile Include="Audio\StudioNumber.cs" />
-    <Compile Include="UI.AudioRouting.cs" />
-    <Compile Include="UI.AudioBridgeSetup.cs" />
-    <Compile Include="UI.RSModsPlus.cs" />
+    <Compile Include="Features\AudioBridge\UI.BridgeSettingsSync.cs" />
+    <Compile Include="Features\AudioBridge\UI.AudioBridgeSetup.cs" />
+    <Compile Include="Features\AudioBridge\UI.AudioBridgeTab.cs" />
     <Compile Include="Controls\ColourWheel.cs" />
     <Compile Include="Controls\ColourChip.cs" />
     <Compile Include="Controls\FeatureSection.cs" />
@@ -192,7 +192,7 @@
     </Compile>
     <Compile Include="KeyConversion.cs" />
     <Compile Include="Program.cs" />
-    <Compile Include="ProductInfo.cs" />
+    <Compile Include="App\ProductInfo.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="ReadSettings.cs" />
     <Compile Include="RsModsLimits.cs" />
@@ -345,9 +345,9 @@
       <Project>{C92F58F4-75B9-4AE0-A722-8F63833EE42C}</Project>
       <Name>RSModsPlus</Name>
     </ProjectReference>
-    <Compile Include="MlModelVerifier.cs" />
-    <Compile Include="MlServiceHost.cs" />
-    <Compile Include="RuntimeBootstrap.cs" />
+    <Compile Include="Features\NoteByNote\Dev\MlModelVerifier.cs" />
+    <Compile Include="Features\NoteByNote\MlServiceHost.cs" />
+    <Compile Include="App\RuntimeBootstrap.cs" />
     <Reference Include="System.IO.Compression" />
     <EmbeddedResource Include="$(IntermediateOutputPath)BundledRuntime.zip">
       <LogicalName>RSMods.BundledRuntime.zip</LogicalName>

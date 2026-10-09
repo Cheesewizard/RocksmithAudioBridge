@@ -1,6 +1,72 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
+    <Filter Include="Core">
+      <UniqueIdentifier>{7af663b9-60a8-4286-b2ff-6a10b1a36628}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Recorder">
+      <UniqueIdentifier>{75000f7f-d796-4315-99c5-82930d002101}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ToneDesigner">
+      <UniqueIdentifier>{d49c3991-7fb0-40d3-bfcd-ac79010f97d2}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ExternalAmp">
+      <UniqueIdentifier>{bd715ec1-7aec-467d-856d-bb3d5b918ec0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Overlay">
+      <UniqueIdentifier>{b69cf688-d637-4bfe-956d-38ec59bc09ba}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="AudioBridge">
+      <UniqueIdentifier>{7967d6eb-7975-48e6-ae61-23bb6588eb60}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="AudioBridge\Cable">
+      <UniqueIdentifier>{c814ddd9-8ae5-4c64-9081-35c50ebf5073}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="AudioBridge\Devices">
+      <UniqueIdentifier>{725fd8dd-bfa6-42e5-93c5-0717a9024fc2}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="AudioBridge\Diagnostics">
+      <UniqueIdentifier>{12e75386-9f8e-4987-be8c-1c20867af6e0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="AudioBridge\Driver">
+      <UniqueIdentifier>{dabd7dd2-91be-49ca-8c5a-2368920715bb}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="AudioBridge\Engine">
+      <UniqueIdentifier>{61a79b77-a037-47eb-a9a1-cf8831efe5c5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="AudioBridge\Input">
+      <UniqueIdentifier>{32d96283-0445-445f-9a46-6f4a99eb6b69}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="NoteByNote\Controller">
+      <UniqueIdentifier>{75569d70-1e2e-42f5-8f85-9cc486f87e1f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="NoteByNote\Detection">
+      <UniqueIdentifier>{ea97d3b9-c915-4da7-a5e4-79760e4131ec}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="NoteByNote\Ml">
+      <UniqueIdentifier>{fd3a5d4b-c969-42a2-bfe7-d2470c47d059}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="NoteByNote\Protocol">
+      <UniqueIdentifier>{f73ae607-a859-43af-9a88-958e1d351334}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="NoteByNote\Ui">
+      <UniqueIdentifier>{d709a14c-0538-42e3-8e89-f2fdd0a84faf}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="NoteByNote">
+      <UniqueIdentifier>{36eec84d-d697-4681-94aa-53f87768545d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="NoteByNote\Host">
+      <UniqueIdentifier>{eb478020-8060-40e7-a3b5-49c788380237}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="DropPedal">
+      <UniqueIdentifier>{bc88a6d2-5bac-4796-8f47-8e37baa33bd5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="DropPedal\SpeakerMode">
+      <UniqueIdentifier>{700d2890-8110-4857-9d3d-e22ad8a2a2fa}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shared">
+      <UniqueIdentifier>{3a3b7d0e-bef3-494f-b126-f4bcd2aa9a2b}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source Files">
       <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
       <Extensions>cpp;c;CC\CC;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
@@ -222,20 +288,17 @@
     <ClCompile Include="Mods\RiffRepeater.cpp">
       <Filter>Mods</Filter>
     </ClCompile>
-	<ClCompile Include="Mods\NoteByNoteProbe.cpp">
-		<Filter>Mods</Filter>
+	<ClCompile Include="NoteByNote\Host\NoteByNoteMode.cpp">
+		<Filter>NoteByNote\Host</Filter>
 	</ClCompile>
-    <ClCompile Include="Mods\NoteByNoteHookHost.cpp">
-		<Filter>Mods</Filter>
+    <ClCompile Include="NoteByNote\Host\NativeScoringHooks.cpp">
+		<Filter>NoteByNote\Host</Filter>
 	</ClCompile>
-    <ClCompile Include="Mods\NoteByNoteMenu.cpp">
-      <Filter>Mods</Filter>
+    <ClCompile Include="NoteByNote\Ui\NoteByNoteMenu.cpp">
+      <Filter>NoteByNote\Ui</Filter>
     </ClCompile>
-    <ClCompile Include="Mods\NoteByNoteHudLabel.cpp">
-      <Filter>Mods</Filter>
-    </ClCompile>
-    <ClCompile Include="Research\ResearchBridge.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="NoteByNote\Ui\NoteByNoteHudLabel.cpp">
+      <Filter>NoteByNote\Ui</Filter>
     </ClCompile>
     <ClCompile Include="Mods\AudioDevices.cpp">
       <Filter>Mods</Filter>
@@ -273,8 +336,8 @@
     <ClCompile Include="D3D/D3DHooks.cpp">
       <Filter>D3D</Filter>
     </ClCompile>
-    <ClCompile Include="D3D/NoteByNoteHighwayRenderer.cpp">
-      <Filter>D3D</Filter>
+    <ClCompile Include="NoteByNote/Ui/NoteByNoteHighwayRenderer.cpp">
+      <Filter>NoteByNote\Ui</Filter>
     </ClCompile>
     <ClCompile Include="CC\Effects\WavyNotesEffect.cpp">
       <Filter>CrowdControl\Effects</Filter>
@@ -330,56 +393,56 @@
     <ClCompile Include="Keyboard.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Mods\DropPedal\DropPedal.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="DropPedal\DropPedal.cpp">
+      <Filter>DropPedal</Filter>
     </ClCompile>
-    <ClCompile Include="Mods\DropPedal\DropPedalHooks.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="DropPedal\DropPedalHooks.cpp">
+      <Filter>DropPedal</Filter>
     </ClCompile>
-    <ClCompile Include="Mods\DropPedal\DropPedalInput.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="DropPedal\DropPedalInput.cpp">
+      <Filter>DropPedal</Filter>
     </ClCompile>
-    <ClCompile Include="Mods\DropPedal\DropPedalOverlay.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="DropPedal\DropPedalOverlay.cpp">
+      <Filter>DropPedal</Filter>
     </ClCompile>
-    <ClCompile Include="Mods\DropPedal\DropPedalState.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="DropPedal\DropPedalState.cpp">
+      <Filter>DropPedal</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\AsioHook.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="AudioBridge\Input\InputCaptureHook.cpp">
+      <Filter>AudioBridge\Input</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\CableInput.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="AudioBridge\Cable\CableInput.cpp">
+      <Filter>AudioBridge\Cable</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\MlServiceLauncher.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="NoteByNote\Ml\MlServiceLauncher.cpp">
+      <Filter>NoteByNote\Ml</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\AsioProxyRegistration.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="AudioBridge\Driver\BridgeDriverRegistration.cpp">
+      <Filter>AudioBridge\Driver</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\SharedOutput.cpp">
-      <Filter>Audio</Filter>
+    <ClCompile Include="AudioBridge\Engine\AudioBridgeEngine.cpp">
+      <Filter>AudioBridge\Engine</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\OutputDevices.cpp">
-      <Filter>Audio</Filter>
+    <ClCompile Include="AudioBridge\Engine\OutputDevices.cpp">
+      <Filter>AudioBridge\Engine</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\TakeRecorder.cpp">
-      <Filter>Audio</Filter>
+    <ClCompile Include="Recorder\TakeRecorder.cpp">
+      <Filter>Recorder</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\GameAudioRecorder.cpp">
-      <Filter>Audio</Filter>
+    <ClCompile Include="Recorder\GameAudioRecorder.cpp">
+      <Filter>Recorder</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\DelayLinePitchShifter.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="DropPedal\DelayLinePitchShifter.cpp">
+      <Filter>DropPedal</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\SongShift\WwiseMusicHook.cpp">
-      <Filter>Audio\SongShift</Filter>
+    <ClCompile Include="DropPedal\SpeakerMode\WwiseMusicHook.cpp">
+      <Filter>DropPedal\SpeakerMode</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\SongShift\PreRenderedPitchCache.cpp">
-      <Filter>Audio\SongShift</Filter>
+    <ClCompile Include="DropPedal\SpeakerMode\PreRenderedPitchCache.cpp">
+      <Filter>DropPedal\SpeakerMode</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\SongShift\StreamingPitchShifter.cpp">
-      <Filter>Audio\SongShift</Filter>
+    <ClCompile Include="DropPedal\SpeakerMode\StreamingPitchShifter.cpp">
+      <Filter>DropPedal\SpeakerMode</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -464,8 +527,8 @@
     <ClInclude Include="D3D/D3DHooks.hpp">
       <Filter>D3D</Filter>
     </ClInclude>
-    <ClInclude Include="D3D/NoteByNoteHighwayRenderer.hpp">
-      <Filter>D3D</Filter>
+    <ClInclude Include="NoteByNote/Ui/NoteByNoteHighwayRenderer.hpp">
+      <Filter>NoteByNote\Ui</Filter>
     </ClInclude>
     <ClInclude Include="D3D/D3D.hpp">
       <Filter>D3D</Filter>
@@ -578,23 +641,23 @@
     <ClInclude Include="Mods\RiffRepeater.hpp">
       <Filter>Mods\Headers</Filter>
     </ClInclude>
-	<ClInclude Include="Mods\NoteByNoteProbe.hpp">
-		<Filter>Mods\Headers</Filter>
+	<ClInclude Include="NoteByNote\Host\NoteByNoteMode.hpp">
+		<Filter>NoteByNote\Host</Filter>
 	</ClInclude>
-    <ClInclude Include="Mods\NoteByNoteNativeScoring.hpp">
-		<Filter>Mods\Headers</Filter>
+    <ClInclude Include="NoteByNote\Controller\NoteByNoteNativeScoring.hpp">
+		<Filter>NoteByNote\Controller</Filter>
 	</ClInclude>
-    <ClInclude Include="Mods\NoteByNoteMenu.hpp">
-      <Filter>Mods\Headers</Filter>
+    <ClInclude Include="NoteByNote\Ui\NoteByNoteMenu.hpp">
+      <Filter>NoteByNote\Ui</Filter>
     </ClInclude>
-    <ClInclude Include="Mods\NoteByNoteHudLabel.hpp">
-      <Filter>Mods\Headers</Filter>
+    <ClInclude Include="NoteByNote\Ui\NoteByNoteHudLabel.hpp">
+      <Filter>NoteByNote\Ui</Filter>
     </ClInclude>
-    <ClInclude Include="Research\ResearchBridge.hpp">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="NoteByNote\Host\ControllerBridge.hpp">
+      <Filter>NoteByNote\Host</Filter>
     </ClInclude>
-    <ClInclude Include="Research\ResearchProtocol.hpp">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="NoteByNote\Protocol\ControllerApi.hpp">
+      <Filter>NoteByNote\Protocol</Filter>
     </ClInclude>
     <ClInclude Include="Mods\AudioDevices.hpp">
       <Filter>Mods\Headers</Filter>
@@ -671,8 +734,8 @@
     <ClInclude Include="D3DOverlay.hpp">
       <Filter>D3D</Filter>
     </ClInclude>
-    <ClInclude Include="ProductVersion.hpp">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Shared/ProductVersion.hpp">
+      <Filter>Shared</Filter>
     </ClInclude>
     <ClInclude Include="Mods\Loft.hpp">
       <Filter>Mods\Headers</Filter>
@@ -713,8 +776,8 @@
     <ClInclude Include="Overlay\AudioBridgeLogo.h">
       <Filter>Main Headers</Filter>
     </ClInclude>
-    <ClInclude Include="Overlay\HudLayout.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="NoteByNote\Ui\NoteByNoteHudLayout.hpp">
+      <Filter>NoteByNote\Ui</Filter>
     </ClInclude>
     <ClInclude Include="QualityOfLife.hpp">
       <Filter>Main Headers</Filter>
@@ -734,80 +797,80 @@
     <ClInclude Include="NoteData.h">
       <Filter>Main Headers\Structs</Filter>
     </ClInclude>
-    <ClInclude Include="Mods\DropPedal\DropPedal.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="DropPedal\DropPedal.hpp">
+      <Filter>DropPedal</Filter>
     </ClInclude>
-    <ClInclude Include="Mods\DropPedal\DropPedalHooks.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="DropPedal\DropPedalHooks.hpp">
+      <Filter>DropPedal</Filter>
     </ClInclude>
-    <ClInclude Include="Mods\DropPedal\DropPedalInput.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="DropPedal\DropPedalInput.hpp">
+      <Filter>DropPedal</Filter>
     </ClInclude>
-    <ClInclude Include="Mods\DropPedal\DropPedalOverlay.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="DropPedal\DropPedalOverlay.hpp">
+      <Filter>DropPedal</Filter>
     </ClInclude>
-    <ClInclude Include="Mods\DropPedal\DropPedalPlayer.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="DropPedal\DropPedalPlayer.hpp">
+      <Filter>DropPedal</Filter>
     </ClInclude>
-    <ClInclude Include="Mods\DropPedal\DropPedalState.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="DropPedal\DropPedalState.hpp">
+      <Filter>DropPedal</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\CaptureFormat.h">
-      <Filter>Audio</Filter>
+    <ClInclude Include="Shared\CaptureFormat.h">
+      <Filter>Shared</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\ComVTable.hpp">
-      <Filter>Audio</Filter>
+    <ClInclude Include="AudioBridge\ComVTable.hpp">
+      <Filter>AudioBridge</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\IInputProcessor.hpp">
-      <Filter>Audio</Filter>
+    <ClInclude Include="Shared\IInputProcessor.hpp">
+      <Filter>Shared</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\AsioHook.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="AudioBridge\Input\InputCaptureHook.hpp">
+      <Filter>AudioBridge\Input</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\CaptureProcessingGate.hpp">
-      <Filter>Audio</Filter>
+    <ClInclude Include="AudioBridge\Input\CaptureProcessingGate.hpp">
+      <Filter>AudioBridge\Input</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\CableInput.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="AudioBridge\Cable\CableInput.hpp">
+      <Filter>AudioBridge\Cable</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\MlServiceLauncher.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="NoteByNote\Ml\MlServiceLauncher.hpp">
+      <Filter>NoteByNote\Ml</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\AsioProxyRegistration.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="AudioBridge\Driver\BridgeDriverRegistration.hpp">
+      <Filter>AudioBridge\Driver</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\MlServiceControl.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="NoteByNote\Ml\MlServiceControl.hpp">
+      <Filter>NoteByNote\Ml</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\SharedOutput.hpp">
-      <Filter>Audio</Filter>
+    <ClInclude Include="AudioBridge\Engine\AudioBridgeEngine.hpp">
+      <Filter>AudioBridge\Engine</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\OutputDevices.hpp">
-      <Filter>Audio</Filter>
+    <ClInclude Include="AudioBridge\Engine\OutputDevices.hpp">
+      <Filter>AudioBridge\Engine</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\TakeRecorder.hpp">
-      <Filter>Audio</Filter>
+    <ClInclude Include="Recorder\TakeRecorder.hpp">
+      <Filter>Recorder</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\GameAudioRecorder.hpp">
-      <Filter>Audio</Filter>
+    <ClInclude Include="Recorder\GameAudioRecorder.hpp">
+      <Filter>Recorder</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\AudioPacketQueue.hpp">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Recorder\AudioPacketQueue.hpp">
+      <Filter>Recorder</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\AudioControl.hpp">
-      <Filter>Audio</Filter>
+    <ClInclude Include="AudioBridge\Engine\AudioControl.hpp">
+      <Filter>AudioBridge\Engine</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\DelayLinePitchShifter.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="DropPedal\DelayLinePitchShifter.hpp">
+      <Filter>DropPedal</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\SongShift\WwiseMusicHook.hpp">
-      <Filter>Audio\SongShift</Filter>
+    <ClInclude Include="DropPedal\SpeakerMode\WwiseMusicHook.hpp">
+      <Filter>DropPedal\SpeakerMode</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\SongShift\PreRenderedPitchCache.hpp">
-      <Filter>Audio\SongShift</Filter>
+    <ClInclude Include="DropPedal\SpeakerMode\PreRenderedPitchCache.hpp">
+      <Filter>DropPedal\SpeakerMode</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\SongShift\StreamingPitchShifter.hpp">
-      <Filter>Audio\SongShift</Filter>
+    <ClInclude Include="DropPedal\SpeakerMode\StreamingPitchShifter.hpp">
+      <Filter>DropPedal\SpeakerMode</Filter>
     </ClInclude>
     <ClInclude Include="Audio\ThirdParty\SignalsmithStretch\signalsmith-stretch.h">
       <Filter>Audio\SongShift</Filter>
@@ -851,5 +914,168 @@
     <MASM Include="syscalls.asm">
       <Filter>Source Files</Filter>
     </MASM>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="ExternalAmp\ExternalAmp.cpp">
+      <Filter>ExternalAmp</Filter>
+    </ClCompile>
+    <ClCompile Include="NoteByNote\Ml\MlAudioExporter.cpp">
+      <Filter>NoteByNote\Ml</Filter>
+    </ClCompile>
+    <ClCompile Include="NoteByNote\Ml\MlStringFretReader.cpp">
+      <Filter>NoteByNote\Ml</Filter>
+    </ClCompile>
+    <ClCompile Include="AudioBridge\Engine\OutputTap.cpp">
+      <Filter>AudioBridge\Engine</Filter>
+    </ClCompile>
+    <ClCompile Include="AudioBridge\Cable\CableCaptureSession.cpp">
+      <Filter>AudioBridge\Cable</Filter>
+    </ClCompile>
+    <ClCompile Include="AudioBridge\Devices\DeviceEnumeratorHook.cpp">
+      <Filter>AudioBridge\Devices</Filter>
+    </ClCompile>
+    <ClCompile Include="NoteByNote\Detection\RawPitchVerifier.cpp">
+      <Filter>NoteByNote\Detection</Filter>
+    </ClCompile>
+    <ClCompile Include="Core\RsModsHelper.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="ToneDesigner\SongLibrary.cpp">
+      <Filter>ToneDesigner</Filter>
+    </ClCompile>
+    <ClCompile Include="ToneDesigner\ToneBackup.cpp">
+      <Filter>ToneDesigner</Filter>
+    </ClCompile>
+    <ClCompile Include="ToneDesigner\VstHostLink.cpp">
+      <Filter>ToneDesigner</Filter>
+    </ClCompile>
+    <ClCompile Include="Core/Extensions.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="NoteByNote\Host\ControllerLink.cpp">
+      <Filter>NoteByNote\Host</Filter>
+    </ClCompile>
+    <ClCompile Include="NoteByNote\Host\NoteByNoteHostServices.cpp">
+      <Filter>NoteByNote\Host</Filter>
+    </ClCompile>
+    <ClCompile Include="NoteByNote\Controller\NoteByNoteNativeScoring.cpp">
+      <Filter>NoteByNote\Controller</Filter>
+    </ClCompile>
+    <ClCompile Include="NoteByNote\Controller\ControllerRuntime.cpp">
+      <Filter>NoteByNote\Controller</Filter>
+    </ClCompile>
+    <ClCompile Include="AudioBridge\Input\RocksmithGate.cpp">
+      <Filter>AudioBridge\Input</Filter>
+    </ClCompile>
+    <ClCompile Include="Overlay/OverlayInputCapture.cpp">
+      <Filter>Overlay</Filter>
+    </ClCompile>
+    <ClCompile Include="Overlay/OverlayToggles.cpp">
+      <Filter>Overlay</Filter>
+    </ClCompile>
+    <ClCompile Include="NoteByNote\Controller\NoteByNoteController.cpp">
+      <Filter>NoteByNote\Controller</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="AudioBridge\Input\AsioBufferState.hpp">
+      <Filter>AudioBridge\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="AudioBridge\Diagnostics\AudioLifecycleTrace.hpp">
+      <Filter>AudioBridge\Diagnostics</Filter>
+    </ClInclude>
+    <ClInclude Include="Recorder\DrySignalRecording.hpp">
+      <Filter>Recorder</Filter>
+    </ClInclude>
+    <ClInclude Include="ExternalAmp\ExternalAmp.hpp">
+      <Filter>ExternalAmp</Filter>
+    </ClInclude>
+    <ClInclude Include="NoteByNote\Detection\HfcOnsetDetector.hpp">
+      <Filter>NoteByNote\Detection</Filter>
+    </ClInclude>
+    <ClInclude Include="AudioBridge\Input\HumRemover.hpp">
+      <Filter>AudioBridge\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="NoteByNote\Ml\MlAudioExporter.hpp">
+      <Filter>NoteByNote\Ml</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\MlFretDisplay.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="NoteByNote\Ml\MlStringFretReader.hpp">
+      <Filter>NoteByNote\Ml</Filter>
+    </ClInclude>
+    <ClInclude Include="AudioBridge\Engine\OutputBackend.hpp">
+      <Filter>AudioBridge\Engine</Filter>
+    </ClInclude>
+    <ClInclude Include="AudioBridge\Engine\OutputRateMatcher.hpp">
+      <Filter>AudioBridge\Engine</Filter>
+    </ClInclude>
+    <ClInclude Include="AudioBridge\Engine\OutputTap.hpp">
+      <Filter>AudioBridge\Engine</Filter>
+    </ClInclude>
+    <ClInclude Include="AudioBridge\Cable\CableCaptureSession.hpp">
+      <Filter>AudioBridge\Cable</Filter>
+    </ClInclude>
+    <ClInclude Include="AudioBridge\Devices\DeviceEnumeratorHook.hpp">
+      <Filter>AudioBridge\Devices</Filter>
+    </ClInclude>
+    <ClInclude Include="AudioBridge\Cable\CableEndpointVolume.hpp">
+      <Filter>AudioBridge\Cable</Filter>
+    </ClInclude>
+    <ClInclude Include="NoteByNote\Detection\RawPitchVerifier.hpp">
+      <Filter>NoteByNote\Detection</Filter>
+    </ClInclude>
+    <ClInclude Include="Core\RsModsHelper.hpp">
+      <Filter>Core</Filter>
+    </ClInclude>
+    <ClInclude Include="ToneDesigner\SongLibrary.hpp">
+      <Filter>ToneDesigner</Filter>
+    </ClInclude>
+    <ClInclude Include="ToneDesigner\ToneBackup.hpp">
+      <Filter>ToneDesigner</Filter>
+    </ClInclude>
+    <ClInclude Include="Shared\VstHostControl.hpp">
+      <Filter>Shared</Filter>
+    </ClInclude>
+    <ClInclude Include="ToneDesigner\VstHostLink.hpp">
+      <Filter>ToneDesigner</Filter>
+    </ClInclude>
+    <ClInclude Include="Core/Extensions.hpp">
+      <Filter>Core</Filter>
+    </ClInclude>
+    <ClInclude Include="NoteByNote\Detection\ChordAttackConfirmation.hpp">
+      <Filter>NoteByNote\Detection</Filter>
+    </ClInclude>
+    <ClInclude Include="NoteByNote\Detection\ChordAttackGate.hpp">
+      <Filter>NoteByNote\Detection</Filter>
+    </ClInclude>
+    <ClInclude Include="NoteByNote\Detection\ChordPitchDecision.hpp">
+      <Filter>NoteByNote\Detection</Filter>
+    </ClInclude>
+    <ClInclude Include="NoteByNote\Detection\DetectionFeedback.hpp">
+      <Filter>NoteByNote\Detection</Filter>
+    </ClInclude>
+    <ClInclude Include="NoteByNote\Detection\MlChordConfirmation.hpp">
+      <Filter>NoteByNote\Detection</Filter>
+    </ClInclude>
+    <ClInclude Include="NoteByNote\Host\NoteByNoteHostServices.hpp">
+      <Filter>NoteByNote\Host</Filter>
+    </ClInclude>
+    <ClInclude Include="NoteByNote\Detection\PreHoldCommitGate.hpp">
+      <Filter>NoteByNote\Detection</Filter>
+    </ClInclude>
+    <ClInclude Include="AudioBridge\Input\RocksmithGate.hpp">
+      <Filter>AudioBridge\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="Overlay/OverlayInputCapture.hpp">
+      <Filter>Overlay</Filter>
+    </ClInclude>
+    <ClInclude Include="Overlay/OverlayToggles.hpp">
+      <Filter>Overlay</Filter>
+    </ClInclude>
+    <ClInclude Include="Core/PitchNames.hpp">
+      <Filter>Core</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
