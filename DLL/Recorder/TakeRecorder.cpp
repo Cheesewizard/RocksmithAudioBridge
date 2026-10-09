@@ -69,7 +69,7 @@ namespace Audio::Takes
 				if (*handle) { CloseHandle(*handle); *handle = nullptr; }
 		}
 
-		// Launches RSMods.exe --video-take hidden. See GUI/Audio/VideoTakeHost.cs for the other half.
+		// Launches RSMods.exe --video-take hidden. See GUI/Features/VideoRecorder/VideoTakeHost.cs for the other half.
 		bool LaunchVideoHelper(const std::wstring& folder)
 		{
 			const std::filesystem::path executable = GameFolder() / L"RSMods" / L"RSMods.exe";
@@ -234,7 +234,7 @@ namespace Audio::Takes
 		WritePrivateProfileStringW(L"Audio Bridge", L"CaptureMode", video ? L"Video" : L"Audio", SettingsFile().c_str());
 	}
 
-	// Read by the video helper (GUI/Audio/WindowCaptureRecorder.cs) when a take starts; the presets themselves
+	// Read by the video helper (GUI/Features/VideoRecorder/WindowCaptureRecorder.cs) when a take starts; the presets themselves
 	// live in GUI/Native/WindowCapture (Quality).
 	int VideoQuality()
 	{

@@ -5,7 +5,7 @@
 
 // Backups of the Tone designer's setup: tones, song tones, plugin settings and its settings, one zip each, in
 // Documents\Rocksmith Audio Bridge\Tone designer backups. RSMods.exe makes and restores them
-// (GUI/ToneDesignerTools.cs). One automatic backup a day (the newest 7 kept), and Back up now / Restore on the
+// (GUI/Features/ToneDesigner/ToneDesignerTools.cs). One automatic backup a day (the newest 7 kept), and Back up now / Restore on the
 // page. A restore closes Tone designer first (it autosaves its chain), backs up what is there now, then starts
 // Tone designer again if it was running.
 namespace ToneBackup

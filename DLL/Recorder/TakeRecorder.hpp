@@ -4,7 +4,7 @@
 //
 // Audio: the engine records the paired wet + dry WAVs in process (control ops 2 start / 3 stop), exactly as the
 // desktop bridge asks it to.
-// Video: RSMods.exe is started hidden with --video-take (GUI/Audio/VideoTakeHost.cs). It runs the same Windows
+// Video: RSMods.exe is started hidden with --video-take (GUI/Features/VideoRecorder/VideoTakeHost.cs). It runs the same Windows
 // Graphics Capture recorder the desktop bridge uses, and on stop muxes the capture with the finished WAV into an
 // MP4, deletes the now-redundant wet WAV (a video take is always dry WAV + MP4), then exits. Out of process on purpose: an encoder crash or hang loses one take, not the game, and the
 // encoder's memory stays out of Rocksmith's 32-bit address space. RSMods.exe is reused rather than a new helper

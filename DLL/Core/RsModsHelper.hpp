@@ -4,7 +4,7 @@
 #include <string>
 
 // RSMods.exe (the game's RSMods folder) run as a hidden helper: no window, the overlay waits for its exit code.
-// The Tone designer's song index and backups use it (GUI/ToneDesignerTools.cs); it can read the game's .psarc
+// The Tone designer's song index and backups use it (GUI/Features/ToneDesigner/ToneDesignerTools.cs); it can read the game's .psarc
 // files and write zips, which the game DLL cannot.
 namespace RsModsHelper
 {
