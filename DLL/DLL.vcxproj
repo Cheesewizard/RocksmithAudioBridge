@@ -219,7 +219,7 @@
     <ClCompile Include="QualityOfLife.cpp" />
 
 
-    <ClCompile Include="Mods\NoteByNoteController.cpp" Condition="'$(RSModsResearchBridge)' != 'true'"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="NoteByNote\Host\ControllerLink.cpp" Condition="'$(RSModsResearchBridge)' != 'true'"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="Mods\NoteByNoteNativeScoring.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">NotUsing</PrecompiledHeader>

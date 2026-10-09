@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
+    <Filter Include="NoteByNote">
+      <UniqueIdentifier>{36eec84d-d697-4681-94aa-53f87768545d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="NoteByNote\Host">
+      <UniqueIdentifier>{eb478020-8060-40e7-a3b5-49c788380237}</UniqueIdentifier>
+    </Filter>
     <Filter Include="DropPedal">
       <UniqueIdentifier>{bc88a6d2-5bac-4796-8f47-8e37baa33bd5}</UniqueIdentifier>
     </Filter>
@@ -895,8 +901,8 @@
     <ClCompile Include="Extensions.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Mods\NoteByNoteController.cpp">
-      <Filter>Mods</Filter>
+    <ClCompile Include="NoteByNote\Host\ControllerLink.cpp">
+      <Filter>NoteByNote\Host</Filter>
     </ClCompile>
     <ClCompile Include="Mods\NoteByNoteHostServices.cpp">
       <Filter>Mods</Filter>
