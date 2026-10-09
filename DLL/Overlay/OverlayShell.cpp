@@ -7,7 +7,7 @@
 #include "AudioBridge/Cable/CableInput.hpp"
 #include "AudioBridge/Engine/OutputDevices.hpp"
 #include "AudioBridge/Engine/OutputTap.hpp"
-#include "Audio/TakeRecorder.hpp"
+#include "Recorder/TakeRecorder.hpp"
 #include "NoteByNote/Ml/MlServiceLauncher.hpp"
 #include "ExternalAmp/ExternalAmp.hpp"
 #include "ToneDesigner/VstHostLink.hpp"

@@ -7,7 +7,7 @@
 #include "AudioBridge/Cable/CableInput.hpp"
 #include "NoteByNote/Ml/MlAudioExporter.hpp"
 #include "NoteByNote/Detection/RawPitchVerifier.hpp"
-#include "Audio/DrySignalRecording.hpp"
+#include "Recorder/DrySignalRecording.hpp"
 #include "AudioBridge/Devices/DeviceEnumeratorHook.hpp"
 #include "HumRemover.hpp"
 #include <wrl/client.h>

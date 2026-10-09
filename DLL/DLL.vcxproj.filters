@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
+    <Filter Include="Recorder">
+      <UniqueIdentifier>{75000f7f-d796-4315-99c5-82930d002101}</UniqueIdentifier>
+    </Filter>
     <Filter Include="ToneDesigner">
       <UniqueIdentifier>{d49c3991-7fb0-40d3-bfcd-ac79010f97d2}</UniqueIdentifier>
     </Filter>
@@ -420,11 +423,11 @@
     <ClCompile Include="AudioBridge\Engine\OutputDevices.cpp">
       <Filter>AudioBridge\Engine</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\TakeRecorder.cpp">
-      <Filter>Audio</Filter>
+    <ClCompile Include="Recorder\TakeRecorder.cpp">
+      <Filter>Recorder</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\GameAudioRecorder.cpp">
-      <Filter>Audio</Filter>
+    <ClCompile Include="Recorder\GameAudioRecorder.cpp">
+      <Filter>Recorder</Filter>
     </ClCompile>
     <ClCompile Include="DropPedal\DelayLinePitchShifter.cpp">
       <Filter>DropPedal</Filter>
@@ -842,14 +845,14 @@
     <ClInclude Include="AudioBridge\Engine\OutputDevices.hpp">
       <Filter>AudioBridge\Engine</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\TakeRecorder.hpp">
-      <Filter>Audio</Filter>
+    <ClInclude Include="Recorder\TakeRecorder.hpp">
+      <Filter>Recorder</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\GameAudioRecorder.hpp">
-      <Filter>Audio</Filter>
+    <ClInclude Include="Recorder\GameAudioRecorder.hpp">
+      <Filter>Recorder</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\AudioPacketQueue.hpp">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Recorder\AudioPacketQueue.hpp">
+      <Filter>Recorder</Filter>
     </ClInclude>
     <ClInclude Include="AudioBridge\Engine\AudioControl.hpp">
       <Filter>AudioBridge\Engine</Filter>
@@ -978,8 +981,8 @@
     <ClInclude Include="AudioBridge\Diagnostics\AudioLifecycleTrace.hpp">
       <Filter>AudioBridge\Diagnostics</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\DrySignalRecording.hpp">
-      <Filter>Audio</Filter>
+    <ClInclude Include="Recorder\DrySignalRecording.hpp">
+      <Filter>Recorder</Filter>
     </ClInclude>
     <ClInclude Include="ExternalAmp\ExternalAmp.hpp">
       <Filter>ExternalAmp</Filter>

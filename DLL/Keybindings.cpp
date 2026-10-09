@@ -1,7 +1,7 @@
 #include "stdafx.h"
 #include "Keybindings.hpp"
 #include "DropPedal/DropPedalInput.hpp"
-#include "Audio/TakeRecorder.hpp"
+#include "Recorder/TakeRecorder.hpp"
 #include "AudioBridge/Engine/AudioBridgeEngine.hpp"
 
 namespace Keybindings {

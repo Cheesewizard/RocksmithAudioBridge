@@ -153,7 +153,7 @@ namespace RSMods.Audio
 		[DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
 		private static extern uint GetPrivateProfileStringW(string section, string key, string defaultValue, System.Text.StringBuilder value, uint size, string file);
 
-		/// <summary>RSMods.ini [Audio Bridge] VideoQuality, set from the overlay's Record page (DLL/Audio/TakeRecorder.cpp):
+		/// <summary>RSMods.ini [Audio Bridge] VideoQuality, set from the overlay's Record page (DLL/Recorder/TakeRecorder.cpp):
 		/// 0 High (default), 1 Standard, 2 Small (1080p). Read at each take start, so a change applies to the next take.</summary>
 		private static uint ReadVideoQuality()
 		{

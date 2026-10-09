@@ -11,7 +11,7 @@ namespace RSMods.Audio
 	/// Capture recorder (rswindowcapture.dll, same code the desktop bridge uses) and muxes the result. It reuses
 	/// RSMods.exe instead of shipping a new executable so antivirus sees an already-trusted binary.
 	///
-	/// Contract with DLL/Audio/TakeRecorder.cpp (change both together):
+	/// Contract with DLL/Recorder/TakeRecorder.cpp (change both together):
 	///   RSMods.exe --video-take &lt;hwnd&gt; &lt;game pid&gt; "&lt;directory&gt;" &lt;token&gt;
 	///   Events (created by the DLL): Local\RSModsVideoTake-&lt;token&gt;-ready (set here once capturing) and
 	///   Local\RSModsVideoTake-&lt;token&gt;-stop (set by the DLL after it stops the audio take).
