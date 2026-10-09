@@ -10,10 +10,10 @@
 #include "Audio/TakeRecorder.hpp"
 #include "NoteByNote/Ml/MlServiceLauncher.hpp"
 #include "ExternalAmp/ExternalAmp.hpp"
-#include "Audio/VstHostLink.hpp"
+#include "ToneDesigner/VstHostLink.hpp"
 #include "Shared/VstHostControl.hpp"
-#include "Audio/SongLibrary.hpp"
-#include "Audio/ToneBackup.hpp"
+#include "ToneDesigner/SongLibrary.hpp"
+#include "ToneDesigner/ToneBackup.hpp"
 #include "Extensions.hpp"
 #include "NoteByNote/Host/ControllerBridge.hpp"
 #include "DropPedal/DropPedal.hpp"
@@ -732,7 +732,7 @@ namespace Overlay
 		}
 
 		// ---- Tone designer --------------------------------------------------------------------------------
-		// The VST host (VstHost/, Audio/VstHostLink.hpp) plays the guitar through a chain of VST3 plugins and shows the
+		// The VST host (VstHost/, ToneDesigner/VstHostLink.hpp) plays the guitar through a chain of VST3 plugins and shows the
 		// selected pedal's own window over the game. This page is laid out like a chain loader, in one framed panel:
 		//   - a bar: File / Edit / View, the tone's name between previous / next arrows (amber dot = unsaved),
 		//     VST | Game amp (A/B), the amp window and power buttons;

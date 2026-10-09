@@ -1,6 +1,6 @@
 #include "stdafx.h"
 #include "ToneBackup.hpp"
-#include "RsModsHelper.hpp"
+#include "Audio/RsModsHelper.hpp"
 #include "VstHostLink.hpp"
 
 #include <ShlObj.h>

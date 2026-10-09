@@ -32,10 +32,10 @@
     <ClCompile Include="Audio\TakeRecorder.cpp" />
     <ClCompile Include="AudioBridge\Engine\OutputTap.cpp" />
     <ClCompile Include="ExternalAmp\ExternalAmp.cpp" />
-    <ClCompile Include="Audio\VstHostLink.cpp" />
+    <ClCompile Include="ToneDesigner\VstHostLink.cpp" />
     <ClCompile Include="Audio\RsModsHelper.cpp" />
-    <ClCompile Include="Audio\SongLibrary.cpp" />
-    <ClCompile Include="Audio\ToneBackup.cpp" />
+    <ClCompile Include="ToneDesigner\SongLibrary.cpp" />
+    <ClCompile Include="ToneDesigner\ToneBackup.cpp" />
     <ClCompile Include="Audio\GameAudioRecorder.cpp" />
     <ClCompile Include="DropPedal\DelayLinePitchShifter.cpp" />
     <ClCompile Include="DropPedal\SpeakerMode\WwiseMusicHook.cpp" />
@@ -305,10 +305,10 @@
     <ClInclude Include="Audio\TakeRecorder.hpp" />
     <ClInclude Include="AudioBridge\Engine\OutputTap.hpp" />
     <ClInclude Include="ExternalAmp\ExternalAmp.hpp" />
-    <ClInclude Include="Audio\VstHostLink.hpp" />
+    <ClInclude Include="ToneDesigner\VstHostLink.hpp" />
     <ClInclude Include="Audio\RsModsHelper.hpp" />
-    <ClInclude Include="Audio\SongLibrary.hpp" />
-    <ClInclude Include="Audio\ToneBackup.hpp" />
+    <ClInclude Include="ToneDesigner\SongLibrary.hpp" />
+    <ClInclude Include="ToneDesigner\ToneBackup.hpp" />
     <ClInclude Include="Shared\VstHostControl.hpp" />
     <ClInclude Include="Audio\GameAudioRecorder.hpp" />
     <ClInclude Include="Audio\DrySignalRecording.hpp" />

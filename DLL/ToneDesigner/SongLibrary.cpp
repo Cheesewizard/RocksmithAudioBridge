@@ -1,6 +1,6 @@
 #include "stdafx.h"
 #include "SongLibrary.hpp"
-#include "RsModsHelper.hpp"
+#include "Audio/RsModsHelper.hpp"
 
 #include <ShlObj.h>
 #include <algorithm>

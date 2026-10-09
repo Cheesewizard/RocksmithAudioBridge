@@ -1,6 +1,6 @@
 #pragma once
 
-// Shared state between the overlay (DLL/Audio/VstHostLink.cpp) and the VST host program
+// Shared state between the overlay (DLL/ToneDesigner/VstHostLink.cpp) and the VST host program
 // (VstHost/Source/Main.cpp). Plain named shared memory; the layout is the same in 32 and 64 bit (only 32-bit
 // fields). The VST host does the audio and owns the amp window; the overlay tells it whether the overlay is on
 // screen, and sends the Tone designer page's commands (one at a time, see Command).

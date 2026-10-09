@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
+    <Filter Include="ToneDesigner">
+      <UniqueIdentifier>{d49c3991-7fb0-40d3-bfcd-ac79010f97d2}</UniqueIdentifier>
+    </Filter>
     <Filter Include="ExternalAmp">
       <UniqueIdentifier>{bd715ec1-7aec-467d-856d-bb3d5b918ec0}</UniqueIdentifier>
     </Filter>
@@ -931,14 +934,14 @@
     <ClCompile Include="Audio\RsModsHelper.cpp">
       <Filter>Audio</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\SongLibrary.cpp">
-      <Filter>Audio</Filter>
+    <ClCompile Include="ToneDesigner\SongLibrary.cpp">
+      <Filter>ToneDesigner</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\ToneBackup.cpp">
-      <Filter>Audio</Filter>
+    <ClCompile Include="ToneDesigner\ToneBackup.cpp">
+      <Filter>ToneDesigner</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\VstHostLink.cpp">
-      <Filter>Audio</Filter>
+    <ClCompile Include="ToneDesigner\VstHostLink.cpp">
+      <Filter>ToneDesigner</Filter>
     </ClCompile>
     <ClCompile Include="Extensions.cpp">
       <Filter>Source Files</Filter>
@@ -1020,17 +1023,17 @@
     <ClInclude Include="Audio\RsModsHelper.hpp">
       <Filter>Audio</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\SongLibrary.hpp">
-      <Filter>Audio</Filter>
+    <ClInclude Include="ToneDesigner\SongLibrary.hpp">
+      <Filter>ToneDesigner</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\ToneBackup.hpp">
-      <Filter>Audio</Filter>
+    <ClInclude Include="ToneDesigner\ToneBackup.hpp">
+      <Filter>ToneDesigner</Filter>
     </ClInclude>
     <ClInclude Include="Shared\VstHostControl.hpp">
       <Filter>Shared</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\VstHostLink.hpp">
-      <Filter>Audio</Filter>
+    <ClInclude Include="ToneDesigner\VstHostLink.hpp">
+      <Filter>ToneDesigner</Filter>
     </ClInclude>
     <ClInclude Include="Extensions.hpp">
       <Filter>Main Headers</Filter>

@@ -13,7 +13,7 @@ using System.Threading.Tasks;
 
 namespace RSMods
 {
-	// Hidden helpers for the in-game Tone designer page (DLL/Audio/SongLibrary.cpp and ToneBackup.cpp start them; no
+	// Hidden helpers for the in-game Tone designer page (DLL/ToneDesigner/SongLibrary.cpp and ToneBackup.cpp start them; no
 	// window, exit code 0 = done):
 	//   --song-index <Rocksmith folder> <out.tsv>   every song in songs.psarc and dlc\*_p.psarc, one line each:
 	//                                                key, title, artist, album, year, arrangements, file (tab separated,

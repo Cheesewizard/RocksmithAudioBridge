@@ -11,7 +11,7 @@
 #include "Overlay/OverlayToggles.hpp"
 #include "PitchNames.hpp"
 #include "Extensions.hpp"
-#include "Audio/VstHostLink.hpp"
+#include "ToneDesigner/VstHostLink.hpp"
 #include "Mods/ExtendedRangeMode.hpp"
 #include "Shared/ProductVersion.hpp"
 #include "NoteByNote/Ui/NoteByNoteHudLayout.hpp"
