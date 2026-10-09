@@ -36,10 +36,10 @@ namespace RSMods
 			}
 		}
 
-		// The desktop bridge window is retired, but the game DLL and the overlay still write these values one line
-		// at a time, so this window keeps the settings sync: re-read the bridge-owned values whenever the
-		// window is activated, so a later full save from here cannot revert what the bridge wrote.
-		private void AddAudioRoutingButton()
+		// The game DLL and the in-game overlay write these values one line at a time while this window may be open.
+		// Re-read them whenever the window is activated (switching back from the game), so a later full save from
+		// here cannot revert what the game wrote. Called once from InitializeRsModsPlusPages.
+		private void WireBridgeSettingsSync()
 		{
 			Activated += (sender, args) => SyncBridgeOwnedSettingsFromDisk();
 		}
