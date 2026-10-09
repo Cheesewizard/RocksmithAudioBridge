@@ -234,9 +234,6 @@
     <ClCompile Include="Mods\NoteByNoteHudLabel.cpp">
       <Filter>Mods</Filter>
     </ClCompile>
-    <ClCompile Include="Research\ResearchBridge.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="Mods\AudioDevices.cpp">
       <Filter>Mods</Filter>
     </ClCompile>
@@ -851,5 +848,168 @@
     <MASM Include="syscalls.asm">
       <Filter>Source Files</Filter>
     </MASM>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Audio\ExternalAmp.cpp">
+      <Filter>Audio</Filter>
+    </ClCompile>
+    <ClCompile Include="Audio\MlAudioExporter.cpp">
+      <Filter>Audio</Filter>
+    </ClCompile>
+    <ClCompile Include="Audio\MlStringFretReader.cpp">
+      <Filter>Audio</Filter>
+    </ClCompile>
+    <ClCompile Include="Audio\OutputTap.cpp">
+      <Filter>Audio</Filter>
+    </ClCompile>
+    <ClCompile Include="Audio\PersistentCapture.cpp">
+      <Filter>Audio</Filter>
+    </ClCompile>
+    <ClCompile Include="Audio\PersistentDevice.cpp">
+      <Filter>Audio</Filter>
+    </ClCompile>
+    <ClCompile Include="Audio\RawPitchVerifier.cpp">
+      <Filter>Audio</Filter>
+    </ClCompile>
+    <ClCompile Include="Audio\RsModsHelper.cpp">
+      <Filter>Audio</Filter>
+    </ClCompile>
+    <ClCompile Include="Audio\SongLibrary.cpp">
+      <Filter>Audio</Filter>
+    </ClCompile>
+    <ClCompile Include="Audio\ToneBackup.cpp">
+      <Filter>Audio</Filter>
+    </ClCompile>
+    <ClCompile Include="Audio\VstHostLink.cpp">
+      <Filter>Audio</Filter>
+    </ClCompile>
+    <ClCompile Include="Extensions.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Mods\NoteByNoteController.cpp">
+      <Filter>Mods</Filter>
+    </ClCompile>
+    <ClCompile Include="Mods\NoteByNoteHostServices.cpp">
+      <Filter>Mods</Filter>
+    </ClCompile>
+    <ClCompile Include="Mods\NoteByNoteNativeScoring.cpp">
+      <Filter>Mods</Filter>
+    </ClCompile>
+    <ClCompile Include="Mods\ResearchProbeRuntime.cpp">
+      <Filter>Mods</Filter>
+    </ClCompile>
+    <ClCompile Include="Mods\RocksmithGate.cpp">
+      <Filter>Mods</Filter>
+    </ClCompile>
+    <ClCompile Include="OverlayInputCapture.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="OverlayToggles.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Research\NoteByNoteProbe\NoteByNoteResearchProbe.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Audio\AsioBufferState.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\AudioLifecycleTrace.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\DrySignalRecording.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\ExternalAmp.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\HfcOnsetDetector.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\HumRemover.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\MlAudioExporter.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\MlFretDisplay.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\MlStringFretReader.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\OutputBackend.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\OutputRateMatcher.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\OutputTap.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\PersistentCapture.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\PersistentInput.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\PersistentVolume.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\RawPitchVerifier.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\RsModsHelper.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\SongLibrary.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\ToneBackup.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\VstHostControl.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Audio\VstHostLink.hpp">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="Extensions.hpp">
+      <Filter>Main Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="Mods\ChordAttackConfirmation.hpp">
+      <Filter>Mods\Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="Mods\ChordAttackGate.hpp">
+      <Filter>Mods\Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="Mods\ChordPitchDecision.hpp">
+      <Filter>Mods\Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="Mods\DetectionFeedback.hpp">
+      <Filter>Mods\Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="Mods\MlChordConfirmation.hpp">
+      <Filter>Mods\Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="Mods\NoteByNoteHostServices.hpp">
+      <Filter>Mods\Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="Mods\PreHoldCommitGate.hpp">
+      <Filter>Mods\Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="Mods\RocksmithGate.hpp">
+      <Filter>Mods\Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="OverlayInputCapture.hpp">
+      <Filter>Main Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="OverlayToggles.hpp">
+      <Filter>Main Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="PitchNames.hpp">
+      <Filter>Main Headers</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
