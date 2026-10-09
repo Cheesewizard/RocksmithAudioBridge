@@ -1,9 +1,9 @@
 #include "stdafx.h"
-#include "NoteByNoteProbe.hpp"
+#include "NoteByNoteMode.hpp"
 
-#include "NoteByNoteNativeScoring.hpp"
-#include "D3D/NoteByNoteHighwayRenderer.hpp"
-#include "Research/ResearchBridge.hpp"
+#include "NoteByNote/Controller/NoteByNoteNativeScoring.hpp"
+#include "NoteByNote/Ui/NoteByNoteHighwayRenderer.hpp"
+#include "NoteByNote/Host/ControllerBridge.hpp"
 #include "Settings.hpp"
 
 namespace

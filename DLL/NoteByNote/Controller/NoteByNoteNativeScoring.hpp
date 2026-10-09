@@ -1,7 +1,7 @@
 #pragma once
 
-#include "NoteByNoteProbe.hpp"
-#include "Research/ResearchProtocol.hpp"
+#include "NoteByNote/Host/NoteByNoteMode.hpp"
+#include "NoteByNote/Protocol/ControllerApi.hpp"
 
 namespace NoteByNoteNativeScoring
 {

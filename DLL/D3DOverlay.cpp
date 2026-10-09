@@ -3,10 +3,10 @@
 #include "Audio/SharedOutput.hpp"
 #include "DropPedal/DropPedalOverlay.hpp"
 #include "DropPedal/DropPedal.hpp"
-#include "Mods/NoteByNoteNativeScoring.hpp"
-#include "D3D/NoteByNoteHighwayRenderer.hpp"
-#include "Audio/MlStringFretReader.hpp"
-#include "Research/ResearchBridge.hpp"
+#include "NoteByNote/Controller/NoteByNoteNativeScoring.hpp"
+#include "NoteByNote/Ui/NoteByNoteHighwayRenderer.hpp"
+#include "NoteByNote/Ml/MlStringFretReader.hpp"
+#include "NoteByNote/Host/ControllerBridge.hpp"
 #include "Audio/CableInput.hpp"
 #include "OverlayToggles.hpp"
 #include "PitchNames.hpp"
@@ -14,7 +14,7 @@
 #include "Audio/VstHostLink.hpp"
 #include "Mods/ExtendedRangeMode.hpp"
 #include "Shared/ProductVersion.hpp"
-#include "Overlay/HudLayout.hpp"
+#include "NoteByNote/Ui/NoteByNoteHudLayout.hpp"
 
 /// <returns>Size of Rocksmith Window</returns>
 Resolution GameOverlay::GetWindowSize() {

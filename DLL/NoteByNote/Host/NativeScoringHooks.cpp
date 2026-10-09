@@ -1,8 +1,8 @@
 #include "stdafx.h"
-#include "NoteByNoteNativeScoring.hpp"
+#include "NoteByNote/Controller/NoteByNoteNativeScoring.hpp"
 
-#include "D3D/NoteByNoteHighwayRenderer.hpp"
-#include "Research/ResearchBridge.hpp"
+#include "NoteByNote/Ui/NoteByNoteHighwayRenderer.hpp"
+#include "NoteByNote/Host/ControllerBridge.hpp"
 #include "VersioningStruct.h"
 
 #include <cstring>

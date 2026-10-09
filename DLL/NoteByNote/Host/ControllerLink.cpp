@@ -1,8 +1,8 @@
 #include "stdafx.h"
-#include "Research/ResearchBridge.hpp"
-#include "Mods/NoteByNoteHostServices.hpp"
-#include "Mods/NoteByNoteNativeScoring.hpp"
-#include "Mods/NoteByNoteProbe.hpp"
+#include "NoteByNote/Host/ControllerBridge.hpp"
+#include "NoteByNote/Host/NoteByNoteHostServices.hpp"
+#include "NoteByNote/Controller/NoteByNoteNativeScoring.hpp"
+#include "NoteByNote/Host/NoteByNoteMode.hpp"
 
 extern "C" const ResearchProtocol::ProbeApi* __cdecl RSMP_GetResearchProbeApi(
 	uint32_t version, const ResearchProtocol::HostApi* host);

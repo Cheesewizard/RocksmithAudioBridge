@@ -1,6 +1,6 @@
 #pragma once
 
-#include "NoteByNoteTypes.hpp"
+#include "NoteByNote/Protocol/NoteByNoteTypes.hpp"
 namespace NoteByNoteHostServices
 {
 	const ResearchProtocol::HostApi& GetHostApi();

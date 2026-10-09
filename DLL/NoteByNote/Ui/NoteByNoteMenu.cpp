@@ -1,10 +1,10 @@
 #include "stdafx.h"
 #include "NoteByNoteMenu.hpp"
 
-#include "NoteByNoteProbe.hpp"
-#include "NoteByNoteNativeScoring.hpp"
-#include "FlowSpeedCap.hpp"
-#include "RiffRepeater.hpp"
+#include "NoteByNote/Host/NoteByNoteMode.hpp"
+#include "NoteByNote/Controller/NoteByNoteNativeScoring.hpp"
+#include "NoteByNote/Detection/FlowSpeedCap.hpp"
+#include "Mods/RiffRepeater.hpp"
 #include "GameState.hpp"
 #include "OverlayToggles.hpp"
 

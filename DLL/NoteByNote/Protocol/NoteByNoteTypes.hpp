@@ -2,8 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
-#include "Audio/RawAttackEvidence.hpp"
-#include "DetectionFeedback.hpp"
+#include "NoteByNote/Detection/RawAttackEvidence.hpp"
+#include "NoteByNote/Detection/DetectionFeedback.hpp"
 namespace ResearchProtocol
 {
 	enum class LogLevel : uint32_t

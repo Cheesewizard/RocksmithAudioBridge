@@ -1,7 +1,7 @@
 #include "stdafx.h"
 #include "MlAudioExporter.hpp"
-#include "Research/ResearchBridge.hpp"
-#include "Mods/ArrangementInstrument.hpp"
+#include "NoteByNote/Host/ControllerBridge.hpp"
+#include "NoteByNote/Detection/ArrangementInstrument.hpp"
 
 #include <atomic>
 #include <cstddef>

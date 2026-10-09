@@ -1,16 +1,16 @@
 #include "NoteByNoteHostServices.hpp"
-#include "NoteByNoteNativeScoring.hpp"
-#include "MlChordConfirmation.hpp"
-#include "ArrangementInstrument.hpp"
+#include "NoteByNote/Controller/NoteByNoteNativeScoring.hpp"
+#include "NoteByNote/Detection/MlChordConfirmation.hpp"
+#include "NoteByNote/Detection/ArrangementInstrument.hpp"
 
 #include <iomanip>
 
 #include "Log.hpp"
-#include "NoteByNoteProbe.hpp"
+#include "NoteByNoteMode.hpp"
 #include "DropPedal/DropPedal.hpp"
-#include "Audio/RawPitchVerifier.hpp"
-#include "Audio/MlAudioExporter.hpp"
-#include "Audio/MlStringFretReader.hpp"
+#include "NoteByNote/Detection/RawPitchVerifier.hpp"
+#include "NoteByNote/Ml/MlAudioExporter.hpp"
+#include "NoteByNote/Ml/MlStringFretReader.hpp"
 
 #include <atomic>
 #include <cmath>

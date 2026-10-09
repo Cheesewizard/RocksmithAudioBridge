@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ResearchProtocol.hpp"
+#include "NoteByNote/Protocol/ControllerApi.hpp"
 
 #include <string>
 

@@ -1,7 +1,7 @@
 #include "stdafx.h"
 #include "NoteByNoteHudLabel.hpp"
 
-#include "NoteByNoteProbe.hpp"
+#include "NoteByNote/Host/NoteByNoteMode.hpp"
 #include "OverlayToggles.hpp"
 
 #include <cstdint>

@@ -2,7 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
-#include "Mods/NoteByNoteTypes.hpp"
+#include "NoteByNote/Protocol/NoteByNoteTypes.hpp"
 
 namespace ResearchProtocol
 {

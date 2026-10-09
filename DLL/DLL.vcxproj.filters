@@ -1,6 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
+    <Filter Include="NoteByNote\Controller">
+      <UniqueIdentifier>{75569d70-1e2e-42f5-8f85-9cc486f87e1f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="NoteByNote\Detection">
+      <UniqueIdentifier>{ea97d3b9-c915-4da7-a5e4-79760e4131ec}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="NoteByNote\Ml">
+      <UniqueIdentifier>{fd3a5d4b-c969-42a2-bfe7-d2470c47d059}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="NoteByNote\Protocol">
+      <UniqueIdentifier>{f73ae607-a859-43af-9a88-958e1d351334}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="NoteByNote\Ui">
+      <UniqueIdentifier>{d709a14c-0538-42e3-8e89-f2fdd0a84faf}</UniqueIdentifier>
+    </Filter>
     <Filter Include="NoteByNote">
       <UniqueIdentifier>{36eec84d-d697-4681-94aa-53f87768545d}</UniqueIdentifier>
     </Filter>
@@ -237,17 +252,17 @@
     <ClCompile Include="Mods\RiffRepeater.cpp">
       <Filter>Mods</Filter>
     </ClCompile>
-	<ClCompile Include="Mods\NoteByNoteProbe.cpp">
-		<Filter>Mods</Filter>
+	<ClCompile Include="NoteByNote\Host\NoteByNoteMode.cpp">
+		<Filter>NoteByNote\Host</Filter>
 	</ClCompile>
-    <ClCompile Include="Mods\NoteByNoteHookHost.cpp">
-		<Filter>Mods</Filter>
+    <ClCompile Include="NoteByNote\Host\NativeScoringHooks.cpp">
+		<Filter>NoteByNote\Host</Filter>
 	</ClCompile>
-    <ClCompile Include="Mods\NoteByNoteMenu.cpp">
-      <Filter>Mods</Filter>
+    <ClCompile Include="NoteByNote\Ui\NoteByNoteMenu.cpp">
+      <Filter>NoteByNote\Ui</Filter>
     </ClCompile>
-    <ClCompile Include="Mods\NoteByNoteHudLabel.cpp">
-      <Filter>Mods</Filter>
+    <ClCompile Include="NoteByNote\Ui\NoteByNoteHudLabel.cpp">
+      <Filter>NoteByNote\Ui</Filter>
     </ClCompile>
     <ClCompile Include="Mods\AudioDevices.cpp">
       <Filter>Mods</Filter>
@@ -285,8 +300,8 @@
     <ClCompile Include="D3D/D3DHooks.cpp">
       <Filter>D3D</Filter>
     </ClCompile>
-    <ClCompile Include="D3D/NoteByNoteHighwayRenderer.cpp">
-      <Filter>D3D</Filter>
+    <ClCompile Include="NoteByNote/Ui/NoteByNoteHighwayRenderer.cpp">
+      <Filter>NoteByNote\Ui</Filter>
     </ClCompile>
     <ClCompile Include="CC\Effects\WavyNotesEffect.cpp">
       <Filter>CrowdControl\Effects</Filter>
@@ -363,8 +378,8 @@
     <ClCompile Include="Audio\CableInput.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\MlServiceLauncher.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="NoteByNote\Ml\MlServiceLauncher.cpp">
+      <Filter>NoteByNote\Ml</Filter>
     </ClCompile>
     <ClCompile Include="Audio\AsioProxyRegistration.cpp">
       <Filter>Source Files</Filter>
@@ -476,8 +491,8 @@
     <ClInclude Include="D3D/D3DHooks.hpp">
       <Filter>D3D</Filter>
     </ClInclude>
-    <ClInclude Include="D3D/NoteByNoteHighwayRenderer.hpp">
-      <Filter>D3D</Filter>
+    <ClInclude Include="NoteByNote/Ui/NoteByNoteHighwayRenderer.hpp">
+      <Filter>NoteByNote\Ui</Filter>
     </ClInclude>
     <ClInclude Include="D3D/D3D.hpp">
       <Filter>D3D</Filter>
@@ -590,23 +605,23 @@
     <ClInclude Include="Mods\RiffRepeater.hpp">
       <Filter>Mods\Headers</Filter>
     </ClInclude>
-	<ClInclude Include="Mods\NoteByNoteProbe.hpp">
-		<Filter>Mods\Headers</Filter>
+	<ClInclude Include="NoteByNote\Host\NoteByNoteMode.hpp">
+		<Filter>NoteByNote\Host</Filter>
 	</ClInclude>
-    <ClInclude Include="Mods\NoteByNoteNativeScoring.hpp">
-		<Filter>Mods\Headers</Filter>
+    <ClInclude Include="NoteByNote\Controller\NoteByNoteNativeScoring.hpp">
+		<Filter>NoteByNote\Controller</Filter>
 	</ClInclude>
-    <ClInclude Include="Mods\NoteByNoteMenu.hpp">
-      <Filter>Mods\Headers</Filter>
+    <ClInclude Include="NoteByNote\Ui\NoteByNoteMenu.hpp">
+      <Filter>NoteByNote\Ui</Filter>
     </ClInclude>
-    <ClInclude Include="Mods\NoteByNoteHudLabel.hpp">
-      <Filter>Mods\Headers</Filter>
+    <ClInclude Include="NoteByNote\Ui\NoteByNoteHudLabel.hpp">
+      <Filter>NoteByNote\Ui</Filter>
     </ClInclude>
-    <ClInclude Include="Research\ResearchBridge.hpp">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="NoteByNote\Host\ControllerBridge.hpp">
+      <Filter>NoteByNote\Host</Filter>
     </ClInclude>
-    <ClInclude Include="Research\ResearchProtocol.hpp">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="NoteByNote\Protocol\ControllerApi.hpp">
+      <Filter>NoteByNote\Protocol</Filter>
     </ClInclude>
     <ClInclude Include="Mods\AudioDevices.hpp">
       <Filter>Mods\Headers</Filter>
@@ -725,8 +740,8 @@
     <ClInclude Include="Overlay\AudioBridgeLogo.h">
       <Filter>Main Headers</Filter>
     </ClInclude>
-    <ClInclude Include="Overlay\HudLayout.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="NoteByNote\Ui\NoteByNoteHudLayout.hpp">
+      <Filter>NoteByNote\Ui</Filter>
     </ClInclude>
     <ClInclude Include="QualityOfLife.hpp">
       <Filter>Main Headers</Filter>
@@ -782,14 +797,14 @@
     <ClInclude Include="Audio\CableInput.hpp">
       <Filter>Main Headers</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\MlServiceLauncher.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="NoteByNote\Ml\MlServiceLauncher.hpp">
+      <Filter>NoteByNote\Ml</Filter>
     </ClInclude>
     <ClInclude Include="Audio\AsioProxyRegistration.hpp">
       <Filter>Main Headers</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\MlServiceControl.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="NoteByNote\Ml\MlServiceControl.hpp">
+      <Filter>NoteByNote\Ml</Filter>
     </ClInclude>
     <ClInclude Include="Audio\SharedOutput.hpp">
       <Filter>Audio</Filter>
@@ -868,11 +883,11 @@
     <ClCompile Include="Audio\ExternalAmp.cpp">
       <Filter>Audio</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\MlAudioExporter.cpp">
-      <Filter>Audio</Filter>
+    <ClCompile Include="NoteByNote\Ml\MlAudioExporter.cpp">
+      <Filter>NoteByNote\Ml</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\MlStringFretReader.cpp">
-      <Filter>Audio</Filter>
+    <ClCompile Include="NoteByNote\Ml\MlStringFretReader.cpp">
+      <Filter>NoteByNote\Ml</Filter>
     </ClCompile>
     <ClCompile Include="Audio\OutputTap.cpp">
       <Filter>Audio</Filter>
@@ -883,8 +898,8 @@
     <ClCompile Include="Audio\PersistentDevice.cpp">
       <Filter>Audio</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\RawPitchVerifier.cpp">
-      <Filter>Audio</Filter>
+    <ClCompile Include="NoteByNote\Detection\RawPitchVerifier.cpp">
+      <Filter>NoteByNote\Detection</Filter>
     </ClCompile>
     <ClCompile Include="Audio\RsModsHelper.cpp">
       <Filter>Audio</Filter>
@@ -904,14 +919,14 @@
     <ClCompile Include="NoteByNote\Host\ControllerLink.cpp">
       <Filter>NoteByNote\Host</Filter>
     </ClCompile>
-    <ClCompile Include="Mods\NoteByNoteHostServices.cpp">
-      <Filter>Mods</Filter>
+    <ClCompile Include="NoteByNote\Host\NoteByNoteHostServices.cpp">
+      <Filter>NoteByNote\Host</Filter>
     </ClCompile>
-    <ClCompile Include="Mods\NoteByNoteNativeScoring.cpp">
-      <Filter>Mods</Filter>
+    <ClCompile Include="NoteByNote\Controller\NoteByNoteNativeScoring.cpp">
+      <Filter>NoteByNote\Controller</Filter>
     </ClCompile>
-    <ClCompile Include="Mods\ResearchProbeRuntime.cpp">
-      <Filter>Mods</Filter>
+    <ClCompile Include="NoteByNote\Controller\ControllerRuntime.cpp">
+      <Filter>NoteByNote\Controller</Filter>
     </ClCompile>
     <ClCompile Include="Mods\RocksmithGate.cpp">
       <Filter>Mods</Filter>
@@ -922,8 +937,8 @@
     <ClCompile Include="OverlayToggles.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Research\NoteByNoteProbe\NoteByNoteResearchProbe.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="NoteByNote\Controller\NoteByNoteController.cpp">
+      <Filter>NoteByNote\Controller</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -939,20 +954,20 @@
     <ClInclude Include="Audio\ExternalAmp.hpp">
       <Filter>Audio</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\HfcOnsetDetector.hpp">
-      <Filter>Audio</Filter>
+    <ClInclude Include="NoteByNote\Detection\HfcOnsetDetector.hpp">
+      <Filter>NoteByNote\Detection</Filter>
     </ClInclude>
     <ClInclude Include="Audio\HumRemover.hpp">
       <Filter>Audio</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\MlAudioExporter.hpp">
-      <Filter>Audio</Filter>
+    <ClInclude Include="NoteByNote\Ml\MlAudioExporter.hpp">
+      <Filter>NoteByNote\Ml</Filter>
     </ClInclude>
     <ClInclude Include="Audio\MlFretDisplay.hpp">
       <Filter>Audio</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\MlStringFretReader.hpp">
-      <Filter>Audio</Filter>
+    <ClInclude Include="NoteByNote\Ml\MlStringFretReader.hpp">
+      <Filter>NoteByNote\Ml</Filter>
     </ClInclude>
     <ClInclude Include="Audio\OutputBackend.hpp">
       <Filter>Audio</Filter>
@@ -972,8 +987,8 @@
     <ClInclude Include="Audio\PersistentVolume.hpp">
       <Filter>Audio</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\RawPitchVerifier.hpp">
-      <Filter>Audio</Filter>
+    <ClInclude Include="NoteByNote\Detection\RawPitchVerifier.hpp">
+      <Filter>NoteByNote\Detection</Filter>
     </ClInclude>
     <ClInclude Include="Audio\RsModsHelper.hpp">
       <Filter>Audio</Filter>
@@ -993,26 +1008,26 @@
     <ClInclude Include="Extensions.hpp">
       <Filter>Main Headers</Filter>
     </ClInclude>
-    <ClInclude Include="Mods\ChordAttackConfirmation.hpp">
-      <Filter>Mods\Headers</Filter>
+    <ClInclude Include="NoteByNote\Detection\ChordAttackConfirmation.hpp">
+      <Filter>NoteByNote\Detection</Filter>
     </ClInclude>
-    <ClInclude Include="Mods\ChordAttackGate.hpp">
-      <Filter>Mods\Headers</Filter>
+    <ClInclude Include="NoteByNote\Detection\ChordAttackGate.hpp">
+      <Filter>NoteByNote\Detection</Filter>
     </ClInclude>
-    <ClInclude Include="Mods\ChordPitchDecision.hpp">
-      <Filter>Mods\Headers</Filter>
+    <ClInclude Include="NoteByNote\Detection\ChordPitchDecision.hpp">
+      <Filter>NoteByNote\Detection</Filter>
     </ClInclude>
-    <ClInclude Include="Mods\DetectionFeedback.hpp">
-      <Filter>Mods\Headers</Filter>
+    <ClInclude Include="NoteByNote\Detection\DetectionFeedback.hpp">
+      <Filter>NoteByNote\Detection</Filter>
     </ClInclude>
-    <ClInclude Include="Mods\MlChordConfirmation.hpp">
-      <Filter>Mods\Headers</Filter>
+    <ClInclude Include="NoteByNote\Detection\MlChordConfirmation.hpp">
+      <Filter>NoteByNote\Detection</Filter>
     </ClInclude>
-    <ClInclude Include="Mods\NoteByNoteHostServices.hpp">
-      <Filter>Mods\Headers</Filter>
+    <ClInclude Include="NoteByNote\Host\NoteByNoteHostServices.hpp">
+      <Filter>NoteByNote\Host</Filter>
     </ClInclude>
-    <ClInclude Include="Mods\PreHoldCommitGate.hpp">
-      <Filter>Mods\Headers</Filter>
+    <ClInclude Include="NoteByNote\Detection\PreHoldCommitGate.hpp">
+      <Filter>NoteByNote\Detection</Filter>
     </ClInclude>
     <ClInclude Include="Mods\RocksmithGate.hpp">
       <Filter>Mods\Headers</Filter>
