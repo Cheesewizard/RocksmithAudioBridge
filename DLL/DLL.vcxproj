@@ -20,17 +20,17 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="OverlayInputCapture.cpp" />
-    <ClCompile Include="Audio\AsioHook.cpp" />
-    <ClCompile Include="Audio\CableInput.cpp" />
+    <ClCompile Include="AudioBridge\Input\InputCaptureHook.cpp" />
+    <ClCompile Include="AudioBridge\Cable\CableInput.cpp" />
     <ClCompile Include="NoteByNote\Ml\MlAudioExporter.cpp" />
     <ClCompile Include="NoteByNote\Ml\MlServiceLauncher.cpp" />
-    <ClCompile Include="Audio\AsioProxyRegistration.cpp" />
+    <ClCompile Include="AudioBridge\Driver\BridgeDriverRegistration.cpp" />
     <ClCompile Include="NoteByNote\Ml\MlStringFretReader.cpp" />
     <ClCompile Include="NoteByNote\Detection\RawPitchVerifier.cpp" />
-    <ClCompile Include="Audio\SharedOutput.cpp" />
-    <ClCompile Include="Audio\OutputDevices.cpp" />
+    <ClCompile Include="AudioBridge\Engine\AudioBridgeEngine.cpp" />
+    <ClCompile Include="AudioBridge\Engine\OutputDevices.cpp" />
     <ClCompile Include="Audio\TakeRecorder.cpp" />
-    <ClCompile Include="Audio\OutputTap.cpp" />
+    <ClCompile Include="AudioBridge\Engine\OutputTap.cpp" />
     <ClCompile Include="Audio\ExternalAmp.cpp" />
     <ClCompile Include="Audio\VstHostLink.cpp" />
     <ClCompile Include="Audio\RsModsHelper.cpp" />
@@ -194,7 +194,7 @@
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../stdafx.h</PrecompiledHeaderFile>
       <PrecompiledHeaderFile Condition="('$(Configuration)|$(Platform)'=='Release|Win32') Or ('$(Configuration)|$(Platform)'=='Master|Win32')">../stdafx.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="Mods\RocksmithGate.cpp" />
+    <ClCompile Include="AudioBridge\Input\RocksmithGate.cpp" />
     <ClCompile Include="Mods\VolumeControl.cpp">
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../stdafx.h</PrecompiledHeaderFile>
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../stdafx.h</PrecompiledHeaderFile>
@@ -289,21 +289,21 @@
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../stdafx.h</PrecompiledHeaderFile>
       <PrecompiledHeaderFile Condition="('$(Configuration)|$(Platform)'=='Release|Win32') Or ('$(Configuration)|$(Platform)'=='Master|Win32')">../stdafx.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClInclude Include="Audio\AsioHook.hpp" />
-    <ClInclude Include="Audio\AsioBufferState.hpp" />
-    <ClInclude Include="Audio\CaptureProcessingGate.hpp" />
-    <ClInclude Include="Audio\CableInput.hpp" />
+    <ClInclude Include="AudioBridge\Input\InputCaptureHook.hpp" />
+    <ClInclude Include="AudioBridge\Input\AsioBufferState.hpp" />
+    <ClInclude Include="AudioBridge\Input\CaptureProcessingGate.hpp" />
+    <ClInclude Include="AudioBridge\Cable\CableInput.hpp" />
     <ClInclude Include="NoteByNote\Ml\MlAudioExporter.hpp" />
     <ClInclude Include="NoteByNote\Ml\MlServiceLauncher.hpp" />
-    <ClInclude Include="Audio\AsioProxyRegistration.hpp" />
+    <ClInclude Include="AudioBridge\Driver\BridgeDriverRegistration.hpp" />
     <ClInclude Include="NoteByNote\Ml\MlServiceControl.hpp" />
     <ClInclude Include="NoteByNote\Ml\MlStringFretReader.hpp" />
     <ClInclude Include="Audio\MlFretDisplay.hpp" />
     <ClInclude Include="NoteByNote\Detection\RawPitchVerifier.hpp" />
-    <ClInclude Include="Audio\SharedOutput.hpp" />
-    <ClInclude Include="Audio\OutputDevices.hpp" />
+    <ClInclude Include="AudioBridge\Engine\AudioBridgeEngine.hpp" />
+    <ClInclude Include="AudioBridge\Engine\OutputDevices.hpp" />
     <ClInclude Include="Audio\TakeRecorder.hpp" />
-    <ClInclude Include="Audio\OutputTap.hpp" />
+    <ClInclude Include="AudioBridge\Engine\OutputTap.hpp" />
     <ClInclude Include="Audio\ExternalAmp.hpp" />
     <ClInclude Include="Audio\VstHostLink.hpp" />
     <ClInclude Include="Audio\RsModsHelper.hpp" />
@@ -312,10 +312,10 @@
     <ClInclude Include="Shared\VstHostControl.hpp" />
     <ClInclude Include="Audio\GameAudioRecorder.hpp" />
     <ClInclude Include="Audio\DrySignalRecording.hpp" />
-    <ClInclude Include="Audio\HumRemover.hpp" />
+    <ClInclude Include="AudioBridge\Input\HumRemover.hpp" />
     <ClInclude Include="NoteByNote\Detection\HfcOnsetDetector.hpp" />
     <ClInclude Include="Audio\AudioPacketQueue.hpp" />
-    <ClInclude Include="Audio\AudioControl.hpp" />
+    <ClInclude Include="AudioBridge\Engine\AudioControl.hpp" />
     <ClInclude Include="Shared\CaptureFormat.h" />
     <ClInclude Include="DropPedal\DelayLinePitchShifter.hpp" />
     <ClInclude Include="DropPedal\SpeakerMode\WwiseMusicHook.hpp" />
@@ -361,7 +361,7 @@
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../../stdafx.h</PrecompiledHeaderFile>
       <PrecompiledHeaderFile Condition="('$(Configuration)|$(Platform)'=='Release|Win32') Or ('$(Configuration)|$(Platform)'=='Master|Win32')">../../stdafx.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClInclude Include="Audio\ComVTable.hpp" />
+    <ClInclude Include="AudioBridge\ComVTable.hpp" />
     <ClInclude Include="D3D/D3DHelper.hpp" />
     <ClInclude Include="D3D/D3DHooks.hpp" />
     <ClInclude Include="NoteByNote/Ui/NoteByNoteHighwayRenderer.hpp" />
@@ -412,7 +412,7 @@
     <ClInclude Include="Mods\RiffRepeater.hpp" />
     <ClInclude Include="Mods\TrueTuning.hpp" />
     <ClInclude Include="Mods\VoiceOverControl.hpp" />
-    <ClInclude Include="Mods\RocksmithGate.hpp" />
+    <ClInclude Include="AudioBridge\Input\RocksmithGate.hpp" />
     <ClInclude Include="Mods\VolumeControl.hpp" />
     <ClInclude Include="DropPedal\DropPedal.hpp" />
     <ClInclude Include="DropPedal\DropPedalHooks.hpp" />
@@ -909,14 +909,14 @@ if exist "$(OutDir)$(TargetName).map" copy /Y "$(OutDir)$(TargetName).map" "$(Bu
   <ItemDefinitionGroup Condition="'$(AudioLifecycleTrace)' == 'true'">
     <ClCompile><PreprocessorDefinitions>RSMODS_AUDIO_LIFECYCLE_TRACE;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile>
   </ItemDefinitionGroup>
-  <ItemGroup><ClInclude Include="Audio\AudioLifecycleTrace.hpp" /></ItemGroup>
+  <ItemGroup><ClInclude Include="AudioBridge\Diagnostics\AudioLifecycleTrace.hpp" /></ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Audio\PersistentCapture.cpp" />
-    <ClCompile Include="Audio\PersistentDevice.cpp" />
-    <ClInclude Include="Audio\PersistentInput.hpp" />
-    <ClInclude Include="Audio\PersistentCapture.hpp" />
-    <ClInclude Include="Audio\PersistentVolume.hpp" />
-    <ClInclude Include="Audio\OutputBackend.hpp" />
-    <ClInclude Include="Audio\OutputRateMatcher.hpp" />
+    <ClCompile Include="AudioBridge\Cable\CableCaptureSession.cpp" />
+    <ClCompile Include="AudioBridge\Devices\DeviceEnumeratorHook.cpp" />
+    <ClInclude Include="AudioBridge\Devices\DeviceEnumeratorHook.hpp" />
+    <ClInclude Include="AudioBridge\Cable\CableCaptureSession.hpp" />
+    <ClInclude Include="AudioBridge\Cable\CableEndpointVolume.hpp" />
+    <ClInclude Include="AudioBridge\Engine\OutputBackend.hpp" />
+    <ClInclude Include="AudioBridge\Engine\OutputRateMatcher.hpp" />
   </ItemGroup>
 </Project>

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "PersistentInput.hpp"
-#include "PersistentVolume.hpp"
+#include "AudioBridge/Devices/DeviceEnumeratorHook.hpp"
+#include "CableEndpointVolume.hpp"
 #include <wrl.h>
 #include <array>
 #include <atomic>

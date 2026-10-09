@@ -1,6 +1,6 @@
 #include "stdafx.h"
 #include "TakeRecorder.hpp"
-#include "SharedOutput.hpp"
+#include "AudioBridge/Engine/AudioBridgeEngine.hpp"
 #include <filesystem>
 #include <fstream>
 #include <mutex>

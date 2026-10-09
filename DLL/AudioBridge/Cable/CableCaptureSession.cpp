@@ -1,5 +1,5 @@
 #include "stdafx.h"
-#include "PersistentCapture.hpp"
+#include "CableCaptureSession.hpp"
 #include "CableInput.hpp"
 #include <avrt.h>
 #include <functiondiscoverykeys_devpkey.h>

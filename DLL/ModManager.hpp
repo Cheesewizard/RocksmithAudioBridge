@@ -3,7 +3,7 @@
 #include "QualityOfLife.hpp"
 #include "Mods/VolumeControl.hpp"
 #include "Mods/AudioDevices.hpp"
-#include "Audio/AsioHook.hpp"
+#include "AudioBridge/Input/InputCaptureHook.hpp"
 #include "Mods/BugPrevention.hpp"
 #include "Mods/LaunchOnExternalMonitor.hpp"
 #include "Keyboard.hpp"

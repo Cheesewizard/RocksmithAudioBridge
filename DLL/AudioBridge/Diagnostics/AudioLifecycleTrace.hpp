@@ -2,7 +2,7 @@
 
 // Compiled only into an explicitly requested diagnostic build.
 #if defined(RSMODS_AUDIO_LIFECYCLE_TRACE)
-#include "ComVTable.hpp"
+#include "AudioBridge/ComVTable.hpp"
 #include <array>
 #include <atomic>
 #include <fstream>

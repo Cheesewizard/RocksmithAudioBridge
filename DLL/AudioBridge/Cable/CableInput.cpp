@@ -1,10 +1,10 @@
 #include "stdafx.h"
 #include "CableInput.hpp"
-#include "SharedOutput.hpp"
-#include "OutputTap.hpp"
-#include "PersistentInput.hpp"
-#include "AsioHook.hpp"
-#include "ComVTable.hpp"
+#include "AudioBridge/Engine/AudioBridgeEngine.hpp"
+#include "AudioBridge/Engine/OutputTap.hpp"
+#include "AudioBridge/Devices/DeviceEnumeratorHook.hpp"
+#include "AudioBridge/Input/InputCaptureHook.hpp"
+#include "AudioBridge/ComVTable.hpp"
 
 #include <functiondiscoverykeys_devpkey.h>
 #include <timeapi.h>

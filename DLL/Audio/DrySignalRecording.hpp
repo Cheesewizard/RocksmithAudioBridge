@@ -1,6 +1,6 @@
 #pragma once
 
-#include "CaptureProcessingGate.hpp"
+#include "AudioBridge/Input/CaptureProcessingGate.hpp"
 #include "GameAudioRecorder.hpp"
 
 namespace Audio::DrySignalRecording

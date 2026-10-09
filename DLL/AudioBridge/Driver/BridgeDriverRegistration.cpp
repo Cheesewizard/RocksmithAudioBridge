@@ -1,5 +1,5 @@
 #include "stdafx.h"
-#include "AsioProxyRegistration.hpp"
+#include "BridgeDriverRegistration.hpp"
 #include "Log.hpp"
 
 #include <windows.h>

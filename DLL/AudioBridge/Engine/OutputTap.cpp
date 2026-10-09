@@ -1,6 +1,6 @@
 #include "stdafx.h"
 #include "OutputTap.hpp"
-#include "GameAudioRecorder.hpp"
+#include "Audio/GameAudioRecorder.hpp"
 #include <audioclient.h>
 #include <mmdeviceapi.h>
 #include <functiondiscoverykeys_devpkey.h>

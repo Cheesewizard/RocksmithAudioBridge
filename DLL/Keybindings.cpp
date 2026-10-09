@@ -2,7 +2,7 @@
 #include "Keybindings.hpp"
 #include "DropPedal/DropPedalInput.hpp"
 #include "Audio/TakeRecorder.hpp"
-#include "Audio/SharedOutput.hpp"
+#include "AudioBridge/Engine/AudioBridgeEngine.hpp"
 
 namespace Keybindings {
 	std::map<std::string, ModCommand, std::less<>> keyUpCommands;

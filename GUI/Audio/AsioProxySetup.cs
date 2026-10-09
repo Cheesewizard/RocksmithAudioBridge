@@ -194,7 +194,7 @@ namespace RSMods.Audio
 		}
 
 		/// <summary>Removes the per-user InprocServer32 the game DLL writes when it finds a stale machine entry
-		/// (DLL/Audio/AsioProxyRegistration.cpp). After a fresh machine registration it is redundant, and after an
+		/// (DLL/AudioBridge/Driver/BridgeDriverRegistration.cpp). After a fresh machine registration it is redundant, and after an
 		/// uninstall it must not linger, since a per-user entry wins over the machine one for 32-bit hosts.</summary>
 		private static void ClearUserOverride()
 		{

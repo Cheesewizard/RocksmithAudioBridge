@@ -7,7 +7,7 @@
 #include <mutex>
 #include <thread>
 #include "AudioPacketQueue.hpp"
-#include "CaptureProcessingGate.hpp"
+#include "AudioBridge/Input/CaptureProcessingGate.hpp"
 
 namespace Audio
 {

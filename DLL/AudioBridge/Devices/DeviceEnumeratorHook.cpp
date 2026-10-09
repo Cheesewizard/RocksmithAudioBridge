@@ -1,7 +1,7 @@
 #include "stdafx.h"
-#include "PersistentCapture.hpp"
-#include "SharedOutput.hpp"
-#include "OutputTap.hpp"
+#include "AudioBridge/Cable/CableCaptureSession.hpp"
+#include "AudioBridge/Engine/AudioBridgeEngine.hpp"
+#include "AudioBridge/Engine/OutputTap.hpp"
 #include <functiondiscoverykeys_devpkey.h>
 #include <propvarutil.h>
 
