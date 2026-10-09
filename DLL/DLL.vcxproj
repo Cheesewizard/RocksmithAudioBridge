@@ -31,7 +31,7 @@
     <ClCompile Include="AudioBridge\Engine\OutputDevices.cpp" />
     <ClCompile Include="Audio\TakeRecorder.cpp" />
     <ClCompile Include="AudioBridge\Engine\OutputTap.cpp" />
-    <ClCompile Include="Audio\ExternalAmp.cpp" />
+    <ClCompile Include="ExternalAmp\ExternalAmp.cpp" />
     <ClCompile Include="Audio\VstHostLink.cpp" />
     <ClCompile Include="Audio\RsModsHelper.cpp" />
     <ClCompile Include="Audio\SongLibrary.cpp" />
@@ -304,7 +304,7 @@
     <ClInclude Include="AudioBridge\Engine\OutputDevices.hpp" />
     <ClInclude Include="Audio\TakeRecorder.hpp" />
     <ClInclude Include="AudioBridge\Engine\OutputTap.hpp" />
-    <ClInclude Include="Audio\ExternalAmp.hpp" />
+    <ClInclude Include="ExternalAmp\ExternalAmp.hpp" />
     <ClInclude Include="Audio\VstHostLink.hpp" />
     <ClInclude Include="Audio\RsModsHelper.hpp" />
     <ClInclude Include="Audio\SongLibrary.hpp" />

@@ -10,7 +10,7 @@
 #include "Audio/TakeRecorder.hpp"
 #include "AudioBridge/Driver/BridgeDriverRegistration.hpp"
 #include "AudioBridge/Diagnostics/AudioLifecycleTrace.hpp"
-#include "Audio/ExternalAmp.hpp"
+#include "ExternalAmp/ExternalAmp.hpp"
 #include "Shared/ProductVersion.hpp"
 #include "Overlay/OverlayInputCapture.hpp"
 #include "Extensions.hpp"

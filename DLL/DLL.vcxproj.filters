@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
+    <Filter Include="ExternalAmp">
+      <UniqueIdentifier>{bd715ec1-7aec-467d-856d-bb3d5b918ec0}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Overlay">
       <UniqueIdentifier>{b69cf688-d637-4bfe-956d-38ec59bc09ba}</UniqueIdentifier>
     </Filter>
@@ -904,8 +907,8 @@
     </MASM>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Audio\ExternalAmp.cpp">
-      <Filter>Audio</Filter>
+    <ClCompile Include="ExternalAmp\ExternalAmp.cpp">
+      <Filter>ExternalAmp</Filter>
     </ClCompile>
     <ClCompile Include="NoteByNote\Ml\MlAudioExporter.cpp">
       <Filter>NoteByNote\Ml</Filter>
@@ -975,8 +978,8 @@
     <ClInclude Include="Audio\DrySignalRecording.hpp">
       <Filter>Audio</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\ExternalAmp.hpp">
-      <Filter>Audio</Filter>
+    <ClInclude Include="ExternalAmp\ExternalAmp.hpp">
+      <Filter>ExternalAmp</Filter>
     </ClInclude>
     <ClInclude Include="NoteByNote\Detection\HfcOnsetDetector.hpp">
       <Filter>NoteByNote\Detection</Filter>

@@ -9,7 +9,7 @@
 #include "AudioBridge/Engine/OutputTap.hpp"
 #include "Audio/TakeRecorder.hpp"
 #include "NoteByNote/Ml/MlServiceLauncher.hpp"
-#include "Audio/ExternalAmp.hpp"
+#include "ExternalAmp/ExternalAmp.hpp"
 #include "Audio/VstHostLink.hpp"
 #include "Shared/VstHostControl.hpp"
 #include "Audio/SongLibrary.hpp"
@@ -705,7 +705,7 @@ namespace Overlay
 		}
 
 		// ---- External amp ---------------------------------------------------------------------------------
-		// Play through an amp sim on the bridge's ASIO driver (Audio/ExternalAmp.hpp, AsioProxy/AmpLink.hpp).
+		// Play through an amp sim on the bridge's ASIO driver (ExternalAmp/ExternalAmp.hpp, AsioProxy/AmpLink.hpp).
 
 		// Label on the left, value on the right of the card row.
 		void InfoRow(const char* label, const std::string& value, ImU32 valueColor = Color::Text)
