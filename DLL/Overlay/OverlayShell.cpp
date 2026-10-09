@@ -14,7 +14,7 @@
 #include "Shared/VstHostControl.hpp"
 #include "ToneDesigner/SongLibrary.hpp"
 #include "ToneDesigner/ToneBackup.hpp"
-#include "Extensions.hpp"
+#include "Core/Extensions.hpp"
 #include "NoteByNote/Host/ControllerBridge.hpp"
 #include "DropPedal/DropPedal.hpp"
 #include "NoteByNote/Ui/NoteByNoteMenu.hpp"

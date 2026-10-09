@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
+    <Filter Include="Core">
+      <UniqueIdentifier>{7af663b9-60a8-4286-b2ff-6a10b1a36628}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Recorder">
       <UniqueIdentifier>{75000f7f-d796-4315-99c5-82930d002101}</UniqueIdentifier>
     </Filter>
@@ -934,8 +937,8 @@
     <ClCompile Include="NoteByNote\Detection\RawPitchVerifier.cpp">
       <Filter>NoteByNote\Detection</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\RsModsHelper.cpp">
-      <Filter>Audio</Filter>
+    <ClCompile Include="Core\RsModsHelper.cpp">
+      <Filter>Core</Filter>
     </ClCompile>
     <ClCompile Include="ToneDesigner\SongLibrary.cpp">
       <Filter>ToneDesigner</Filter>
@@ -946,8 +949,8 @@
     <ClCompile Include="ToneDesigner\VstHostLink.cpp">
       <Filter>ToneDesigner</Filter>
     </ClCompile>
-    <ClCompile Include="Extensions.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Core/Extensions.cpp">
+      <Filter>Core</Filter>
     </ClCompile>
     <ClCompile Include="NoteByNote\Host\ControllerLink.cpp">
       <Filter>NoteByNote\Host</Filter>
@@ -1023,8 +1026,8 @@
     <ClInclude Include="NoteByNote\Detection\RawPitchVerifier.hpp">
       <Filter>NoteByNote\Detection</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\RsModsHelper.hpp">
-      <Filter>Audio</Filter>
+    <ClInclude Include="Core\RsModsHelper.hpp">
+      <Filter>Core</Filter>
     </ClInclude>
     <ClInclude Include="ToneDesigner\SongLibrary.hpp">
       <Filter>ToneDesigner</Filter>
@@ -1038,8 +1041,8 @@
     <ClInclude Include="ToneDesigner\VstHostLink.hpp">
       <Filter>ToneDesigner</Filter>
     </ClInclude>
-    <ClInclude Include="Extensions.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="Core/Extensions.hpp">
+      <Filter>Core</Filter>
     </ClInclude>
     <ClInclude Include="NoteByNote\Detection\ChordAttackConfirmation.hpp">
       <Filter>NoteByNote\Detection</Filter>
@@ -1071,8 +1074,8 @@
     <ClInclude Include="Overlay/OverlayToggles.hpp">
       <Filter>Overlay</Filter>
     </ClInclude>
-    <ClInclude Include="PitchNames.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="Core/PitchNames.hpp">
+      <Filter>Core</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

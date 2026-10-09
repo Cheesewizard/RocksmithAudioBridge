@@ -13,7 +13,7 @@
 #include "ExternalAmp/ExternalAmp.hpp"
 #include "Shared/ProductVersion.hpp"
 #include "Overlay/OverlayInputCapture.hpp"
-#include "Extensions.hpp"
+#include "Core/Extensions.hpp"
 
 #include <io.h>
 #include <share.h>

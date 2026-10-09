@@ -10,7 +10,7 @@
 #include "Overlay/OverlayToggles.hpp"
 #include "DropPedal/SpeakerMode/WwiseMusicHook.hpp"
 #include "AudioBridge/Cable/CableInput.hpp"
-#include "Extensions.hpp"
+#include "Core/Extensions.hpp"
 
 namespace ModManager {
 	bool IsHookGroupSkipped(const char* group) {

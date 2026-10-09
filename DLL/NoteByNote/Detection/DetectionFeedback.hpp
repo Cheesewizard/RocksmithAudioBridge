@@ -4,7 +4,7 @@
 #include <cmath>
 #include <string>
 
-#include "PitchNames.hpp"
+#include "Core/PitchNames.hpp"
 
 namespace NoteByNote
 {

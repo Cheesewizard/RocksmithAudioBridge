@@ -33,7 +33,7 @@
     <ClCompile Include="AudioBridge\Engine\OutputTap.cpp" />
     <ClCompile Include="ExternalAmp\ExternalAmp.cpp" />
     <ClCompile Include="ToneDesigner\VstHostLink.cpp" />
-    <ClCompile Include="Audio\RsModsHelper.cpp" />
+    <ClCompile Include="Core\RsModsHelper.cpp" />
     <ClCompile Include="ToneDesigner\SongLibrary.cpp" />
     <ClCompile Include="ToneDesigner\ToneBackup.cpp" />
     <ClCompile Include="Recorder\GameAudioRecorder.cpp" />
@@ -146,7 +146,7 @@
       <PrecompiledHeader Condition="('$(Configuration)|$(Platform)'=='Release|Win32') Or ('$(Configuration)|$(Platform)'=='Master|Win32')">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="Menu.cpp" />
-    <ClCompile Include="Extensions.cpp" />
+    <ClCompile Include="Core\Extensions.cpp" />
     <ClCompile Include="Overlay\OverlayShell.cpp" />
     <ClCompile Include="Overlay\OverlayUi.cpp" />
     <ClCompile Include="ModManager.cpp" />
@@ -306,7 +306,7 @@
     <ClInclude Include="AudioBridge\Engine\OutputTap.hpp" />
     <ClInclude Include="ExternalAmp\ExternalAmp.hpp" />
     <ClInclude Include="ToneDesigner\VstHostLink.hpp" />
-    <ClInclude Include="Audio\RsModsHelper.hpp" />
+    <ClInclude Include="Core\RsModsHelper.hpp" />
     <ClInclude Include="ToneDesigner\SongLibrary.hpp" />
     <ClInclude Include="ToneDesigner\ToneBackup.hpp" />
     <ClInclude Include="Shared\VstHostControl.hpp" />
@@ -385,7 +385,7 @@
     <ClInclude Include="NoteByNote\Detection\MlChordConfirmation.hpp" />
     <ClInclude Include="NoteByNote\Detection\PreHoldCommitGate.hpp" />
     <ClInclude Include="Overlay\OverlayToggles.hpp" />
-    <ClInclude Include="PitchNames.hpp" />
+    <ClInclude Include="Core\PitchNames.hpp" />
     <ClInclude Include="D3D\GdiplusManager.hpp" />
     <ClInclude Include="GameState.hpp" />
     <ClInclude Include="Shared\IInputProcessor.hpp" />
@@ -396,7 +396,7 @@
     <ClInclude Include="Lib\Midi\RtMidi.h" />
     <ClInclude Include="Log.hpp" />
     <ClInclude Include="Menu.hpp" />
-    <ClInclude Include="Extensions.hpp" />
+    <ClInclude Include="Core\Extensions.hpp" />
     <ClInclude Include="Overlay\OverlayShell.hpp" />
     <ClInclude Include="Overlay\OverlayUi.hpp" />
     <ClInclude Include="NoteByNote\Ui\NoteByNoteHudLayout.hpp" />
