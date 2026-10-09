@@ -1,6 +1,6 @@
 #include "stdafx.h"
 #include "Audio/AsioHook.hpp"
-#include "Audio/DelayLinePitchShifter.hpp"
+#include "DropPedal/DelayLinePitchShifter.hpp"
 #include "DropPedal.hpp"
 #include "DropPedalHooks.hpp"
 #include "DropPedalInput.hpp"

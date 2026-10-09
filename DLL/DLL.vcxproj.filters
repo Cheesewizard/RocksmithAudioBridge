@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
+    <Filter Include="DropPedal">
+      <UniqueIdentifier>{bc88a6d2-5bac-4796-8f47-8e37baa33bd5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="DropPedal\SpeakerMode">
+      <UniqueIdentifier>{700d2890-8110-4857-9d3d-e22ad8a2a2fa}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Shared">
       <UniqueIdentifier>{3a3b7d0e-bef3-494f-b126-f4bcd2aa9a2b}</UniqueIdentifier>
     </Filter>
@@ -330,20 +336,20 @@
     <ClCompile Include="Keyboard.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Mods\DropPedal\DropPedal.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="DropPedal\DropPedal.cpp">
+      <Filter>DropPedal</Filter>
     </ClCompile>
-    <ClCompile Include="Mods\DropPedal\DropPedalHooks.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="DropPedal\DropPedalHooks.cpp">
+      <Filter>DropPedal</Filter>
     </ClCompile>
-    <ClCompile Include="Mods\DropPedal\DropPedalInput.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="DropPedal\DropPedalInput.cpp">
+      <Filter>DropPedal</Filter>
     </ClCompile>
-    <ClCompile Include="Mods\DropPedal\DropPedalOverlay.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="DropPedal\DropPedalOverlay.cpp">
+      <Filter>DropPedal</Filter>
     </ClCompile>
-    <ClCompile Include="Mods\DropPedal\DropPedalState.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="DropPedal\DropPedalState.cpp">
+      <Filter>DropPedal</Filter>
     </ClCompile>
     <ClCompile Include="Audio\AsioHook.cpp">
       <Filter>Source Files</Filter>
@@ -369,17 +375,17 @@
     <ClCompile Include="Audio\GameAudioRecorder.cpp">
       <Filter>Audio</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\DelayLinePitchShifter.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="DropPedal\DelayLinePitchShifter.cpp">
+      <Filter>DropPedal</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\SongShift\WwiseMusicHook.cpp">
-      <Filter>Audio\SongShift</Filter>
+    <ClCompile Include="DropPedal\SpeakerMode\WwiseMusicHook.cpp">
+      <Filter>DropPedal\SpeakerMode</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\SongShift\PreRenderedPitchCache.cpp">
-      <Filter>Audio\SongShift</Filter>
+    <ClCompile Include="DropPedal\SpeakerMode\PreRenderedPitchCache.cpp">
+      <Filter>DropPedal\SpeakerMode</Filter>
     </ClCompile>
-    <ClCompile Include="Audio\SongShift\StreamingPitchShifter.cpp">
-      <Filter>Audio\SongShift</Filter>
+    <ClCompile Include="DropPedal\SpeakerMode\StreamingPitchShifter.cpp">
+      <Filter>DropPedal\SpeakerMode</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -734,23 +740,23 @@
     <ClInclude Include="NoteData.h">
       <Filter>Main Headers\Structs</Filter>
     </ClInclude>
-    <ClInclude Include="Mods\DropPedal\DropPedal.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="DropPedal\DropPedal.hpp">
+      <Filter>DropPedal</Filter>
     </ClInclude>
-    <ClInclude Include="Mods\DropPedal\DropPedalHooks.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="DropPedal\DropPedalHooks.hpp">
+      <Filter>DropPedal</Filter>
     </ClInclude>
-    <ClInclude Include="Mods\DropPedal\DropPedalInput.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="DropPedal\DropPedalInput.hpp">
+      <Filter>DropPedal</Filter>
     </ClInclude>
-    <ClInclude Include="Mods\DropPedal\DropPedalOverlay.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="DropPedal\DropPedalOverlay.hpp">
+      <Filter>DropPedal</Filter>
     </ClInclude>
-    <ClInclude Include="Mods\DropPedal\DropPedalPlayer.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="DropPedal\DropPedalPlayer.hpp">
+      <Filter>DropPedal</Filter>
     </ClInclude>
-    <ClInclude Include="Mods\DropPedal\DropPedalState.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="DropPedal\DropPedalState.hpp">
+      <Filter>DropPedal</Filter>
     </ClInclude>
     <ClInclude Include="Shared\CaptureFormat.h">
       <Filter>Shared</Filter>
@@ -797,17 +803,17 @@
     <ClInclude Include="Audio\AudioControl.hpp">
       <Filter>Audio</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\DelayLinePitchShifter.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="DropPedal\DelayLinePitchShifter.hpp">
+      <Filter>DropPedal</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\SongShift\WwiseMusicHook.hpp">
-      <Filter>Audio\SongShift</Filter>
+    <ClInclude Include="DropPedal\SpeakerMode\WwiseMusicHook.hpp">
+      <Filter>DropPedal\SpeakerMode</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\SongShift\PreRenderedPitchCache.hpp">
-      <Filter>Audio\SongShift</Filter>
+    <ClInclude Include="DropPedal\SpeakerMode\PreRenderedPitchCache.hpp">
+      <Filter>DropPedal\SpeakerMode</Filter>
     </ClInclude>
-    <ClInclude Include="Audio\SongShift\StreamingPitchShifter.hpp">
-      <Filter>Audio\SongShift</Filter>
+    <ClInclude Include="DropPedal\SpeakerMode\StreamingPitchShifter.hpp">
+      <Filter>DropPedal\SpeakerMode</Filter>
     </ClInclude>
     <ClInclude Include="Audio\ThirdParty\SignalsmithStretch\signalsmith-stretch.h">
       <Filter>Audio\SongShift</Filter>

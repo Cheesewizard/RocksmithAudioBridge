@@ -1,6 +1,6 @@
 #include "AmpLinkGuest.hpp"
 #include "AmpLink.hpp"
-#include "../Audio/DelayLinePitchShifter.hpp"
+#include "../DropPedal/DelayLinePitchShifter.hpp"
 #include "../Shared/ProductVersion.hpp"
 #include <avrt.h>
 #include <algorithm>

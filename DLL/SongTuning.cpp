@@ -1,6 +1,6 @@
 #include "stdafx.h"
 #include "SongTuning.hpp"
-#include "Mods/DropPedal/DropPedal.hpp"
+#include "DropPedal/DropPedal.hpp"
 
 namespace {
 	// Parsed once; the file is static for the session and lookups can run several

@@ -1,6 +1,6 @@
 #include "stdafx.h"
 #include "GameState.hpp"
-#include "Mods/DropPedal/DropPedal.hpp"
+#include "DropPedal/DropPedal.hpp"
 #include "PreRenderedPitchCache.hpp"
 #include "StreamingPitchShifter.hpp"
 #include "WwiseMusicHook.hpp"

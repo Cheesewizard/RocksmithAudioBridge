@@ -1,7 +1,7 @@
 #include "stdafx.h"
 #include "ExternalAmp.hpp"
 #include "Mods/VolumeControl.hpp"
-#include "Mods/DropPedal/DropPedal.hpp"
+#include "DropPedal/DropPedal.hpp"
 #include "GameState.hpp"
 #include <atomic>
 #include <cmath>

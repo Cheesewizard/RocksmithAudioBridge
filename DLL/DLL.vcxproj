@@ -37,9 +37,9 @@
     <ClCompile Include="Audio\SongLibrary.cpp" />
     <ClCompile Include="Audio\ToneBackup.cpp" />
     <ClCompile Include="Audio\GameAudioRecorder.cpp" />
-    <ClCompile Include="Audio\DelayLinePitchShifter.cpp" />
-    <ClCompile Include="Audio\SongShift\WwiseMusicHook.cpp" />
-    <ClCompile Include="Audio\SongShift\PreRenderedPitchCache.cpp">
+    <ClCompile Include="DropPedal\DelayLinePitchShifter.cpp" />
+    <ClCompile Include="DropPedal\SpeakerMode\WwiseMusicHook.cpp" />
+    <ClCompile Include="DropPedal\SpeakerMode\PreRenderedPitchCache.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="('$(Configuration)|$(Platform)'=='Release|Win32') Or ('$(Configuration)|$(Platform)'=='Master|Win32')">NotUsing</PrecompiledHeader>
@@ -48,7 +48,7 @@
       <Optimization Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">MaxSpeed</Optimization>
       <DisableSpecificWarnings>4127;4244;4305;4456;4458;%(DisableSpecificWarnings)</DisableSpecificWarnings>
     </ClCompile>
-    <ClCompile Include="Audio\SongShift\StreamingPitchShifter.cpp">
+    <ClCompile Include="DropPedal\SpeakerMode\StreamingPitchShifter.cpp">
       <Optimization Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">MaxSpeed</Optimization>
       <Optimization Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">MaxSpeed</Optimization>
     </ClCompile>
@@ -317,10 +317,10 @@
     <ClInclude Include="Audio\AudioPacketQueue.hpp" />
     <ClInclude Include="Audio\AudioControl.hpp" />
     <ClInclude Include="Shared\CaptureFormat.h" />
-    <ClInclude Include="Audio\DelayLinePitchShifter.hpp" />
-    <ClInclude Include="Audio\SongShift\WwiseMusicHook.hpp" />
-    <ClInclude Include="Audio\SongShift\PreRenderedPitchCache.hpp" />
-    <ClInclude Include="Audio\SongShift\StreamingPitchShifter.hpp" />
+    <ClInclude Include="DropPedal\DelayLinePitchShifter.hpp" />
+    <ClInclude Include="DropPedal\SpeakerMode\WwiseMusicHook.hpp" />
+    <ClInclude Include="DropPedal\SpeakerMode\PreRenderedPitchCache.hpp" />
+    <ClInclude Include="DropPedal\SpeakerMode\StreamingPitchShifter.hpp" />
     <ClInclude Include="Audio\ThirdParty\SignalsmithStretch\signalsmith-stretch.h" />
     <ClInclude Include="Audio\ThirdParty\SignalsmithStretch\signalsmith-linear\fft.h" />
     <ClInclude Include="Audio\ThirdParty\SignalsmithStretch\signalsmith-linear\stft.h" />
@@ -414,24 +414,24 @@
     <ClInclude Include="Mods\VoiceOverControl.hpp" />
     <ClInclude Include="Mods\RocksmithGate.hpp" />
     <ClInclude Include="Mods\VolumeControl.hpp" />
-    <ClInclude Include="Mods\DropPedal\DropPedal.hpp" />
-    <ClInclude Include="Mods\DropPedal\DropPedalHooks.hpp" />
-    <ClInclude Include="Mods\DropPedal\DropPedalInput.hpp" />
-    <ClInclude Include="Mods\DropPedal\DropPedalOverlay.hpp" />
-    <ClInclude Include="Mods\DropPedal\DropPedalPlayer.hpp" />
-    <ClInclude Include="Mods\DropPedal\DropPedalState.hpp" />
+    <ClInclude Include="DropPedal\DropPedal.hpp" />
+    <ClInclude Include="DropPedal\DropPedalHooks.hpp" />
+    <ClInclude Include="DropPedal\DropPedalInput.hpp" />
+    <ClInclude Include="DropPedal\DropPedalOverlay.hpp" />
+    <ClInclude Include="DropPedal\DropPedalPlayer.hpp" />
+    <ClInclude Include="DropPedal\DropPedalState.hpp" />
 	<ClInclude Include="Mods\NoteByNoteMenu.hpp" />
 	<ClInclude Include="Mods\NoteByNoteHudLabel.hpp" />
 	<ClInclude Include="Mods\NoteByNoteNativeScoring.hpp" />
     <ClInclude Include="Mods\NoteByNoteHostServices.hpp" />
     <ClInclude Include="Mods\NoteByNoteProbe.hpp" />
 
-    <ClCompile Include="Mods\DropPedal\DropPedal.cpp" />
+    <ClCompile Include="DropPedal\DropPedal.cpp" />
 
-    <ClCompile Include="Mods\DropPedal\DropPedalHooks.cpp" />
-    <ClCompile Include="Mods\DropPedal\DropPedalInput.cpp" />
-    <ClCompile Include="Mods\DropPedal\DropPedalOverlay.cpp" />
-    <ClCompile Include="Mods\DropPedal\DropPedalState.cpp" />
+    <ClCompile Include="DropPedal\DropPedalHooks.cpp" />
+    <ClCompile Include="DropPedal\DropPedalInput.cpp" />
+    <ClCompile Include="DropPedal\DropPedalOverlay.cpp" />
+    <ClCompile Include="DropPedal\DropPedalState.cpp" />
     <ClInclude Include="NoteData.h" />
     <ClInclude Include="ObjectUtil.hpp" />
     <ClInclude Include="CC\Effects\ShuffleTonesEffect.hpp" />

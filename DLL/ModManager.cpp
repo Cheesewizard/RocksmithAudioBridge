@@ -1,6 +1,6 @@
 #include "stdafx.h"
 #include "ModManager.hpp"
-#include "Mods/DropPedal/DropPedal.hpp"
+#include "DropPedal/DropPedal.hpp"
 #include "Mods/RocksmithGate.hpp"
 #include "Research/ResearchBridge.hpp"
 #include "Audio/MlAudioExporter.hpp"
@@ -8,7 +8,7 @@
 #include "Audio/AsioHook.hpp"
 #include "Audio/OutputTap.hpp"
 #include "OverlayToggles.hpp"
-#include "Audio/SongShift/WwiseMusicHook.hpp"
+#include "DropPedal/SpeakerMode/WwiseMusicHook.hpp"
 #include "Audio/CableInput.hpp"
 #include "Extensions.hpp"
 
