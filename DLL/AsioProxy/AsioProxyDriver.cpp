@@ -19,7 +19,7 @@
 #include "VirtualCableCapture.hpp"
 #include "AmpLinkHost.hpp"
 #include "AmpLinkGuest.hpp"
-#include "../ProductVersion.hpp"
+#include "../Shared/ProductVersion.hpp"
 #include <string>
 #include <array>
 #include <atomic>

@@ -309,14 +309,14 @@
     <ClInclude Include="Audio\RsModsHelper.hpp" />
     <ClInclude Include="Audio\SongLibrary.hpp" />
     <ClInclude Include="Audio\ToneBackup.hpp" />
-    <ClInclude Include="Audio\VstHostControl.hpp" />
+    <ClInclude Include="Shared\VstHostControl.hpp" />
     <ClInclude Include="Audio\GameAudioRecorder.hpp" />
     <ClInclude Include="Audio\DrySignalRecording.hpp" />
     <ClInclude Include="Audio\HumRemover.hpp" />
     <ClInclude Include="Audio\HfcOnsetDetector.hpp" />
     <ClInclude Include="Audio\AudioPacketQueue.hpp" />
     <ClInclude Include="Audio\AudioControl.hpp" />
-    <ClInclude Include="Audio\CaptureFormat.h" />
+    <ClInclude Include="Shared\CaptureFormat.h" />
     <ClInclude Include="Audio\DelayLinePitchShifter.hpp" />
     <ClInclude Include="Audio\SongShift\WwiseMusicHook.hpp" />
     <ClInclude Include="Audio\SongShift\PreRenderedPitchCache.hpp" />
@@ -377,7 +377,7 @@
     <ClInclude Include="CC\Effects\HighwayScrollSpeedEffect.hpp" />
     <ClInclude Include="D3DInfo.h" />
     <ClInclude Include="D3DOverlay.hpp" />
-    <ClInclude Include="ProductVersion.hpp" />
+    <ClInclude Include="Shared\ProductVersion.hpp" />
     <ClInclude Include="Mods\DetectionFeedback.hpp" />
     <ClInclude Include="Mods\ChordAttackGate.hpp" />
     <ClInclude Include="Mods\ChordAttackConfirmation.hpp" />
@@ -388,7 +388,7 @@
     <ClInclude Include="PitchNames.hpp" />
     <ClInclude Include="D3D\GdiplusManager.hpp" />
     <ClInclude Include="GameState.hpp" />
-    <ClInclude Include="Audio\IInputProcessor.hpp" />
+    <ClInclude Include="Shared\IInputProcessor.hpp" />
     <ClInclude Include="Keybindings.hpp" />
     <ClInclude Include="Keyboard.hpp" />
     <ClInclude Include="Lib\Ini\SimpleIni.h" />

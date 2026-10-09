@@ -11,7 +11,7 @@
 #include "Audio/MlServiceLauncher.hpp"
 #include "Audio/ExternalAmp.hpp"
 #include "Audio/VstHostLink.hpp"
-#include "Audio/VstHostControl.hpp"
+#include "Shared/VstHostControl.hpp"
 #include "Audio/SongLibrary.hpp"
 #include "Audio/ToneBackup.hpp"
 #include "Extensions.hpp"
@@ -21,7 +21,7 @@
 #include "Mods/DropPedal/DropPedalOverlay.hpp"
 #include "GameState.hpp"
 #include "Keybindings.hpp"
-#include "ProductVersion.hpp"
+#include "Shared/ProductVersion.hpp"
 #include <filesystem>
 #include <cmath>
 #include <shellapi.h>

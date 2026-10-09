@@ -13,7 +13,7 @@
 #include "Extensions.hpp"
 #include "Audio/VstHostLink.hpp"
 #include "Mods/ExtendedRangeMode.hpp"
-#include "ProductVersion.hpp"
+#include "Shared/ProductVersion.hpp"
 #include "Overlay/HudLayout.hpp"
 
 /// <returns>Size of Rocksmith Window</returns>

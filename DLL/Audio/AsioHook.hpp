@@ -1,7 +1,7 @@
 #pragma once
 
-#include "CaptureFormat.h"
-#include "IInputProcessor.hpp"
+#include "Shared/CaptureFormat.h"
+#include "Shared/IInputProcessor.hpp"
 
 #include <cstddef>
 #include <cstdint>

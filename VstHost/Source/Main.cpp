@@ -3,7 +3,7 @@
 // plugins are 64-bit only; audio goes through the bridge driver's external amp link, the same path an external
 // amp sim uses.
 //
-// The overlay's Tone designer page drives it through a shared block (DLL/Audio/VstHostControl.hpp): build the
+// The overlay's Tone designer page drives it through a shared block (DLL/Shared/VstHostControl.hpp): build the
 // chain, pick which plugin's window shows, save and load tones, set levels. The shown plugin's editor lives in a
 // borderless, always-on-top popout over the game that shows with the overlay, so the amp can be adjusted without
 // leaving Rocksmith. That needs Rocksmith in windowed or borderless fullscreen; nothing can draw over exclusive
@@ -20,7 +20,7 @@
 #include "Chain.hpp"
 #include "HostLog.hpp"
 
-#include "../../DLL/Audio/VstHostControl.hpp"
+#include "../../DLL/Shared/VstHostControl.hpp"
 
 #include <Windows.h>
 #include <ShlObj.h>

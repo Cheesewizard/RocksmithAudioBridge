@@ -6,7 +6,7 @@ namespace RSMods
 		// "RSModsPlus"; user-visible folders use the product name (%LOCALAPPDATA%\Rocksmith Audio Bridge,
 		// Videos\Rocksmith Audio Bridge). The runtime files are RocksmithAudioBridge.dll and RocksmithAudioBridgeAsio.dll.
 		public const string PRODUCT_NAME = "Rocksmith Audio Bridge";
-		// Keep VERSION in step with DLL/ProductVersion.hpp VERSION.
+		// Keep VERSION in step with DLL/Shared/ProductVersion.hpp VERSION.
 		public const string VERSION = "4.1";
 		public const string DISPLAY_NAME = PRODUCT_NAME + " " + VERSION;
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "IInputProcessor.hpp"
+#include "../Shared/IInputProcessor.hpp"
 
 #include <atomic>
 #include <cstdint>

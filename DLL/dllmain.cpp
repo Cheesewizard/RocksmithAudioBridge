@@ -11,7 +11,7 @@
 #include "Audio/AsioProxyRegistration.hpp"
 #include "Audio/AudioLifecycleTrace.hpp"
 #include "Audio/ExternalAmp.hpp"
-#include "ProductVersion.hpp"
+#include "Shared/ProductVersion.hpp"
 #include "OverlayInputCapture.hpp"
 #include "Extensions.hpp"
 

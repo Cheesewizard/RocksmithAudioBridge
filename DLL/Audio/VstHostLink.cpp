@@ -1,6 +1,6 @@
 #include "stdafx.h"
 #include "VstHostLink.hpp"
-#include "VstHostControl.hpp"
+#include "Shared/VstHostControl.hpp"
 #include "ExternalAmp.hpp"
 #include "SongLibrary.hpp"
 #include "GameState.hpp"
