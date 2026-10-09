@@ -12,7 +12,7 @@
 #include "AudioBridge/Diagnostics/AudioLifecycleTrace.hpp"
 #include "Audio/ExternalAmp.hpp"
 #include "Shared/ProductVersion.hpp"
-#include "OverlayInputCapture.hpp"
+#include "Overlay/OverlayInputCapture.hpp"
 #include "Extensions.hpp"
 
 #include <io.h>

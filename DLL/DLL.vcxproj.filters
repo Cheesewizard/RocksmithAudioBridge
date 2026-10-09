@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
+    <Filter Include="Overlay">
+      <UniqueIdentifier>{b69cf688-d637-4bfe-956d-38ec59bc09ba}</UniqueIdentifier>
+    </Filter>
     <Filter Include="AudioBridge">
       <UniqueIdentifier>{7967d6eb-7975-48e6-ae61-23bb6588eb60}</UniqueIdentifier>
     </Filter>
@@ -952,11 +955,11 @@
     <ClCompile Include="AudioBridge\Input\RocksmithGate.cpp">
       <Filter>AudioBridge\Input</Filter>
     </ClCompile>
-    <ClCompile Include="OverlayInputCapture.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Overlay/OverlayInputCapture.cpp">
+      <Filter>Overlay</Filter>
     </ClCompile>
-    <ClCompile Include="OverlayToggles.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Overlay/OverlayToggles.cpp">
+      <Filter>Overlay</Filter>
     </ClCompile>
     <ClCompile Include="NoteByNote\Controller\NoteByNoteController.cpp">
       <Filter>NoteByNote\Controller</Filter>
@@ -1053,11 +1056,11 @@
     <ClInclude Include="AudioBridge\Input\RocksmithGate.hpp">
       <Filter>AudioBridge\Input</Filter>
     </ClInclude>
-    <ClInclude Include="OverlayInputCapture.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="Overlay/OverlayInputCapture.hpp">
+      <Filter>Overlay</Filter>
     </ClInclude>
-    <ClInclude Include="OverlayToggles.hpp">
-      <Filter>Main Headers</Filter>
+    <ClInclude Include="Overlay/OverlayToggles.hpp">
+      <Filter>Overlay</Filter>
     </ClInclude>
     <ClInclude Include="PitchNames.hpp">
       <Filter>Main Headers</Filter>

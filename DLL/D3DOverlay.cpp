@@ -8,7 +8,7 @@
 #include "NoteByNote/Ml/MlStringFretReader.hpp"
 #include "NoteByNote/Host/ControllerBridge.hpp"
 #include "AudioBridge/Cable/CableInput.hpp"
-#include "OverlayToggles.hpp"
+#include "Overlay/OverlayToggles.hpp"
 #include "PitchNames.hpp"
 #include "Extensions.hpp"
 #include "Audio/VstHostLink.hpp"

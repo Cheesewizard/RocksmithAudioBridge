@@ -2,7 +2,7 @@
 #include "NoteByNoteHudLabel.hpp"
 
 #include "NoteByNote/Host/NoteByNoteMode.hpp"
-#include "OverlayToggles.hpp"
+#include "Overlay/OverlayToggles.hpp"
 
 #include <cstdint>
 #include <cstring>

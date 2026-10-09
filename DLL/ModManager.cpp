@@ -7,7 +7,7 @@
 #include "AudioBridge/Cable/CableInput.hpp"
 #include "AudioBridge/Input/InputCaptureHook.hpp"
 #include "AudioBridge/Engine/OutputTap.hpp"
-#include "OverlayToggles.hpp"
+#include "Overlay/OverlayToggles.hpp"
 #include "DropPedal/SpeakerMode/WwiseMusicHook.hpp"
 #include "AudioBridge/Cable/CableInput.hpp"
 #include "Extensions.hpp"

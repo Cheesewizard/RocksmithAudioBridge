@@ -6,7 +6,7 @@
 #include "NoteByNote/Detection/FlowSpeedCap.hpp"
 #include "Mods/RiffRepeater.hpp"
 #include "GameState.hpp"
-#include "OverlayToggles.hpp"
+#include "Overlay/OverlayToggles.hpp"
 
 #include <cstdio>
 #include <cstring>

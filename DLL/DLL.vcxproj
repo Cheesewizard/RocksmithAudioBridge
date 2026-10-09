@@ -19,7 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="OverlayInputCapture.cpp" />
+    <ClCompile Include="Overlay\OverlayInputCapture.cpp" />
     <ClCompile Include="AudioBridge\Input\InputCaptureHook.cpp" />
     <ClCompile Include="AudioBridge\Cable\CableInput.cpp" />
     <ClCompile Include="NoteByNote\Ml\MlAudioExporter.cpp" />
@@ -131,7 +131,7 @@
       <PrecompiledHeaderFile Condition="('$(Configuration)|$(Platform)'=='Release|Win32') Or ('$(Configuration)|$(Platform)'=='Master|Win32')">../../stdafx.h</PrecompiledHeaderFile>
     </ClCompile>
     <ClCompile Include="D3DOverlay.cpp" />
-    <ClCompile Include="OverlayToggles.cpp" />
+    <ClCompile Include="Overlay\OverlayToggles.cpp" />
     <ClCompile Include="GameState.cpp" />
     <ClCompile Include="Keybindings.cpp" />
     <ClCompile Include="Keyboard.cpp" />
@@ -384,7 +384,7 @@
     <ClInclude Include="NoteByNote\Detection\ChordPitchDecision.hpp" />
     <ClInclude Include="NoteByNote\Detection\MlChordConfirmation.hpp" />
     <ClInclude Include="NoteByNote\Detection\PreHoldCommitGate.hpp" />
-    <ClInclude Include="OverlayToggles.hpp" />
+    <ClInclude Include="Overlay\OverlayToggles.hpp" />
     <ClInclude Include="PitchNames.hpp" />
     <ClInclude Include="D3D\GdiplusManager.hpp" />
     <ClInclude Include="GameState.hpp" />
@@ -461,7 +461,7 @@
     <ClInclude Include="Wwise\Types.hpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="OverlayInputCapture.hpp" />
+    <ClInclude Include="Overlay\OverlayInputCapture.hpp" />
 
 
   </ItemGroup>
