@@ -1,7 +1,7 @@
 #include "stdafx.h"
 #include "MlStringFretReader.hpp"
 #include "MlAudioExporter.hpp"
-#include "../PitchNames.hpp"
+#include "PitchNames.hpp"
 
 #include <windows.h>
 #include <cstring>

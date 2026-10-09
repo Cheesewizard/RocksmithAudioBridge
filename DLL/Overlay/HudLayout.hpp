@@ -4,7 +4,7 @@
 // Both run on the render thread inside EndScene (ImGui first, HUD after), so the editor sees the previous frame's
 // rectangles; plain globals are enough. Coordinates are backbuffer pixels, the same space as ImGui's mouse.
 
-#include "../Settings.hpp"
+#include "Settings.hpp"
 
 namespace Overlay::HudLayout
 {

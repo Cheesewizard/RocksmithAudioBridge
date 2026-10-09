@@ -1,5 +1,5 @@
-#include "../stdafx.h"
-#include "../Research/ResearchBridge.hpp"
+#include "stdafx.h"
+#include "Research/ResearchBridge.hpp"
 #include "NoteByNoteHostServices.hpp"
 #include "NoteByNoteNativeScoring.hpp"
 #include "NoteByNoteProbe.hpp"

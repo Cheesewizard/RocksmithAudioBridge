@@ -1,7 +1,7 @@
 #include "stdafx.h"
 #include "MlServiceLauncher.hpp"
 #include "MlServiceControl.hpp"
-#include "../Log.hpp"
+#include "Log.hpp"
 
 #include <windows.h>
 #include <filesystem>

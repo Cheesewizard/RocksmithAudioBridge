@@ -5,12 +5,12 @@
 
 #include <iomanip>
 
-#include "../Log.hpp"
+#include "Log.hpp"
 #include "NoteByNoteProbe.hpp"
 #include "DropPedal/DropPedal.hpp"
-#include "../Audio/RawPitchVerifier.hpp"
-#include "../Audio/MlAudioExporter.hpp"
-#include "../Audio/MlStringFretReader.hpp"
+#include "Audio/RawPitchVerifier.hpp"
+#include "Audio/MlAudioExporter.hpp"
+#include "Audio/MlStringFretReader.hpp"
 
 #include <atomic>
 #include <cmath>

@@ -1,9 +1,9 @@
-#include "../../stdafx.h"
+#include "stdafx.h"
 #include "DropPedalOverlay.hpp"
 
-#include "../../GameState.hpp"
-#include "../../Resolution.h"
-#include "../../Settings.hpp"
+#include "GameState.hpp"
+#include "Resolution.h"
+#include "Settings.hpp"
 #include "DropPedal.hpp"
 #include "DropPedalState.hpp"
 

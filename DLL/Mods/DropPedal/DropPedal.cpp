@@ -1,13 +1,13 @@
-#include "../../stdafx.h"
-#include "../../Audio/AsioHook.hpp"
-#include "../../Audio/DelayLinePitchShifter.hpp"
+#include "stdafx.h"
+#include "Audio/AsioHook.hpp"
+#include "Audio/DelayLinePitchShifter.hpp"
 #include "DropPedal.hpp"
 #include "DropPedalHooks.hpp"
 #include "DropPedalInput.hpp"
 #include "DropPedalOverlay.hpp"
 #include "DropPedalState.hpp"
-#include "../../GameState.hpp"
-#include "../../SongTuning.hpp"
+#include "GameState.hpp"
+#include "SongTuning.hpp"
 
 namespace
 {

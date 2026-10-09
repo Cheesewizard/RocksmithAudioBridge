@@ -1,12 +1,12 @@
-#include "../stdafx.h"
+#include "stdafx.h"
 #include "NoteByNoteMenu.hpp"
 
 #include "NoteByNoteProbe.hpp"
 #include "NoteByNoteNativeScoring.hpp"
 #include "FlowSpeedCap.hpp"
 #include "RiffRepeater.hpp"
-#include "../GameState.hpp"
-#include "../OverlayToggles.hpp"
+#include "GameState.hpp"
+#include "OverlayToggles.hpp"
 
 #include <cstdio>
 #include <cstring>

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "NoteByNoteProbe.hpp"
-#include "../Research/ResearchProtocol.hpp"
+#include "Research/ResearchProtocol.hpp"
 
 namespace NoteByNoteNativeScoring
 {

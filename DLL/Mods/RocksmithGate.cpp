@@ -1,6 +1,6 @@
-#include "../stdafx.h"
+#include "stdafx.h"
 #include "RocksmithGate.hpp"
-#include "../Wwise/SoundEngine.hpp"
+#include "Wwise/SoundEngine.hpp"
 #include <atomic>
 
 namespace {

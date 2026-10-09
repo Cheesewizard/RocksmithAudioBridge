@@ -1,10 +1,10 @@
-#include "../stdafx.h"
+#include "stdafx.h"
 #include "NoteByNoteProbe.hpp"
 
 #include "NoteByNoteNativeScoring.hpp"
-#include "../D3D/NoteByNoteHighwayRenderer.hpp"
-#include "../Research/ResearchBridge.hpp"
-#include "../Settings.hpp"
+#include "D3D/NoteByNoteHighwayRenderer.hpp"
+#include "Research/ResearchBridge.hpp"
+#include "Settings.hpp"
 
 namespace
 {

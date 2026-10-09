@@ -1,9 +1,9 @@
-#include "../stdafx.h"
+#include "stdafx.h"
 #include "NoteByNoteNativeScoring.hpp"
 
-#include "../D3D/NoteByNoteHighwayRenderer.hpp"
-#include "../Research/ResearchBridge.hpp"
-#include "../VersioningStruct.h"
+#include "D3D/NoteByNoteHighwayRenderer.hpp"
+#include "Research/ResearchBridge.hpp"
+#include "VersioningStruct.h"
 
 #include <cstring>
 namespace

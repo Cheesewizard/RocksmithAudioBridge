@@ -5,7 +5,7 @@
 #include <mutex>
 #include <thread>
 #include <wrl.h>
-#include "../AsioProxy/OutputGuardDsp.h"
+#include "AsioProxy/OutputGuardDsp.h"
 #include "OutputRateMatcher.hpp"
 
 namespace Audio::SharedOutput

@@ -2,7 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
-#include "../Audio/RawAttackEvidence.hpp"
+#include "Audio/RawAttackEvidence.hpp"
 #include "DetectionFeedback.hpp"
 namespace ResearchProtocol
 {

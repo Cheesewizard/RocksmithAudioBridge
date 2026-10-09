@@ -3,7 +3,7 @@
 #include "VstHostControl.hpp"
 #include "ExternalAmp.hpp"
 #include "SongLibrary.hpp"
-#include "../GameState.hpp"
+#include "GameState.hpp"
 
 #include <ShlObj.h>
 #include <shellapi.h>

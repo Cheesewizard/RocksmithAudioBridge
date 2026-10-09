@@ -17,7 +17,7 @@
 #include "StrumHandoff.hpp"
 #include "PowerChordConfirmation.hpp"
 #include "UnisonChord.hpp"
-#include "../Audio/RawPitchVerifier.hpp"
+#include "Audio/RawPitchVerifier.hpp"
 #include "HeldPitchConfirmation.hpp"
 #include "PlayedNotePitch.hpp"
 #include "ArrangementInstrument.hpp"

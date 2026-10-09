@@ -38,12 +38,7 @@
     <ClCompile Include="Audio\ToneBackup.cpp" />
     <ClCompile Include="Audio\GameAudioRecorder.cpp" />
     <ClCompile Include="Audio\DelayLinePitchShifter.cpp" />
-    <ClCompile Include="Audio\SongShift\WwiseMusicHook.cpp">
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="('$(Configuration)|$(Platform)'=='Release|Win32') Or ('$(Configuration)|$(Platform)'=='Master|Win32')">../../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release with Wwise Logging|Win32'">../../stdafx.h</PrecompiledHeaderFile>
-    </ClCompile>
+    <ClCompile Include="Audio\SongShift\WwiseMusicHook.cpp" />
     <ClCompile Include="Audio\SongShift\PreRenderedPitchCache.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">NotUsing</PrecompiledHeader>
@@ -54,10 +49,6 @@
       <DisableSpecificWarnings>4127;4244;4305;4456;4458;%(DisableSpecificWarnings)</DisableSpecificWarnings>
     </ClCompile>
     <ClCompile Include="Audio\SongShift\StreamingPitchShifter.cpp">
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="('$(Configuration)|$(Platform)'=='Release|Win32') Or ('$(Configuration)|$(Platform)'=='Master|Win32')">../../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release with Wwise Logging|Win32'">../../stdafx.h</PrecompiledHeaderFile>
       <Optimization Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">MaxSpeed</Optimization>
       <Optimization Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">MaxSpeed</Optimization>
     </ClCompile>
@@ -156,16 +147,8 @@
     </ClCompile>
     <ClCompile Include="Menu.cpp" />
     <ClCompile Include="Extensions.cpp" />
-    <ClCompile Include="Overlay\OverlayShell.cpp">
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="('$(Configuration)|$(Platform)'=='Release|Win32') Or ('$(Configuration)|$(Platform)'=='Master|Win32')">../stdafx.h</PrecompiledHeaderFile>
-    </ClCompile>
-    <ClCompile Include="Overlay\OverlayUi.cpp">
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="('$(Configuration)|$(Platform)'=='Release|Win32') Or ('$(Configuration)|$(Platform)'=='Master|Win32')">../stdafx.h</PrecompiledHeaderFile>
-    </ClCompile>
+    <ClCompile Include="Overlay\OverlayShell.cpp" />
+    <ClCompile Include="Overlay\OverlayUi.cpp" />
     <ClCompile Include="ModManager.cpp" />
     <ClCompile Include="Mods\AudioDevices.cpp">
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../stdafx.h</PrecompiledHeaderFile>
@@ -192,27 +175,10 @@
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../stdafx.h</PrecompiledHeaderFile>
       <PrecompiledHeaderFile Condition="('$(Configuration)|$(Platform)'=='Release|Win32') Or ('$(Configuration)|$(Platform)'=='Master|Win32')">../stdafx.h</PrecompiledHeaderFile>
     </ClCompile>
-	<ClCompile Include="Mods\NoteByNoteProbe.cpp">
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="('$(Configuration)|$(Platform)'=='Release|Win32') Or ('$(Configuration)|$(Platform)'=='Master|Win32')">../stdafx.h</PrecompiledHeaderFile>
-	</ClCompile>
-    <ClCompile Include="Mods\NoteByNoteHookHost.cpp">
-		<PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../stdafx.h</PrecompiledHeaderFile>
-		<PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../stdafx.h</PrecompiledHeaderFile>
-		<PrecompiledHeaderFile Condition="('$(Configuration)|$(Platform)'=='Release|Win32') Or ('$(Configuration)|$(Platform)'=='Master|Win32')">../stdafx.h</PrecompiledHeaderFile>
-		<PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release with Wwise Logging|Win32'">../stdafx.h</PrecompiledHeaderFile>
-	</ClCompile>
-    <ClCompile Include="Mods\NoteByNoteMenu.cpp">
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="('$(Configuration)|$(Platform)'=='Release|Win32') Or ('$(Configuration)|$(Platform)'=='Master|Win32')">../stdafx.h</PrecompiledHeaderFile>
-    </ClCompile>
-    <ClCompile Include="Mods\NoteByNoteHudLabel.cpp">
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="('$(Configuration)|$(Platform)'=='Release|Win32') Or ('$(Configuration)|$(Platform)'=='Master|Win32')">../stdafx.h</PrecompiledHeaderFile>
-    </ClCompile>
+	<ClCompile Include="Mods\NoteByNoteProbe.cpp" />
+    <ClCompile Include="Mods\NoteByNoteHookHost.cpp" />
+    <ClCompile Include="Mods\NoteByNoteMenu.cpp" />
+    <ClCompile Include="Mods\NoteByNoteHudLabel.cpp" />
     <ClCompile Include="Mods\TrueTuning.cpp">
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../stdafx.h</PrecompiledHeaderFile>
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../stdafx.h</PrecompiledHeaderFile>
@@ -228,11 +194,7 @@
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../stdafx.h</PrecompiledHeaderFile>
       <PrecompiledHeaderFile Condition="('$(Configuration)|$(Platform)'=='Release|Win32') Or ('$(Configuration)|$(Platform)'=='Master|Win32')">../stdafx.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="Mods\RocksmithGate.cpp">
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="('$(Configuration)|$(Platform)'=='Release|Win32') Or ('$(Configuration)|$(Platform)'=='Master|Win32')">../stdafx.h</PrecompiledHeaderFile>
-    </ClCompile>
+    <ClCompile Include="Mods\RocksmithGate.cpp" />
     <ClCompile Include="Mods\VolumeControl.cpp">
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../stdafx.h</PrecompiledHeaderFile>
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../stdafx.h</PrecompiledHeaderFile>
@@ -378,11 +340,7 @@
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../stdafx.h</PrecompiledHeaderFile>
       <PrecompiledHeaderFile Condition="('$(Configuration)|$(Platform)'=='Release|Win32') Or ('$(Configuration)|$(Platform)'=='Master|Win32')">../stdafx.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="D3D/NoteByNoteHighwayRenderer.cpp">
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="('$(Configuration)|$(Platform)'=='Release|Win32') Or ('$(Configuration)|$(Platform)'=='Master|Win32')">../stdafx.h</PrecompiledHeaderFile>
-    </ClCompile>
+    <ClCompile Include="D3D/NoteByNoteHighwayRenderer.cpp" />
     <ClCompile Include="Mods\DisableControllers.cpp">
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../stdafx.h</PrecompiledHeaderFile>
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../stdafx.h</PrecompiledHeaderFile>
@@ -468,32 +426,12 @@
     <ClInclude Include="Mods\NoteByNoteHostServices.hpp" />
     <ClInclude Include="Mods\NoteByNoteProbe.hpp" />
 
-    <ClCompile Include="Mods\DropPedal\DropPedal.cpp">
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="('$(Configuration)|$(Platform)'=='Release|Win32') Or ('$(Configuration)|$(Platform)'=='Master|Win32')">../../stdafx.h</PrecompiledHeaderFile>
-    </ClCompile>
+    <ClCompile Include="Mods\DropPedal\DropPedal.cpp" />
 
-    <ClCompile Include="Mods\DropPedal\DropPedalHooks.cpp">
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="('$(Configuration)|$(Platform)'=='Release|Win32') Or ('$(Configuration)|$(Platform)'=='Master|Win32')">../../stdafx.h</PrecompiledHeaderFile>
-    </ClCompile>
-    <ClCompile Include="Mods\DropPedal\DropPedalInput.cpp">
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="('$(Configuration)|$(Platform)'=='Release|Win32') Or ('$(Configuration)|$(Platform)'=='Master|Win32')">../../stdafx.h</PrecompiledHeaderFile>
-    </ClCompile>
-    <ClCompile Include="Mods\DropPedal\DropPedalOverlay.cpp">
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="('$(Configuration)|$(Platform)'=='Release|Win32') Or ('$(Configuration)|$(Platform)'=='Master|Win32')">../../stdafx.h</PrecompiledHeaderFile>
-    </ClCompile>
-    <ClCompile Include="Mods\DropPedal\DropPedalState.cpp">
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../../stdafx.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="('$(Configuration)|$(Platform)'=='Release|Win32') Or ('$(Configuration)|$(Platform)'=='Master|Win32')">../../stdafx.h</PrecompiledHeaderFile>
-    </ClCompile>
+    <ClCompile Include="Mods\DropPedal\DropPedalHooks.cpp" />
+    <ClCompile Include="Mods\DropPedal\DropPedalInput.cpp" />
+    <ClCompile Include="Mods\DropPedal\DropPedalOverlay.cpp" />
+    <ClCompile Include="Mods\DropPedal\DropPedalState.cpp" />
     <ClInclude Include="NoteData.h" />
     <ClInclude Include="ObjectUtil.hpp" />
     <ClInclude Include="CC\Effects\ShuffleTonesEffect.hpp" />
@@ -731,7 +669,7 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
-    <BuildArchiveDir>$(SolutionDir)BuildArchive\$([System.DateTime]::Now.ToString('yyyyMMdd-HHmmss'))</BuildArchiveDir>
+    <BuildArchiveDir>$(RSModsThisCheckout)\BuildArchive\$([System.DateTime]::Now.ToString('yyyyMMdd-HHmmss'))</BuildArchiveDir>
     <RocksmithInstallDir Condition="'$(RocksmithInstallDir)'==''">C:\Program Files (x86)\Steam\steamapps\common\Rocksmith2014</RocksmithInstallDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -946,12 +884,19 @@ if exist "$(OutDir)$(TargetName).map" copy /Y "$(OutDir)$(TargetName).map" "$(Bu
        RSModsResearchBridge=true, which drops the built-in controller above. -->
   <Import Project="$(MSBuildThisFileDirectory)Research\Private\Private.props" Condition="Exists('$(MSBuildThisFileDirectory)Research\Private\Private.props')" />
   <Target Name="PublishReleaseHost" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
-    <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(SolutionDir)Installer\Resources\xinput1_3.dll" />
-    <Copy SourceFiles="$(OutDir)$(TargetName).pdb" DestinationFiles="$(SolutionDir)Installer\Resources\xinput1_3.pdb" Condition="Exists('$(OutDir)$(TargetName).pdb')" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(RSModsThisCheckout)\Installer\Resources\xinput1_3.dll" />
+    <Copy SourceFiles="$(OutDir)$(TargetName).pdb" DestinationFiles="$(RSModsThisCheckout)\Installer\Resources\xinput1_3.pdb" Condition="Exists('$(OutDir)$(TargetName).pdb')" />
   </Target>
 
 
 
+  <!-- Includes resolve from the project root (DLL\), so our files can include "Audio/Foo.hpp" or "stdafx.h"
+       without ../ paths that break when files move. -->
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Import Project="$(MSBuildThisFileDirectory)..\DeployToGame.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -1,4 +1,4 @@
-#include "../../stdafx.h"
+#include "stdafx.h"
 #include "DropPedal.hpp"
 #include "DropPedalInput.hpp"
 #include "DropPedalState.hpp"

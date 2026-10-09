@@ -1,8 +1,8 @@
-#include "../stdafx.h"
+#include "stdafx.h"
 #include "NoteByNoteHighwayRenderer.hpp"
 
-#include "../Mods/NoteByNoteNativeScoring.hpp"
-#include "../Research/ResearchBridge.hpp"
+#include "Mods/NoteByNoteNativeScoring.hpp"
+#include "Research/ResearchBridge.hpp"
 
 #include <cstdint>
 #include <array>

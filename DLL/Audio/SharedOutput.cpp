@@ -10,10 +10,10 @@
 #include "PersistentInput.hpp"
 #include "AsioHook.hpp"
 #include "CableInput.hpp"
-#include "../AsioProxy/LatencyDsp.h"
-#include "../Mods/VolumeControl.hpp"
-#include "../Mods/RocksmithGate.hpp"
-#include "../Mods/Enumeration.hpp"
+#include "AsioProxy/LatencyDsp.h"
+#include "Mods/VolumeControl.hpp"
+#include "Mods/RocksmithGate.hpp"
+#include "Mods/Enumeration.hpp"
 #include <vector>
 #include <avrt.h>
 #include <cmath>

@@ -1,8 +1,8 @@
-#include "../stdafx.h"
+#include "stdafx.h"
 #include "NoteByNoteHudLabel.hpp"
 
 #include "NoteByNoteProbe.hpp"
-#include "../OverlayToggles.hpp"
+#include "OverlayToggles.hpp"
 
 #include <cstdint>
 #include <cstring>

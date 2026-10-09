@@ -21,7 +21,7 @@
 #include <thread>
 #include <vector>
 
-#include "../ThirdParty/SignalsmithStretch/signalsmith-stretch.h"
+#include "Audio/ThirdParty/SignalsmithStretch/signalsmith-stretch.h"
 
 namespace
 {

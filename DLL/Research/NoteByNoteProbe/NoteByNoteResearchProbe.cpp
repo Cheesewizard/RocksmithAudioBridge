@@ -1,7 +1,7 @@
-#include "../../Mods/ResearchProbeRuntime.hpp"
-#include "../../Mods/NoteByNoteScoringCore.hpp"
+#include "Mods/ResearchProbeRuntime.hpp"
+#include "Mods/NoteByNoteScoringCore.hpp"
 
-#include "../../Mods/NoteByNoteNativeScoring.hpp"
+#include "Mods/NoteByNoteNativeScoring.hpp"
 
 #include <windows.h>
 #include <d3d9.h>

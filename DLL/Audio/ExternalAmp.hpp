@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../AsioProxy/AmpLink.hpp"
+#include "AsioProxy/AmpLink.hpp"
 
 // External amp: play through an amp sim (AmpliTube 5 or any ASIO host) instead of Rocksmith's
 // own amp, while Rocksmith keeps the clean guitar signal for note detection.
