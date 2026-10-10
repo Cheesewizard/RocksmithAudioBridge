@@ -463,7 +463,7 @@ namespace AsioProxy
 		if (SUCCEEDED(com)) CoUninitialize();
 	}
 
-	// Capture thread: one line to RocksmithAudioBridge-log.txt every 30 s while capturing, and at once
+	// Capture thread: one line to RSMods_debug.txt (through the proxy log) every 30 s while capturing, and at once
 	// when a glitch counter moves, so the log shows whether the input ever dropped a block.
 	void VirtualCableCapture::LogStatsIfChanged()
 	{

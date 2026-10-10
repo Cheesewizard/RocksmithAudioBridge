@@ -42,8 +42,8 @@ namespace AmpLink
 			return slash == std::wstring::npos ? std::wstring() : p.substr(0, slash);
 		}
 
-		// Its own log file: the game's copy rewrites RocksmithAudioBridge-log.txt per process, so a guest
-		// writing there would wipe the game's log. Kept short: a few lines per stream start and link change.
+		// Its own log file: the guest runs in a separate 64-bit process, so it cannot write through the mod's
+		// RSMods_debug.txt like the in-game driver does. Kept short: a few lines per stream start and link change.
 		std::mutex g_logMutex;
 		void GuestLog(const char* format, ...)
 		{

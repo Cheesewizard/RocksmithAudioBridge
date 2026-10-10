@@ -196,31 +196,37 @@ namespace
 		return slash == std::wstring::npos ? std::wstring() : p.substr(0, slash);
 	}
 
-	// Proxy log: RocksmithAudioBridge-log.txt next to RS_ASIO-log.txt in the game folder, rewritten per
-	// process. The proxy has no other voice (OutputDebugString is invisible in a normal session), and
-	// RS_ASIO's log alone does not show whether the real ASIO device bound at boot or which step refused.
-	// Every bind step logs its result here. Cheap: a few lines per stream open.
-	std::mutex g_logMutex;
+	// Proxy log: written into the mod's RSMods_debug.txt through RSMods_BridgeDriverLog, exported by the mod
+	// (xinput1_3.dll, in this DLL's folder), so a report needs one log, not two. RS_ASIO's log alone does not
+	// show whether the real ASIO device bound at boot or which step refused; every bind step logs here. Cheap:
+	// a few lines per stream open. Looked up per line by full path (the mod also loads the system xinput1_3.dll,
+	// same base name), so a line written while the mod unloads is dropped, not sent to a stale address. The
+	// driver is only meant to run inside Rocksmith: anywhere else the lines are dropped.
+	using BridgeDriverLogFn = void(__cdecl*)(const char*);
+	BridgeDriverLogFn FindModLog()
+	{
+		static const std::wstring modPath = ThisModuleDir() + L"\\xinput1_3.dll";
+		const HMODULE mod = GetModuleHandleW(modPath.c_str());
+		return mod ? reinterpret_cast<BridgeDriverLogFn>(GetProcAddress(mod, "RSMods_BridgeDriverLog")) : nullptr;
+	}
+
 	void ProxyLog(const char* format, ...)
 	{
-		static const auto start = std::chrono::steady_clock::now();
-		static bool truncated = false;
-		std::lock_guard<std::mutex> guard(g_logMutex);
-		const std::wstring dir = ThisModuleDir();
-		if (dir.empty()) return;
-		const std::wstring path = dir + L"\\RocksmithAudioBridge-log.txt";
-		FILE* file = nullptr;
-		if (_wfopen_s(&file, path.c_str(), truncated ? L"a" : L"w") != 0 || !file) return;
-		if (!truncated) fprintf(file, "%s ASIO bridge driver\n", ProductVersion::DISPLAY_NAME);
-		truncated = true;
-		const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-		fprintf(file, "%8.3f [%5lu] ", seconds, GetCurrentThreadId());
+		const BridgeDriverLogFn log = FindModLog();
+		if (!log) return;
+		static std::atomic<bool> announced{ false };
+		if (!announced.exchange(true))
+		{
+			char banner[128]{};
+			_snprintf_s(banner, _TRUNCATE, "%s ASIO bridge driver loaded", ProductVersion::DISPLAY_NAME);
+			log(banner);
+		}
+		char line[1024]{};
 		va_list args;
 		va_start(args, format);
-		vfprintf(file, format, args);
+		_vsnprintf_s(line, _TRUNCATE, format, args);
 		va_end(args);
-		fputc('\n', file);
-		fclose(file);
+		log(line);
 	}
 
 	std::wstring ReadTargetDriverName()
