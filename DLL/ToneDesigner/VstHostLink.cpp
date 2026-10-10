@@ -37,6 +37,7 @@ namespace VstHostLink
 		struct PendingCommand { Command op; LONG arg = 0, arg2 = 0; std::wstring text; };
 		std::deque<PendingCommand> g_commands;
 		LONG g_sentCommand = 0;
+		Command g_sentOp = Command::None;   // the command in flight: a LoadSpare or PrepareTone is a background load
 
 		std::vector<Plugin> g_plugins;
 		bool g_scanned = false;
@@ -206,6 +207,7 @@ namespace VstHostLink
 			shared->commandArg2 = next.arg2;
 			memset(const_cast<wchar_t*>(shared->commandText), 0, sizeof(shared->commandText));
 			wcsncpy_s(const_cast<wchar_t*>(shared->commandText), VstHostControl::kPathChars, next.text.c_str(), _TRUNCATE);
+			g_sentOp = next.op;
 			g_sentCommand = InterlockedIncrement(&shared->commandSeq);   // full barrier: the fields are written first
 			g_commands.pop_front();
 		}
@@ -477,6 +479,7 @@ namespace VstHostLink
 			int keepRecent = 4;
 			std::vector<std::wstring> alwaysLoaded;
 			std::vector<std::wstring> preloadFailed;
+			std::vector<std::pair<std::wstring, std::string>> preloadFailedWhy;
 			unsigned version = 0;
 		};
 		std::mutex g_slowLock;
@@ -499,6 +502,15 @@ namespace VstHostLink
 				fresh.exclusiveFullscreen = ExclusiveFullscreen();
 				fresh.songTone = SongTone(songKey);
 				fresh.tones = ReadToneNames();
+				// Logged when the count changes: an empty library while tone files exist is otherwise a mystery.
+				static size_t loggedTones = static_cast<size_t>(-1);
+				if (fresh.tones.size() != loggedTones)
+				{
+					loggedTones = fresh.tones.size();
+					std::string names;
+					for (const std::string& tone : fresh.tones) names += (names.empty() ? "" : ", ") + tone;
+					LOG_INFO("(VST HOST) " << loggedTones << " tone(s) in " << Utf8(DataDirectory()) << "\\Tones: " << names << std::endl);
+				}
 				fresh.songTones = ReadSongTones();
 				fresh.songLoads = ReadSongLoads();
 				fresh.scanFolders = ExtraFolders();
@@ -506,6 +518,12 @@ namespace VstHostLink
 				fresh.keepRecent = static_cast<int>(ReadDword(L"KeepRecentPlugins", 4));
 				fresh.alwaysLoaded = ReadList(L"KeepLoadedPlugins");
 				fresh.preloadFailed = ReadList(L"PreloadFailed");
+				// The host writes "path|reason" for each: why the "Load failed" pill is showing.
+				for (const std::wstring& item : ReadList(L"PreloadFailedWhy"))
+				{
+					const size_t bar = item.find(L'|');
+					if (bar != std::wstring::npos) fresh.preloadFailedWhy.emplace_back(item.substr(0, bar), Utf8(item.substr(bar + 1)));
+				}
 				{
 					std::lock_guard<std::mutex> lock(g_slowLock);
 					fresh.songKey = g_slow.songKey;
@@ -748,6 +766,7 @@ namespace VstHostLink
 				s.keepRecent = slow.keepRecent;
 				s.alwaysLoaded = slow.alwaysLoaded;
 				s.preloadFailed = slow.preloadFailed;
+				s.preloadFailedWhy = slow.preloadFailedWhy;
 				return 0;
 			});
 			s.songKey = g_songKey;
@@ -855,6 +874,11 @@ namespace VstHostLink
 			char name[VstHostControl::kNameChars + 1]{};
 			memcpy(name, shared->preloadText, VstHostControl::kNameChars);
 			s.preloadingName = name;
+			// The host loads it on its one thread, so commands wait meanwhile (one from the page, LoadSpare or
+			// PrepareTone, is in flight for it; the "Always keep loaded" step runs with none in flight).
+			s.backgroundOnly = shared->loading == 0;
+			const bool sentWaits = shared->commandDone != shared->commandSeq && g_sentOp != Command::LoadSpare && g_sentOp != Command::PrepareTone;
+			s.waitingOnBackground = !g_commands.empty() || sentWaits;
 		}
 		return s;
 	}
@@ -1027,9 +1051,11 @@ namespace VstHostLink
 		return g_tones;
 	}
 
+	std::wstring TonesFolder() { return DataDirectory() + L"\\Tones"; }
+
 	void OpenTonesFolder()
 	{
-		const std::wstring folder = DataDirectory() + L"\\Tones";
+		const std::wstring folder = TonesFolder();
 		SHCreateDirectoryExW(nullptr, folder.c_str(), nullptr);
 		ShellExecuteW(nullptr, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 	}
@@ -1120,12 +1146,12 @@ namespace VstHostLink
 		if (VstHostControl::Shared* shared = Shared()) InterlockedExchange(&shared->popoutWanted, wanted ? 1 : 0);
 	}
 
-	void AddPlugin(const std::wstring& path)
+	void AddPlugin(const std::wstring& path, int position)
 	{
 		VstHostControl::Shared* shared = Shared();
 		RememberRecent(path);
 		if (!shared || !HostAlive(shared)) { if (HostProcessGone()) Launch(path); return; }
-		Queue(Command::AddPlugin, 0, 0, path);
+		Queue(Command::AddPlugin, position < 0 ? 0 : position + 1, 0, path);
 	}
 
 	void ReplaceSlot(int slot, const std::wstring& path) { RememberRecent(path); Queue(Command::ReplaceSlot, slot, 0, path); }

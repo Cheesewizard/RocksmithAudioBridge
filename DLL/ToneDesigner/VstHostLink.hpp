@@ -50,9 +50,14 @@ namespace VstHostLink
 		// Fast tone changes: plugins the host keeps loaded outside the chain (a tone using them switches at once).
 		std::vector<std::wstring> spares;
 		std::string preloadingName;   // a plugin loading in the background now (starred, or the highlighted song's)
+		// The host is busy only with that background load: tone file actions (save, open, rename) can still be
+		// asked for; they queue and run once it has loaded. waitingOnBackground: something is queued behind it.
+		bool backgroundOnly = false;
+		bool waitingOnBackground = false;
 		int keepRecent = 4;           // plugins that left the chain kept loaded
 		std::vector<std::wstring> alwaysLoaded;    // "Always keep loaded": loaded in the background each session
 		std::vector<std::wstring> preloadFailed;   // plugins that went down while loading in the background
+		std::vector<std::pair<std::wstring, std::string>> preloadFailedWhy;   // (path, why) for those, when the host said
 	};
 
 	// What a plugin is, from its VST3 sub categories (moduleinfo.json); Unknown when the bundle does not say.
@@ -87,6 +92,7 @@ namespace VstHostLink
 	// Tones: the saved chains.
 	const std::vector<std::string>& Tones();
 	void OpenTonesFolder();
+	std::wstring TonesFolder();          // %APPDATA%\RocksmithAudioBridge\VstHost\Tones (not touched by install or uninstall)
 	std::vector<std::string> SongsUsingTone(const std::string& tone);   // song keys from SongTones.ini
 	size_t SongToneCount();              // songs with a tone of their own
 	bool IsFavouriteTone(const std::string& tone);
@@ -107,7 +113,7 @@ namespace VstHostLink
 	void DismissCrashNote();
 
 	// Chain commands (queued; the host handles them in order). AddPlugin starts the host when it is not running.
-	void AddPlugin(const std::wstring& path);
+	void AddPlugin(const std::wstring& path, int position = -1);   // -1 appends; otherwise it goes in at that slot
 	void ReplaceSlot(int slot, const std::wstring& path);
 	void RemoveSlot(int slot);
 	void MoveSlot(int slot, int delta);

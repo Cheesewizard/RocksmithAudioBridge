@@ -181,6 +181,28 @@ namespace
 		return out;
 	}
 
+	// A plugin that failed to load in the background goes on PreloadFailed, so the background does not try it again
+	// until the player asks for it, and PreloadFailedWhy ("path|reason;...") keeps why, for the page's "Load failed"
+	// pill. A ';' or '|' in the reason would break the list, so they become ','.
+	void RecordPreloadFailure(const std::wstring& path, std::wstring reason)
+	{
+		std::vector<std::wstring> failed = ReadList(L"PreloadFailed");
+		if (!ListHas(failed, path)) failed.push_back(path);
+		std::wstring list;
+		for (const std::wstring& item : failed) list += (list.empty() ? L"" : L";") + item;
+		WriteString(L"PreloadFailed", list);
+
+		std::replace_if(reason.begin(), reason.end(), [](wchar_t c) { return c == L';' || c == L'|'; }, L',');
+		std::wstring why;
+		for (const std::wstring& item : ReadList(L"PreloadFailedWhy"))
+		{
+			const std::wstring itemPath = item.substr(0, item.find(L'|'));
+			if (_wcsicmp(itemPath.c_str(), path.c_str()) != 0) why += (why.empty() ? L"" : L";") + item;
+		}
+		why += (why.empty() ? L"" : L";") + path + L"|" + reason;
+		WriteString(L"PreloadFailedWhy", why);
+	}
+
 	void CopyText(char* destination, size_t capacity, const std::string& text)
 	{
 		memset(destination, 0, capacity);
@@ -222,8 +244,19 @@ namespace
 		wcsncpy_s(destination, VstHostControl::kPathChars, path.c_str(), _TRUNCATE);
 	}
 
+	// The game's process once found: waiting on its handle costs nothing, where listing every process on the system
+	// (until it is found, or if the handle cannot be opened) costs a kernel walk each time.
+	HANDLE g_gameProcess = nullptr;
+
 	bool RocksmithRunning()
 	{
+		if (g_gameProcess)
+		{
+			if (WaitForSingleObject(g_gameProcess, 0) == WAIT_TIMEOUT) return true;
+			CloseHandle(g_gameProcess);
+			g_gameProcess = nullptr;
+			return false;
+		}
 		HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 		if (snapshot == INVALID_HANDLE_VALUE) return true;   // cannot tell: assume it is, never close by mistake
 		PROCESSENTRY32W entry{ sizeof(entry) };
@@ -231,6 +264,7 @@ namespace
 		for (BOOL more = Process32FirstW(snapshot, &entry); more && !found; more = Process32NextW(snapshot, &entry))
 			found = _wcsicmp(entry.szExeFile, L"Rocksmith2014.exe") == 0;
 		CloseHandle(snapshot);
+		if (found) g_gameProcess = OpenProcess(SYNCHRONIZE, FALSE, entry.th32ProcessID);
 		return found;
 	}
 
@@ -701,6 +735,9 @@ namespace
 		{
 			Log("spares: %ls did not load (%s)", name.c_str(), error.c_str());
 			if (!ListHas(g_preloadFailed, path)) g_preloadFailed.push_back(path);
+			// Saved too: RefreshKeepSettings rereads the list from the registry, which dropped this in-memory mark
+			// and retried the plugin at the next quiet moment.
+			RecordPreloadFailure(path, error.empty() ? L"The plugin refused to load." : Wide(error));
 		}
 		WriteString(L"PreloadingNow", {});
 		g_loadingNow[0] = 0;
@@ -737,7 +774,16 @@ namespace
 		{
 		case Command::AddPlugin:
 			BeginLoading();
-			if (g_chain.Add(text, error)) { MarkModified(); OpenWindow(g_chain.Count() - 1); }
+			if (g_chain.Add(text, error))
+			{
+				// arg = position + 1 to insert it there (a plugin dropped between two pedals); 0 appends. It is
+				// added last, then stepped back, so an overlay that sends 0 behaves as before.
+				int at = g_chain.Count() - 1;
+				if (arg > 0)
+					for (const int position = std::min(arg - 1, at); at > position; --at) g_chain.Move(at, -1);
+				MarkModified();
+				OpenWindow(at);
+			}
 			else { SetLoadError(error.empty() ? "That plugin did not load." : error); SetFailedPath(text); }
 			EndLoading();
 			break;
@@ -947,7 +993,10 @@ namespace
 		case WM_TIMER:
 			if (wParam == kKeyTimer)
 			{
-				const bool down = (GetAsyncKeyState(kOverlayKey) & 0x8000) != 0;
+				// Only while one of our windows has the keyboard (otherwise the game sees the key itself): the key
+				// read goes through Steam's overlay hook, which Steam injects into this process, so it is not free.
+				const HWND foreground = GetForegroundWindow();
+				const bool down = foreground && IsOurWindow(foreground) && (GetAsyncKeyState(kOverlayKey) & 0x8000) != 0;
 				if (g_keyDown && !down) OnOverlayKeyReleased();
 				g_keyDown = down;
 				UpdateWindows();
@@ -1240,11 +1289,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 	// A starred plugin that took the host down while it loaded in the background (PreloadStep) is not tried again.
 	if (const std::wstring crashed = ReadString(L"PreloadingNow"); !crashed.empty())
 	{
-		std::vector<std::wstring> failed = ReadList(L"PreloadFailed");
-		if (!ListHas(failed, crashed)) failed.push_back(crashed);
-		std::wstring list;
-		for (const std::wstring& item : failed) list += (list.empty() ? L"" : L";") + item;
-		WriteString(L"PreloadFailed", list);
+		RecordPreloadFailure(crashed, L"The plugin host closed while this loaded in the background, most likely because the plugin crashed it.");
 		WriteString(L"PreloadingNow", {});
 		Log("spares: %ls went down with the host last time while loading in the background; not tried again", crashed.c_str());
 	}

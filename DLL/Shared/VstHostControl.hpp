@@ -28,7 +28,7 @@ namespace VstHostControl
 	enum class Command : LONG
 	{
 		None = 0,
-		AddPlugin = 1,      // text = plugin path; appended to the chain
+		AddPlugin = 1,      // text = plugin path; arg = 0 appends it, arg = n inserts it at slot n - 1
 		ReplaceSlot = 2,    // arg = slot, text = plugin path
 		RemoveSlot = 3,     // arg = slot
 		MoveSlot = 4,       // arg = slot, arg2 = -1 (earlier) or +1 (later)
