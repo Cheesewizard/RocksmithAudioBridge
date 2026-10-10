@@ -3,6 +3,7 @@
 #include <Windows.h>
 #include <mmdeviceapi.h>
 #include <string>
+#include <vector>
 
 // Passive output tap: wraps the render client the game fills so the wet mix can be copied
 // read-only, forwarding every call untouched. Works for both a plain WASAPI render device and
@@ -43,6 +44,15 @@ namespace Audio::OutputTap
 	bool TryDemoteProxyOutput();
 	// Explicit re-bind of the named real ASIO driver even when the proxy already reports it bound.
 	bool TryRebindProxyOutput(const std::wstring& driverName);
+	// Channel routing (ticket #109). Roles: 0 output (first channel of its stereo pair), 1 Player 1, 2 Player 2,
+	// 3 Mic; channels are 0-based device channels. ProxyRoute is false when RS_ASIO.ini does not send the role
+	// through the bridge (or the proxy is not loaded); hostChannel is the channel RS_ASIO.ini asks for.
+	bool ProxyRoute(int role, long& hostChannel, long& deviceChannel);
+	// The bound device's channel names; empty while the proxy is on speaker mode.
+	std::vector<std::string> ProxyChannelNames(bool input);
+	// Save and apply a role's device channel (-1 = the channel RS_ASIO.ini asks for). 1 applied live, 2 saved for
+	// the next bind, 0 failed. Blocks while the device's buffers are re-created: call it off the render thread.
+	int SetProxyRoute(int role, long deviceChannel);
 	// Set the proxy's static output trim (linear gain; second arg reserved); false if the proxy is not loaded.
 	bool ConfigureLimiter(float gainLinear, float reserved);
 	bool ConfigureOutputGuard(bool limiterOn, float ceilingLin, bool agcOn, float targetRms);

@@ -417,6 +417,33 @@ namespace Overlay
 		return changed;
 	}
 
+	bool DropdownRow(const char* label, int* index, const std::vector<std::string>& items, const char* hint)
+	{
+		ImGui::PushID(label);
+		const float width = RowWidth();
+		const float height = ImGui::GetFrameHeight();
+		const ImVec2 start = ImGui::GetCursorScreenPos();
+		const ImVec2 control = BeginLabelledRow(label, width, height);
+		ImGui::SetCursorScreenPos(control);
+		ImGui::SetNextItemWidth(std::max(40.0f, start.x + width - control.x));
+		bool changed = false;
+		const char* preview = *index >= 0 && *index < static_cast<int>(items.size()) ? items[static_cast<size_t>(*index)].c_str() : "";
+		if (ImGui::BeginCombo("##dropdown", preview)) {
+			for (int i = 0; i < static_cast<int>(items.size()); ++i) {
+				ImGui::PushID(i);
+				const bool selected = i == *index;
+				if (ImGui::Selectable(items[static_cast<size_t>(i)].c_str(), selected) && !selected) { *index = i; changed = true; }
+				if (selected) ImGui::SetItemDefaultFocus();
+				ImGui::PopID();
+			}
+			ImGui::EndCombo();
+		}
+		Hint(hint);
+		EndLabelledRow(start, height);
+		ImGui::PopID();
+		return changed;
+	}
+
 	bool ColorSwatch(const char* label, float rgb[3], bool* committed, const char* hint)
 	{
 		ImGui::PushID(label);

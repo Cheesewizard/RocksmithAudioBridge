@@ -96,6 +96,8 @@ namespace Overlay
 	bool SliderRow(const char* label, float* value, float min, float max, const char* format,
 		bool* committed = nullptr, const char* hint = nullptr);
 	bool SegmentedRow(const char* label, int* index, const char* const* options, int count, const char* hint = nullptr);
+	// Labelled drop-down list; `index` -1 shows an empty box. Returns true on the frame a different item is picked.
+	bool DropdownRow(const char* label, int* index, const std::vector<std::string>& items, const char* hint = nullptr);
 	bool ColorSwatch(const char* label, float rgb[3], bool* committed, const char* hint = nullptr);
 	bool Button(const char* label, bool primary = false, const char* hint = nullptr);
 	// One selectable line in a list (output devices): radio mark, label, optional caption on the right.

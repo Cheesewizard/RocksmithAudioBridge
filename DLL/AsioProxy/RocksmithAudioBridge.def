@@ -27,3 +27,7 @@ EXPORTS
 	RSModsAsio_SetAmpLinkLatency
 	RSModsAsio_SetAmpLinkPitch
 	RSModsAsio_GetBindError
+	RSModsAsio_GetRoute
+	RSModsAsio_GetChannelCount
+	RSModsAsio_GetChannelName
+	RSModsAsio_SetRoute

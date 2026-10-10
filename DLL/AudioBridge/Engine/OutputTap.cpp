@@ -541,6 +541,41 @@ namespace Audio::OutputTap
 		auto demote = reinterpret_cast<DemoteFn>(GetProcAddress(proxy, "RSModsAsio_TryDemote"));
 		return demote && demote() != 0;
 	}
+	bool ProxyRoute(int role, long& hostChannel, long& deviceChannel)
+	{
+		hostChannel = deviceChannel = 0;
+		HMODULE proxy = GetModuleHandleW(L"RocksmithAudioBridgeAsio.dll");
+		if (!proxy) return false;
+		using RouteFn = int(__cdecl*)(int, long*, long*);
+		auto get = reinterpret_cast<RouteFn>(GetProcAddress(proxy, "RSModsAsio_GetRoute"));   // absent on older drivers
+		return get && get(role, &hostChannel, &deviceChannel) != 0;
+	}
+	std::vector<std::string> ProxyChannelNames(bool input)
+	{
+		std::vector<std::string> names;
+		HMODULE proxy = GetModuleHandleW(L"RocksmithAudioBridgeAsio.dll");
+		if (!proxy) return names;
+		using CountFn = int(__cdecl*)(int);
+		using NameFn = int(__cdecl*)(int, long, char*, int);
+		auto count = reinterpret_cast<CountFn>(GetProcAddress(proxy, "RSModsAsio_GetChannelCount"));
+		auto name = reinterpret_cast<NameFn>(GetProcAddress(proxy, "RSModsAsio_GetChannelName"));
+		if (!count || !name) return names;
+		const int n = count(input ? 1 : 0);
+		for (int channel = 0; channel < n; ++channel)
+		{
+			char text[64]{};
+			names.push_back(name(input ? 1 : 0, channel, text, 64) ? std::string(text) : std::string());
+		}
+		return names;
+	}
+	int SetProxyRoute(int role, long deviceChannel)
+	{
+		HMODULE proxy = GetModuleHandleW(L"RocksmithAudioBridgeAsio.dll");
+		if (!proxy) return 0;
+		using SetFn = int(__cdecl*)(int, long);
+		auto set = reinterpret_cast<SetFn>(GetProcAddress(proxy, "RSModsAsio_SetRoute"));
+		return set ? set(role, deviceChannel) : 0;
+	}
 	// Configure the proxy's static output trim (linear gain in the first arg; the second is reserved). Returns
 	// false when the proxy driver is not loaded (WASAPI output, or ASIO without the bridge). gain == 1 = off.
 	bool ConfigureLimiter(float gainLinear, float reserved)

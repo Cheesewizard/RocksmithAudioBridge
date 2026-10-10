@@ -3489,10 +3489,117 @@ namespace Overlay
 			EndCard();
 		}
 
+		// ---- Channel routing (ticket #109) ------------------------------------------------------------------
+		// Which channels of the ASIO interface the game's output and each player's input use. RS_ASIO.ini keeps
+		// asking for the same channels; the bridge maps them onto the ones picked here and applies a change at
+		// once (a short gap while it re-creates the interface's buffers), saved per interface for the next launch.
+		// One interface for every role for now: per-player interfaces are step 2 of the ticket.
+
+		struct RouteView
+		{
+			bool viaBridge[4]{};
+			long host[4]{};
+			long device[4]{};
+			std::vector<std::string> inputs, outputs;
+		};
+
+		// 0 idle, 1 applying, 2 applied, 3 saved for next launch, 4 failed.
+		std::atomic<int> g_routeState{ 0 };
+
+		void ApplyRoute(int role, long channel)
+		{
+			g_routeState.store(1);
+			std::thread([role, channel] {
+				const int result = Audio::OutputTap::SetProxyRoute(role, channel);
+				g_routeState.store(result == 1 ? 2 : result == 2 ? 3 : 4);
+			}).detach();
+		}
+
+		void ChannelRoutingCard()
+		{
+			if (!Audio::OutputTap::ProxyAvailable()) return;
+			// The route reads open RS_ASIO.ini and the registry: once a second, and right after a change lands.
+			static RouteView view;
+			static ULONGLONG polled = 0;
+			static int lastState = 0;
+			const int state = g_routeState.load();
+			if (state != 1 && (GetTickCount64() - polled > 1000 || state != lastState)) {
+				RouteView fresh;
+				for (int role = 0; role < 4; ++role) fresh.viaBridge[role] = Audio::OutputTap::ProxyRoute(role, fresh.host[role], fresh.device[role]);
+				fresh.inputs = Audio::OutputTap::ProxyChannelNames(true);
+				fresh.outputs = Audio::OutputTap::ProxyChannelNames(false);
+				view = std::move(fresh);
+				polled = GetTickCount64();
+			}
+			lastState = state;
+
+			BeginCard("Channels");
+			if (view.inputs.empty() && view.outputs.empty()) {
+				Caption("Pick which inputs and outputs of your ASIO interface to use once it is open. The bridge is on speaker mode right now.");
+				EndCard();
+				return;
+			}
+			std::string asioName = Utf8(ReadPassthroughOutputName());
+			if (asioName.empty()) asioName = "your ASIO interface";
+			Caption(("Which inputs and outputs of " + asioName + " the game uses. A change applies straight away, with a short gap in the sound, and is remembered for this interface.").c_str());
+
+			ImGui::BeginDisabled(state == 1);
+			if (view.viaBridge[0] && view.outputs.size() >= 2) {
+				std::vector<std::string> labels;
+				std::vector<long> channels;
+				int index = -1;
+				for (long channel = 0; channel + 1 < static_cast<long>(view.outputs.size()); channel += 2) {
+					if (channel == view.device[0]) index = static_cast<int>(labels.size());
+					labels.push_back(view.outputs[channel] + " / " + view.outputs[channel + 1]);
+					channels.push_back(channel);
+				}
+				if (index < 0 && view.device[0] + 1 < static_cast<long>(view.outputs.size())) {   // an odd pair saved earlier
+					index = static_cast<int>(labels.size());
+					labels.push_back(view.outputs[view.device[0]] + " / " + view.outputs[view.device[0] + 1]);
+					channels.push_back(view.device[0]);
+				}
+				if (DropdownRow("Output", &index, labels, "The pair of outputs the game's sound plays on."))
+					ApplyRoute(0, channels[static_cast<size_t>(index)]);
+			}
+			static const char* const roleNames[4] = { "Output", "Player 1", "Player 2", "Mic" };
+			bool missing = false;
+			for (int role = 1; role < 4; ++role) {
+				if (!view.viaBridge[role]) { missing = true; continue; }
+				int index = view.device[role] >= 0 && view.device[role] < static_cast<long>(view.inputs.size()) ? static_cast<int>(view.device[role]) : -1;
+				// RS_ASIO.ini gives this role the same channel as an earlier one, so there is one buffer for both and
+				// it follows that role. Picking it separately needs its own Channel= in RS_ASIO.ini.
+				int sharesWith = 0;
+				for (int earlier = 1; earlier < role; ++earlier)
+					if (view.viaBridge[earlier] && view.host[earlier] == view.host[role]) { sharesWith = earlier; break; }
+				ImGui::BeginDisabled(sharesWith != 0);
+				if (DropdownRow(roleNames[role], &index, view.inputs, "The input this part listens to.") && sharesWith == 0)
+					ApplyRoute(role, index);
+				ImGui::EndDisabled();
+				if (sharesWith != 0)
+					Caption((std::string(roleNames[role]) + " has the same Channel as " + roleNames[sharesWith] + " in RS_ASIO.ini, so it follows it. Give it its own Channel there to pick it here.").c_str());
+			}
+			ImGui::EndDisabled();
+			if (missing) Caption("Player 2 and the mic show up here once RS_ASIO.ini sends them to Rocksmith Audio Bridge ASIO too.");
+
+			const char* message = nullptr;
+			ImU32 color = Color::Muted;
+			if (state == 1) message = "Applying...";
+			else if (state == 2) message = "Applied.";
+			else if (state == 3) message = "Saved. It applies when the interface opens.";
+			else if (state == 4) { message = "The interface would not take that channel. Check the Playing to card above."; color = Color::Bad; }
+			if (message) {
+				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(color));
+				ImGui::TextUnformatted(message);
+				ImGui::PopStyleColor();
+			}
+			EndCard();
+		}
+
 		void OutputPage(const LiveState& live)
 		{
 			PageHeader("Output", "Where the game's sound goes and how loud it can get.");
 			OutputDeviceCard(live);
+			ChannelRoutingCard();
 			OutputBufferCard(live);
 
 			static bool seeded = false;
