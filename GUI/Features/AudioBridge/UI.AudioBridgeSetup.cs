@@ -81,6 +81,7 @@ namespace RSMods
 			page.Controls.Add(setup);
 
 			InitializeRecordingFolderSetup(page);
+			InitializeBugReportSetup(page);
 
 			page.VisibleChanged += (sender, args) => { if (page.Visible) RefreshAudioBridgeSetup(); };
 			// The window can sit open while Rocksmith starts or stops; re-check whenever it comes back to the front.

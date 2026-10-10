@@ -178,6 +178,8 @@
     <Compile Include="Features\AudioBridge\UI.BridgeSettingsSync.cs" />
     <Compile Include="Features\AudioBridge\UI.AudioBridgeSetup.cs" />
     <Compile Include="Features\AudioBridge\UI.AudioBridgeTab.cs" />
+    <Compile Include="Features\BugReport\BugReport.cs" />
+    <Compile Include="Features\BugReport\UI.BugReport.cs" />
     <Compile Include="Controls\ColourWheel.cs" />
     <Compile Include="Controls\ColourChip.cs" />
     <Compile Include="Controls\FeatureSection.cs" />
