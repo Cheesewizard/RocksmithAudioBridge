@@ -259,6 +259,59 @@ namespace
 		return status == ERROR_SUCCESS && valueType == REG_DWORD && value == 1;
 	}
 
+	// Why the wanted real device did not bind this launch. Without this a driver that refuses to open (the
+	// device is busy in its own control app, a DAW, OBS) leaves the proxy silently on Virtual and the player
+	// only sees "no input". Kept per process for the mod's overlay (RSModsAsio_GetBindError) and persisted
+	// under HKCU so the settings app can say it after the game has closed. Written only from bind steps on
+	// host / export threads, never from the audio callback.
+	std::mutex g_bindErrorMutex;
+	std::wstring g_bindErrorDriver;
+	std::wstring g_bindErrorReason;
+
+	std::wstring Widen(const std::string& text)
+	{
+		if (text.empty()) return std::wstring();
+		const int n = MultiByteToWideChar(CP_ACP, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0);
+		std::wstring wide(static_cast<size_t>(n > 0 ? n : 0), L'\0');
+		if (n > 0) MultiByteToWideChar(CP_ACP, 0, text.c_str(), static_cast<int>(text.size()), &wide[0], n);
+		return wide;
+	}
+
+	void PersistBindError(const std::wstring& driver, const std::wstring& reason)
+	{
+		HKEY key = nullptr;
+		if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\RSMods\\AsioProxy", 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS)
+			return;
+		const auto setString = [key](const wchar_t* name, const std::wstring& value)
+		{
+			RegSetValueExW(key, name, 0, REG_SZ, reinterpret_cast<const BYTE*>(value.c_str()),
+				static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t)));
+		};
+		setString(L"LastBindError", reason);
+		setString(L"LastBindErrorDriver", driver);
+		SYSTEMTIME now{};
+		GetLocalTime(&now);
+		wchar_t stamp[32]{};
+		swprintf_s(stamp, L"%04u-%02u-%02u %02u:%02u:%02u", now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond);
+		setString(L"LastBindErrorTime", stamp);
+		RegCloseKey(key);
+	}
+
+	void ClearBindError()
+	{
+		{
+			std::lock_guard<std::mutex> lock(g_bindErrorMutex);
+			g_bindErrorDriver.clear();
+			g_bindErrorReason.clear();
+		}
+		HKEY key = nullptr;
+		if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\RSMods\\AsioProxy", 0, KEY_SET_VALUE, &key) != ERROR_SUCCESS) return;
+		RegDeleteValueW(key, L"LastBindError");
+		RegDeleteValueW(key, L"LastBindErrorDriver");
+		RegDeleteValueW(key, L"LastBindErrorTime");
+		RegCloseKey(key);
+	}
+
 	// Resolve an ASIO driver name to its DLL path + CLSID via HKLM/HKCU Software\ASIO\<name>.
 	bool ResolveAsioDriver(const std::wstring& name, std::wstring& dllPath, CLSID& clsid)
 	{
@@ -452,9 +505,11 @@ public:
 			// refused to load or init during the buffer-size query this boot is not retried (saves ~0.4 s).
 			const bool knownAbsent = m_realProbeFailed;
 			m_realProbeFailed = false;
+			if (!knownAbsent) m_bindFailure.clear();   // a probe refusal keeps its reason for the report below
 			if (knownAbsent && preferReal) ProxyLog("createBuffers: real device unavailable at the buffer-size query; not retrying");
 			if (!preferReal || knownAbsent || BindReal(std::wstring(), bufferInfos, numChannels, bufferSize) != 0)
 			{
+				if (preferReal) PublishBindFailure();
 				const ASIOError virtualResult = CreateVirtualBuffers(bufferInfos, numChannels, bufferSize, callbacks);
 				ProxyLog("createBuffers: staying Virtual -> %ld", virtualResult);
 				return virtualResult;
@@ -467,11 +522,14 @@ public:
 		// initialised, only its buffers are rebuilt, so this is the one path that does not go via BindReal.
 		if (!m_real) return -1;
 		EnforceRealSampleRate();
+		m_bindFailure.clear();
 		const ASIOError e = CreateRealBuffers(bufferInfos, numChannels, bufferSize);
 		if (e == 0) { CompleteRealBind(bufferInfos, numChannels, bufferSize); return 0; }   // ASE_OK
 		// The device went away between the host's dispose and re-create (e.g. unplugged). Staying Real with no
 		// buffers and no s_active would make every RSModsAsio_Try* export refuse until a restart.
 		ProxyLog("createBuffers: re-creating on the real device failed (%ld); falling back to Virtual", e);
+		if (m_bindFailure.empty()) NoteBindFailure("it stopped accepting buffers, error %ld (was it unplugged?)", e);
+		PublishBindFailure();
 		ReleaseReal();
 		ActivateVirtual();
 		const ASIOError virtualResult = CreateVirtualBuffers(bufferInfos, numChannels, bufferSize, callbacks);
@@ -527,12 +585,14 @@ private:
 				char message[128]{};
 				m_real->getErrorMessage(message);
 				ProxyLog("BindReal: the real driver refused init (host handle %p): %s", m_sysHandle, message);
+				NoteInitRefused(message);
 				ReleaseReal();
 				return -1;
 			}
 			ProxyLog("BindReal: real driver loaded and initialised");
 		}
 		EnforceRealSampleRate();
+		m_bindFailure.clear();   // so a format refusal noted inside CreateRealBuffers is kept below
 		const ASIOError e = CreateRealBuffers(infos, numChannels, bufferSize);
 		if (e != 0)
 		{
@@ -542,6 +602,12 @@ private:
 			m_real->getBufferSize(&minimum, &maximum, &preferred, &granularity);
 			ProxyLog("BindReal: real createBuffers(%ld channels, %ld frames) -> %ld (%s); driver allows %ld..%ld preferred %ld granularity %ld",
 				numChannels, bufferSize, e, message, minimum, maximum, preferred, granularity);
+			// A format refusal noted by CreateRealBuffers is the real reason; otherwise use the driver's text.
+			if (m_bindFailure.empty())
+			{
+				if (message[0] != '\0') NoteBindFailure("it refused %ld frame buffers: %s", bufferSize, message);
+				else NoteBindFailure("it refused %ld frame buffers, error %ld", bufferSize, e);
+			}
 			ReleaseReal();
 		}
 		else ProxyLog("BindReal: real createBuffers(%ld channels, %ld frames) OK at %.0f Hz", numChannels, bufferSize, m_sampleRate);
@@ -571,6 +637,7 @@ private:
 			{
 				ProxyLog("BindReal: the driver would not report the format of %s channel %ld; staying Virtual rather than guess",
 					infos[i].isInput ? "input" : "output", infos[i].channelNum);
+				NoteBindFailure("it would not report the audio format of %s channel %ld", infos[i].isInput ? "input" : "output", infos[i].channelNum);
 				return -1;
 			}
 			types[i] = info.type;
@@ -578,6 +645,7 @@ private:
 			{
 				ProxyLog("BindReal: %s channel %ld uses ASIO sample type %ld, which the proxy cannot convert; staying Virtual",
 					infos[i].isInput ? "input" : "output", infos[i].channelNum, types[i]);
+				NoteBindFailure("it uses audio format %ld, which the bridge cannot convert", types[i]);
 				return -1;
 			}
 			if (types[i] != ASIOSTInt32LSB) convert = true;
@@ -724,6 +792,7 @@ private:
 			char message[128]{};
 			m_real->getErrorMessage(message);
 			ProxyLog("getBufferSize: real device refused init (%s); reporting the virtual range", message);
+			NoteInitRefused(message);
 		}
 		ReleaseReal();
 		m_realProbeFailed = true;
@@ -741,6 +810,9 @@ private:
 		for (long i = 0; i < numChannels; ++i)
 			if (infos[i].isInput) ++m_inputCount;
 		m_mode.store(OutputMode::Real, std::memory_order_release);
+		// Bound: a refusal recorded on an earlier launch (or earlier this launch) no longer applies.
+		m_bindFailure.clear();
+		ClearBindError();
 		CacheInputChannels();
 		CacheOutputChannels();
 		g_trim.Configure(g_trimGain.load());
@@ -766,6 +838,41 @@ private:
 	}
 
 	// Drop the real driver and its module. Safe to call when nothing is loaded.
+	// Bind failure reporting (see g_bindErrorMutex). Each refusing step notes a short reason; the caller that
+	// decides "staying Virtual" publishes it, so the overlay and settings app can say why the guitar is silent.
+	void NoteBindFailure(const char* format, ...)
+	{
+		char text[256]{};
+		va_list args;
+		va_start(args, format);
+		_vsnprintf_s(text, _TRUNCATE, format, args);
+		va_end(args);
+		m_bindFailure = text;
+	}
+
+	// The driver's own getErrorMessage text (e.g. "ASIO Driver open Failure!") is the most useful part.
+	void NoteInitRefused(const char* driverMessage)
+	{
+		if (driverMessage && driverMessage[0] != '\0') NoteBindFailure("it refused to start: %s", driverMessage);
+		else NoteBindFailure("it refused to start");
+	}
+
+	void PublishBindFailure()
+	{
+		const std::wstring driver = m_bindTarget.empty() ? ReadTargetDriverName() : m_bindTarget;
+		const std::string reason = m_bindFailure.empty() ? std::string("it would not start") : m_bindFailure;
+		m_bindFailure.clear();
+		if (driver.empty()) return;   // no Target set: the settings app already reports "not set up"
+		ProxyLog("ERROR: guitar input and output are silent because '%ls' would not open: %s", driver.c_str(), reason.c_str());
+		const std::wstring wideReason = Widen(reason);
+		{
+			std::lock_guard<std::mutex> lock(g_bindErrorMutex);
+			g_bindErrorDriver = driver;
+			g_bindErrorReason = wideReason;
+		}
+		PersistBindError(driver, wideReason);
+	}
+
 	void ReleaseReal()
 	{
 		if (m_real) { m_real->Release(); m_real = nullptr; }
@@ -1062,29 +1169,43 @@ private:
 		if (m_real) return true;
 		std::wstring dllPath; CLSID clsid;
 		const std::wstring targetDriver = driverName.empty() ? ReadTargetDriverName() : driverName;
+		m_bindTarget = targetDriver;   // named in the bind error if a later step refuses
 		if (!ResolveAsioDriver(targetDriver, dllPath, clsid))
 		{
 			ProxyLog("LoadReal: no ASIO registry entry for '%ls'", targetDriver.c_str());
+			NoteBindFailure("it is not installed as an ASIO driver (reinstall its driver)");
 			return false;
 		}
 		m_realModule = LoadLibraryW(dllPath.c_str());
 		if (!m_realModule)
 		{
-			ProxyLog("LoadReal: LoadLibrary failed for '%ls' (error %lu)", dllPath.c_str(), GetLastError());
+			const DWORD error = GetLastError();
+			ProxyLog("LoadReal: LoadLibrary failed for '%ls' (error %lu)", dllPath.c_str(), error);
+			NoteBindFailure("its driver file would not load, Windows error %lu", error);
 			return false;
 		}
 		using GetClassObject = HRESULT(STDAPICALLTYPE*)(REFCLSID, REFIID, void**);
 		auto dllGetClassObject = reinterpret_cast<GetClassObject>(GetProcAddress(m_realModule, "DllGetClassObject"));
-		if (!dllGetClassObject) { ProxyLog("LoadReal: '%ls' exports no DllGetClassObject", dllPath.c_str()); return false; }
+		if (!dllGetClassObject)
+		{
+			ProxyLog("LoadReal: '%ls' exports no DllGetClassObject", dllPath.c_str());
+			NoteBindFailure("its driver file is not a working ASIO driver");
+			return false;
+		}
 		IClassFactory* factory = nullptr;
 		if (FAILED(dllGetClassObject(clsid, IID_IClassFactory, reinterpret_cast<void**>(&factory))) || !factory)
 		{
 			ProxyLog("LoadReal: '%ls' gave no class factory", dllPath.c_str());
+			NoteBindFailure("its driver file is not a working ASIO driver");
 			return false;
 		}
 		const HRESULT hr = factory->CreateInstance(nullptr, clsid, reinterpret_cast<void**>(&m_real));
 		factory->Release();
-		if (FAILED(hr) || !m_real) ProxyLog("LoadReal: CreateInstance for '%ls' failed 0x%08lX", targetDriver.c_str(), static_cast<unsigned long>(hr));
+		if (FAILED(hr) || !m_real)
+		{
+			ProxyLog("LoadReal: CreateInstance for '%ls' failed 0x%08lX", targetDriver.c_str(), static_cast<unsigned long>(hr));
+			NoteBindFailure("the driver could not be created, error 0x%08lX", static_cast<unsigned long>(hr));
+		}
 		else ProxyLog("LoadReal: '%ls' loaded from '%ls'", targetDriver.c_str(), dllPath.c_str());
 		return SUCCEEDED(hr) && m_real != nullptr;
 	}
@@ -1457,6 +1578,8 @@ private:
 	std::atomic<bool> m_virtualRunning{ false };
 	std::atomic<bool> m_callbackSeen{ false };
 	bool m_realProbeFailed = false;   // real device refused load/init at this boot's buffer-size query
+	std::wstring m_bindTarget;        // the real driver the last LoadReal tried
+	std::string m_bindFailure;        // why the last bind step refused, user-readable; empty when none
 	std::atomic<bool> m_realCallbacksEnabled{ false };
 	std::atomic<uint32_t> m_realCallbacksInFlight{ 0 };
 	std::atomic<bool> m_streamRunning{ false };
@@ -1538,6 +1661,18 @@ extern "C" __declspec(dllexport) int RSModsAsio_TryDemote()
 	const int result = active->TryDemote();
 	active->Release();
 	return result;
+}
+
+// Why the real device would not open this launch, as one user-readable line ("<driver> would not open: <reason>.
+// Guitar input and output are silent."). Returns 1 and fills buffer when a failure is recorded, else 0.
+extern "C" __declspec(dllexport) int RSModsAsio_GetBindError(wchar_t* buffer, int chars)
+{
+	std::lock_guard<std::mutex> lock(g_bindErrorMutex);
+	if (g_bindErrorDriver.empty()) return 0;
+	if (buffer && chars > 0)
+		_snwprintf_s(buffer, static_cast<size_t>(chars), _TRUNCATE, L"%ls would not open: %ls. Guitar input and output are silent.",
+			g_bindErrorDriver.c_str(), g_bindErrorReason.c_str());
+	return 1;
 }
 
 extern "C" __declspec(dllexport) int RSModsAsio_GetInputMode()

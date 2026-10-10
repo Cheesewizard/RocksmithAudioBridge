@@ -304,6 +304,14 @@ namespace RSMods
 				status = "Several ASIO drivers are installed. Set Driver= in RS_ASIO.ini to your interface so the bridge knows which one to use.";
 				colour = OverlayLook.Warn;
 			}
+			else if (linked && AsioProxySetup.ReadLastBindError(out string failedDriver, out string reason))
+			{
+				// The driver could not open the interface last launch (usually another app holds it), so the game ran
+				// with a silent guitar. Said here because in game it looked like plain "no input".
+				if (failedDriver.Length == 0) failedDriver = target;
+				status = "Last launch: " + failedDriver + " would not open (" + reason.TrimEnd('.') + "). Guitar was silent. Close other apps using it (its control app, a DAW, OBS) and restart Rocksmith.";
+				colour = OverlayLook.Warn;
+			}
 			else if (linked)
 			{
 				status = "Installed, wrapping " + target + ".";

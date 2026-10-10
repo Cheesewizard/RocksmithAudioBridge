@@ -34,6 +34,9 @@ namespace Audio::OutputTap
 	// Current proxy capture transport: 0 = physical ASIO input, 1 = virtual input waiting for
 	// a Real Tone Cable, 2 = virtual input receiving the Real Tone Cable.
 	int ProxyInputMode();
+	// Why the proxy could not open the user's real ASIO device this launch (one readable line), or empty
+	// when it bound or never tried. Explains a silent guitar that would otherwise show only as "no input".
+	std::wstring ProxyBindError();
 	// Ask a virtual proxy to bind its configured physical ASIO driver. Failure leaves the virtual stream live.
 	bool TryPromoteProxyOutput(const std::wstring& driverName);
 	// Replace a stalled real-ASIO transport with the proxy's virtual clock. Used only for automatic downgrade.

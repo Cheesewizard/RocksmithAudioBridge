@@ -3300,11 +3300,29 @@ namespace Overlay
 			else if (endpoint == L"(silent)") { current = "No output"; state = "Silent"; stateColor = Color::Bad; }
 			else if (switching) { current = "Switching"; state = "Switching"; stateColor = Color::Warn; }
 
+			// The real ASIO device refused to open this launch, so the proxy runs on its virtual clock and the
+			// guitar is silent. Without this the card reads "ASIO" in green and the player only notices "no input".
+			// The proxy clears the error once the device binds, so it is only shown while it still applies.
+			const std::wstring bindError = proxy ? Audio::OutputTap::ProxyBindError() : std::wstring();
+			static std::wstring loggedBindError;
+			if (!bindError.empty() && bindError != loggedBindError) {
+				loggedBindError = bindError;
+				LOG_ERROR("(AUDIO BRIDGE) " << Utf8(bindError) << std::endl);
+			}
+			if (!bindError.empty() && !routing && !session && !switching) { current = asioName; state = "Not open"; stateColor = Color::Bad; }
+
 			BeginCard("Playing to");
 			ImGui::PushFont(GetFonts().title);
 			ImGui::TextUnformatted(current.c_str());
 			ImGui::PopFont();
 			StatusPill(state, stateColor);
+			if (!bindError.empty()) {
+				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Color::Bad));
+				ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + RowWidth());
+				ImGui::TextUnformatted((Utf8(bindError) + " Close other apps using it (its control app, a DAW, OBS) and restart Rocksmith.").c_str());
+				ImGui::PopTextWrapPos();
+				ImGui::PopStyleColor();
+			}
 			Meter("Left", MeterFraction(live.status.outputPeak[0]), "The game's left-channel output level, after the volume cap.");
 			Meter("Right", MeterFraction(live.status.outputPeak[1]), "The game's right-channel output level, after the volume cap.");
 			EndCard();

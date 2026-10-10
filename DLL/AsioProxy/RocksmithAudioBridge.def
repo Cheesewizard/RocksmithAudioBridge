@@ -26,3 +26,4 @@ EXPORTS
 	RSModsAsio_GetAmpLinkStatus
 	RSModsAsio_SetAmpLinkLatency
 	RSModsAsio_SetAmpLinkPitch
+	RSModsAsio_GetBindError

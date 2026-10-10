@@ -506,6 +506,15 @@ namespace Audio::OutputTap
 		auto mode = reinterpret_cast<ModeFn>(GetProcAddress(proxy, "RSModsAsio_GetInputMode"));
 		return mode ? mode() : 0;
 	}
+	std::wstring ProxyBindError()
+	{
+		HMODULE proxy = GetModuleHandleW(L"RocksmithAudioBridgeAsio.dll");
+		if (!proxy) return std::wstring();
+		using BindErrorFn = int(__cdecl*)(wchar_t*, int);
+		auto get = reinterpret_cast<BindErrorFn>(GetProcAddress(proxy, "RSModsAsio_GetBindError"));   // absent on older drivers
+		wchar_t text[512]{};
+		return get && get(text, 512) != 0 ? std::wstring(text) : std::wstring();
+	}
 	bool TryPromoteProxyOutput(const std::wstring& driverName)
 	{
 		if (driverName.empty()) return false;

@@ -254,6 +254,24 @@ namespace RSMods.Audio
 			catch { return ""; }
 		}
 
+		/// <summary>Why the bridge driver could not open the real interface on the last launch, written by
+		/// DLL/AsioProxy/AsioProxyDriver.cpp (LastBindError, LastBindErrorDriver) and removed once it binds. Lets the
+		/// settings app explain a silent guitar after the game has closed. False when the last launch bound fine.</summary>
+		public static bool ReadLastBindError(out string driver, out string reason)
+		{
+			driver = reason = "";
+			try
+			{
+				using (var key = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Registry32).OpenSubKey(TargetKey))
+				{
+					reason = key?.GetValue("LastBindError") as string ?? "";
+					driver = key?.GetValue("LastBindErrorDriver") as string ?? "";
+				}
+			}
+			catch { reason = ""; }
+			return reason.Length > 0;
+		}
+
 		/// <summary>Records which real ASIO driver the proxy forwards to. This is the one piece of setup the GUI
 		/// still owns; the proxy reads it from HKCU at boot. RS_ASIO.ini stays the user's to edit.</summary>
 		public static void SelectTarget(string realDriverName)
