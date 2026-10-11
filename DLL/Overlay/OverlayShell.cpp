@@ -3387,6 +3387,17 @@ namespace Overlay
 			ImGui::TextUnformatted(current.c_str());
 			ImGui::PopFont();
 			StatusPill(state, stateColor);
+			// A setup that crashed the game is not reopened at boot (the driver's last-known-good guard); say what happened.
+			static std::string safeBootNotice;
+			static uint64_t safeBootPolled = 0;
+			if (proxy && GetTickCount64() - safeBootPolled > 1000) { safeBootPolled = GetTickCount64(); safeBootNotice = Audio::OutputTap::ProxySafeBootNotice(); }
+			if (!safeBootNotice.empty()) {
+				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Color::Warn));
+				ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + RowWidth());
+				ImGui::TextUnformatted(safeBootNotice.c_str());
+				ImGui::PopTextWrapPos();
+				ImGui::PopStyleColor();
+			}
 			if (!bindError.empty()) {
 				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Color::Bad));
 				ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + RowWidth());

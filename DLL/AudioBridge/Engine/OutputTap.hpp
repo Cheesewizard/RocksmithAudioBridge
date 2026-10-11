@@ -62,6 +62,8 @@ namespace Audio::OutputTap
 	int SetProxyInputTarget(int role, const std::wstring& driver);
 	// Why an input interface would not open (its inputs then come from the output interface), or empty.
 	std::string ProxyInputError();
+	// What the bridge's last-known-good guard did at boot (a setup that crashed the game is not reopened), or empty.
+	std::string ProxySafeBootNotice();
 	// A role's input on another clock: 1 input interface, 2 Real Tone Cable, 0 none. ppm, fill, margin, underruns,
 	// primed as VirtualCableCapture::Stats.
 	struct InputClock { int source = 0; int ppm = 0; int fill = 0; int margin = 0; unsigned underruns = 0; int primed = 0; };

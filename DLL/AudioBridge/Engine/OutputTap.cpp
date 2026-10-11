@@ -603,6 +603,15 @@ namespace Audio::OutputTap
 		char text[1024]{};
 		return get && get(text, 1024) ? std::string(text) : std::string();
 	}
+	std::string ProxySafeBootNotice()
+	{
+		HMODULE proxy = GetModuleHandleW(L"RocksmithAudioBridgeAsio.dll");
+		if (!proxy) return std::string();
+		using GetFn = int(__cdecl*)(char*, int);
+		auto get = reinterpret_cast<GetFn>(GetProcAddress(proxy, "RSModsAsio_GetSafeBootNotice"));
+		char text[512]{};
+		return get && get(text, 512) ? std::string(text) : std::string();
+	}
 	InputClock ProxyInputClock(int role)
 	{
 		InputClock clock;

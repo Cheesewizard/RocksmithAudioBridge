@@ -34,6 +34,7 @@ EXPORTS
 	RSModsAsio_GetRoleInputTarget
 	RSModsAsio_SetRoleInputTarget
 	RSModsAsio_GetInputError
+	RSModsAsio_GetSafeBootNotice
 	RSModsAsio_GetRoleInputClock
 	RSModsAsio_GetRoleChannelCount
 	RSModsAsio_GetRoleChannelName

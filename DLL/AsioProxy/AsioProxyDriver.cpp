@@ -500,6 +500,62 @@ namespace
 	std::string g_inputError;
 	void SetInputError(const std::string& text) { std::lock_guard<std::mutex> lock(g_inputErrorMutex); g_inputError = text; }
 
+	// ---- Last known good setup (2026-10-11) ------------------------------------------------------------------
+	// A broken ASIO driver can take the whole game down (Realtek ASIO corrupts the heap when opened input-only, proven
+	// outside the game), and nothing in-process can catch that. So the bridge never boots twice into a setup that
+	// crashed: before any interface opens it saves the exact setup it is trying as "Pending"; ten seconds of clean
+	// running (or a clean exit) promote it to "LastGood" and clear Pending (a setup that fails to open without crashing
+	// just clears Pending). At boot, a saved setup equal to Pending crashed last time: the last good one comes back, or
+	// with none (or when that one is the one that crashed) nothing opens until the player picks an interface. A setup
+	// changed in the settings app while the game was closed no longer matches Pending, so it is tried normally.
+	// Chosen over testing drivers in a helper process: far less code, and a crash points at the player's own setup.
+	constexpr const wchar_t* kSetupValues[] = { L"Target", L"InputTarget", L"InputTarget.Player1", L"InputTarget.Player2", L"InputTarget.Mic" };
+	std::mutex g_safeBootMutex;
+	std::wstring g_attemptSetup;           // the setup being tried, until it is confirmed
+	uint64_t g_attemptTick = 0;            // GetTickCount64 when it started; 0 = nothing pending from this process
+	std::string g_safeBootNotice;          // shown on the overlay's Playing to card
+
+	void WriteRegistryString(const wchar_t* name, const std::wstring& value)
+	{
+		HKEY key = nullptr;
+		if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\RSMods\\AsioProxy", 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) return;
+		if (value.empty()) RegDeleteValueW(key, name);
+		else RegSetValueExW(key, name, 0, REG_SZ, reinterpret_cast<const BYTE*>(value.c_str()), static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t)));
+		RegCloseKey(key);
+	}
+
+	// The saved setup as one string (values joined by newlines); `target` replaces the output when not empty.
+	std::wstring CurrentSetup(const std::wstring& target = std::wstring())
+	{
+		std::wstring setup;
+		for (const wchar_t* name : kSetupValues)
+		{
+			const bool isTarget = wcscmp(name, L"Target") == 0;
+			setup += (isTarget && !target.empty() ? target : ReadRegistryString(name)) + L"\n";
+		}
+		return setup;
+	}
+
+	void RestoreSetup(const std::wstring& setup)
+	{
+		size_t start = 0;
+		for (const wchar_t* name : kSetupValues)
+		{
+			const size_t end = setup.find(L'\n', start);
+			WriteRegistryString(name, setup.substr(start, end == std::wstring::npos ? std::wstring::npos : end - start));
+			start = end == std::wstring::npos ? setup.size() : end + 1;
+		}
+	}
+
+	// Marks `setup` as being tried now (before any driver for it loads).
+	void BeginSetupAttempt(const std::wstring& setup)
+	{
+		std::lock_guard<std::mutex> lock(g_safeBootMutex);
+		g_attemptSetup = setup;
+		g_attemptTick = GetTickCount64();
+		WriteRegistryString(L"Pending", setup);
+	}
+
 	// The device whose routes an input role uses: its input interface when it has one, else the output's.
 	std::wstring CurrentInputRouteTarget(int role)
 	{
@@ -554,6 +610,91 @@ class AsioProxyDriver : public IAsioDriver
 {
 public:
 	static AsioProxyDriver* s_active;   // ASIO callbacks carry no context; only one driver is active
+
+	// Boot only, once per process: whether this launch may open the saved setup (see "Last known good setup").
+	static bool SafeBootAllowsReal()
+	{
+		static int decided = -1;
+		if (decided >= 0) return decided == 1;
+		const std::wstring setup = CurrentSetup();
+		const std::wstring pending = ReadRegistryString(L"Pending");
+		if (!pending.empty() && pending == setup)
+		{
+			const std::wstring lastGood = ReadRegistryString(L"LastGood");
+			if (!lastGood.empty() && lastGood != setup)
+			{
+				RestoreSetup(lastGood);
+				ProxyLog("SafeBoot: the saved setup did not survive its last launch; back on the last one that worked");
+				std::lock_guard<std::mutex> lock(g_safeBootMutex);
+				g_safeBootNotice = "The game closed unexpectedly with the last setup, so the last one that worked is back.";
+			}
+			else
+			{
+				if (!lastGood.empty()) WriteRegistryString(L"LastGood", std::wstring());   // it crashed too
+				ProxyLog("SafeBoot: the saved setup did not survive its last launch and nothing else is known to work; opening no interface");
+				std::lock_guard<std::mutex> lock(g_safeBootMutex);
+				g_safeBootNotice = "The game closed unexpectedly with the saved setup, so no interface was opened. Pick one in Switch output.";
+				decided = 0;
+				return false;   // Pending stays: the next launch holds too until the setup changes
+			}
+		}
+		BeginSetupAttempt(CurrentSetup());
+		StartSafeBootWatch();
+		decided = 1;
+		return true;
+	}
+
+	// A live change in the overlay: `target` is the output being tried (empty = the saved one).
+	static void BeginLiveAttempt(const std::wstring& target)
+	{
+		BeginSetupAttempt(CurrentSetup(target));
+		{
+			std::lock_guard<std::mutex> lock(g_safeBootMutex);
+			g_safeBootNotice.clear();
+		}
+		StartSafeBootWatch();
+	}
+
+	// Ends the attempt being tried; `worked` saves it as the last good one.
+	static void FinishSetupAttempt(bool worked)
+	{
+		std::lock_guard<std::mutex> lock(g_safeBootMutex);
+		if (!g_attemptTick) return;
+		if (worked) WriteRegistryString(L"LastGood", g_attemptSetup);
+		WriteRegistryString(L"Pending", std::wstring());
+		ProxyLog("SafeBoot: setup %s", worked ? "confirmed working; saved as the last good one" : "did not open, but did not crash either");
+		g_attemptTick = 0;
+	}
+
+	static void StartSafeBootWatch()
+	{
+		static std::atomic<bool> started{ false };
+		if (started.exchange(true)) return;
+		// The thread lives as long as the process, so this module must never unload under it.
+		HMODULE self = nullptr;
+		GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN, reinterpret_cast<LPCWSTR>(&StartSafeBootWatch), &self);
+		std::thread([] {
+			for (;;)
+			{
+				std::this_thread::sleep_for(std::chrono::milliseconds(500));
+				uint64_t begun = 0;
+				{
+					std::lock_guard<std::mutex> lock(g_safeBootMutex);
+					begun = g_attemptTick;
+				}
+				if (!begun || GetTickCount64() - begun < 10000) continue;
+				AsioProxyDriver* active = s_active;
+				FinishSetupAttempt(active && active->RunningReal());
+			}
+		}).detach();
+	}
+
+	// Real, and its callbacks arrived in the last second.
+	bool RunningReal() const
+	{
+		const uint64_t last = m_lastCallbackTick.load(std::memory_order_acquire);
+		return IsReal() && last != 0 && GetTickCount64() - last < 1000;
+	}
 	AsioProxyDriver()
 	{
 		m_virtualCable.SetTestMode(g_virtualCaptureTestMode.load(std::memory_order_acquire));
@@ -611,6 +752,7 @@ public:
 	{
 		StopVirtual();
 		FreeVirtualBuffers();
+		if (IsReal() && m_callbackSeen.load(std::memory_order_acquire)) FinishSetupAttempt(true);   // closed cleanly while running: it worked
 		DisableRealCallbacksAndWait();   // a host that releases without stop/dispose must not race the bridge free
 		FreeBridge();
 		if (s_active == this) s_active = nullptr;
@@ -751,7 +893,7 @@ public:
 		{
 			long inputs = 0;
 			for (long i = 0; i < numChannels; ++i) if (bufferInfos[i].isInput) ++inputs;
-			const bool preferReal = PreferRealOutput();
+			const bool preferReal = PreferRealOutput() && SafeBootAllowsReal();
 			ProxyLog("createBuffers: %ld channel(s) (%ld in, %ld out), %ld frames; PreferReal=%d",
 				numChannels, inputs, numChannels - inputs, bufferSize, preferReal ? 1 : 0);
 			// Stay virtual unless the user prefers the real device AND it binds cleanly. A device that already
@@ -1196,7 +1338,7 @@ private:
 	bool ProbeRealBeforeBind()
 	{
 		if (m_real) return !m_bufferInfos;
-		if (m_bufferInfos || m_realProbeFailed || !PreferRealOutput()) return false;
+		if (m_bufferInfos || m_realProbeFailed || !PreferRealOutput() || !SafeBootAllowsReal()) return false;
 		if (LoadReal() && m_real->init(m_sysHandle))
 		{
 			long mn = 0, mx = 0, pref = 0, gran = 0;
@@ -1471,6 +1613,7 @@ private:
 		// Each refusal is published like a boot-time one (RSModsAsio_GetBindError), so the overlay's interface switch
 		// can say why before it falls back; the bind that follows clears it again (CompleteRealBind).
 		m_bindFailure.clear();
+		BeginLiveAttempt(driverName);
 		if (!LoadReal(driverName)) { ReleaseReal(); PublishBindFailure(); return false; }
 		if (!m_real->init(m_sysHandle))
 		{
@@ -1523,6 +1666,7 @@ private:
 			std::lock_guard<std::mutex> transition(m_transitionMutex);
 			ProxyLog("Rebind: '%ls' requested; mode %s", driverName.c_str(),
 				m_mode.load() == OutputMode::Virtual ? "Virtual" : "Real");
+			BeginLiveAttempt(driverName);
 			if (m_mode.load(std::memory_order_acquire) == OutputMode::Real)
 			{
 				if (!m_bufferInfos) return false;
@@ -2277,10 +2421,20 @@ extern "C" __declspec(dllexport) int RSModsAsio_SetRoleInputTarget(int role, con
 	ProxyLog("SetInputTarget: %ls -> '%ls'", role < 0 ? L"every input" : kRouteValueNames[role], name.empty() ? L"(same as output)" : name.c_str());
 	AsioProxyDriver* active = AsioProxyDriver::s_active;
 	if (!active || !active->IsReal()) return 2;
+	AsioProxyDriver::BeginLiveAttempt(std::wstring());
 	active->AddRef();
 	const int result = active->Reroute();
 	active->Release();
 	return result;
+}
+
+// What the last-known-good guard did at boot (UTF-8, one line), for the overlay's Playing to card. Returns 1 with text.
+extern "C" __declspec(dllexport) int RSModsAsio_GetSafeBootNotice(char* buffer, int chars)
+{
+	std::lock_guard<std::mutex> lock(g_safeBootMutex);
+	if (g_safeBootNotice.empty()) return 0;
+	if (buffer && chars > 0) strncpy_s(buffer, static_cast<size_t>(chars), g_safeBootNotice.c_str(), _TRUNCATE);
+	return 1;
 }
 
 // Why an input interface would not open this time (UTF-8, one line per interface). Returns 1 and fills the buffer
