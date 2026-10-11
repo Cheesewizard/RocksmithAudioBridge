@@ -145,6 +145,26 @@ namespace RS2014_Mod_Installer
             }
         }
 
+        // Runs the installed RSMods.exe to put back the RS_ASIO.ini the player had before "Set up for me" rewrote it
+        // (GUI/Features/RsAsio/RsAsioIniSetup.cs). Must run before RemoveFiles, which deletes the registry state that
+        // says whether there is anything to restore. Returns null on success or nothing to restore.
+        public static string RunRsAsioRestore(string rocksmithLocation)
+        {
+            string exe = ToolPath(rocksmithLocation);
+            if (!File.Exists(exe)) return "RSMods.exe is missing";
+            var info = new ProcessStartInfo(exe, "--restore-rs-asio-ini \"" + rocksmithLocation.TrimEnd('\\') + "\"")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = Path.GetDirectoryName(exe),
+            };
+            using (var process = Process.Start(info))
+            {
+                if (!process.WaitForExit(60000)) { try { process.Kill(); } catch { } return "it did not finish within a minute"; }
+                return process.ExitCode == 0 ? null : "the saved copy could not be put back";
+            }
+        }
+
         // Deletes our files and returns the ones that could not be removed.
         public static List<string> RemoveFiles(string rocksmithLocation, bool removeSettings, bool menuEntryRemoved)
             => RemoveFiles(rocksmithLocation, removeSettings, menuEntryRemoved,
