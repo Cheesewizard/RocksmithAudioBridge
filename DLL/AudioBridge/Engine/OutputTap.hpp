@@ -53,6 +53,21 @@ namespace Audio::OutputTap
 	// Save and apply a role's device channel (-1 = the channel RS_ASIO.ini asks for). 1 applied live, 2 saved for
 	// the next bind, 0 failed. Blocks while the device's buffers are re-created: call it off the render thread.
 	int SetProxyRoute(int role, long deviceChannel);
+	// Input interfaces per role (DLL/AsioProxy/SplitInput.hpp): 1 Player 1, 2 Player 2, 3 Mic. Empty = the output
+	// interface.
+	std::wstring ProxyInputTarget(int role);
+	// Saves and applies a role's input interface (empty = the output's; role -1 = every input role): 1 applied live,
+	// 2 saved for the next bind, 0 failed. Blocks while the interface's buffers are re-created: call it off the render
+	// thread.
+	int SetProxyInputTarget(int role, const std::wstring& driver);
+	// Why an input interface would not open (its inputs then come from the output interface), or empty.
+	std::string ProxyInputError();
+	// A role's input on another clock: 1 input interface, 2 Real Tone Cable, 0 none. ppm, fill, margin, underruns,
+	// primed as VirtualCableCapture::Stats.
+	struct InputClock { int source = 0; int ppm = 0; int fill = 0; int margin = 0; unsigned underruns = 0; int primed = 0; };
+	InputClock ProxyInputClock(int role);
+	// A role's channel names: the output pair's interface for role 0, else that input role's own interface.
+	std::vector<std::string> ProxyRoleChannelNames(int role);
 	// Set the proxy's static output trim (linear gain; second arg reserved); false if the proxy is not loaded.
 	bool ConfigureLimiter(float gainLinear, float reserved);
 	bool ConfigureOutputGuard(bool limiterOn, float ceilingLin, bool agcOn, float targetRms);

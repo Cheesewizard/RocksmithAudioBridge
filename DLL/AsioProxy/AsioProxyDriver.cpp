@@ -17,6 +17,7 @@
 #include "OutputGuardDsp.h"
 #include "MeterDsp.h"
 #include "VirtualCableCapture.hpp"
+#include "SplitInput.hpp"
 #include "AmpLinkHost.hpp"
 #include "AmpLinkGuest.hpp"
 #include "../Shared/ProductVersion.hpp"
@@ -410,6 +411,7 @@ namespace
 	// Real channel names of the bound device, for the overlay's pickers. Filled at each bind, emptied on Virtual.
 	std::mutex g_channelNamesMutex;
 	std::vector<std::string> g_inputNames;
+	std::vector<std::string> g_roleInputNames[RouteRoleCount];   // per input role: its interface's input names
 	std::vector<std::string> g_outputNames;
 	std::wstring g_boundTarget;   // the bound device's driver name, empty while Virtual
 
@@ -421,6 +423,101 @@ namespace
 			if (!g_boundTarget.empty()) return g_boundTarget;
 		}
 		return ReadTargetDriverName();
+	}
+
+	// Input interfaces (SplitInput.hpp), per input role: HKCU AsioProxy\InputTarget.Player1 / .Player2 / .Mic names
+	// the ASIO interface that role's input comes from; the plain InputTarget value is the default for every role that
+	// has none of its own (and was the only setting before per-role interfaces). Empty, or the output interface,
+	// means the role's input comes from the output interface. So the bridge just routes: each input from any
+	// interface and channel, the output to any interface and pair, the way RS_ASIO.ini itself can.
+	constexpr const wchar_t* kSameAsOutput = L"(output)";
+	std::wstring InputTargetValueName(int role) { return role == RoutePlayer1 || role == RoutePlayer2 || role == RouteMic ? std::wstring(L"InputTarget.") + kRouteValueNames[role] : L"InputTarget"; }
+
+	std::wstring ReadRegistryString(const wchar_t* name)
+	{
+		HKEY key = nullptr;
+		wchar_t buffer[512]{};
+		DWORD size = sizeof(buffer);
+		if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\RSMods\\AsioProxy", 0, KEY_READ, &key) == ERROR_SUCCESS)
+		{
+			RegQueryValueExW(key, name, nullptr, nullptr, reinterpret_cast<BYTE*>(buffer), &size);
+			RegCloseKey(key);
+		}
+		return buffer;
+	}
+
+	// The role's own setting; else, for Player 2 and the mic, Player 1's (an unset second player is on the same
+	// interface as the first); else the shared default.
+	std::wstring ReadInputTargetDriverName(int role)
+	{
+		const std::wstring own = ReadRegistryString(InputTargetValueName(role).c_str());
+		if (!own.empty()) return own;
+		if (role == RoutePlayer2 || role == RouteMic)
+		{
+			const std::wstring first = ReadRegistryString(InputTargetValueName(RoutePlayer1).c_str());
+			if (!first.empty()) return first;
+		}
+		return ReadRegistryString(L"InputTarget");
+	}
+
+	// role < 0 sets the shared default and clears every role's own setting (one interface for all inputs).
+	bool WriteInputTargetDriverName(int role, const std::wstring& driver)
+	{
+		HKEY key = nullptr;
+		if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\RSMods\\AsioProxy", 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) return false;
+		const std::wstring name = InputTargetValueName(role);
+		// A role set to "same as output" must still override a shared default, so it is stored as the marker
+		// kSameAsOutput rather than deleted (not as the output's name: that would turn into a real input interface
+		// once the output moved to another interface).
+		const std::wstring value = driver.empty() && role >= 0 ? std::wstring(kSameAsOutput) : driver;
+		const LSTATUS status = value.empty() ? RegDeleteValueW(key, name.c_str())
+			: RegSetValueExW(key, name.c_str(), 0, REG_SZ, reinterpret_cast<const BYTE*>(value.c_str()), static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t)));
+		if (role < 0)
+			for (int each : { RoutePlayer1, RoutePlayer2, RouteMic }) RegDeleteValueW(key, InputTargetValueName(each).c_str());
+		RegCloseKey(key);
+		return status == ERROR_SUCCESS || status == ERROR_FILE_NOT_FOUND;
+	}
+
+	// The input interface to open for `role` beside `outputTarget`, or empty when it comes from the output interface.
+	std::wstring SplitInputTarget(int role, const std::wstring& outputTarget)
+	{
+		const std::wstring input = ReadInputTargetDriverName(role);
+		return input.empty() || input == kSameAsOutput || _wcsicmp(input.c_str(), outputTarget.c_str()) == 0 ? std::wstring() : input;
+	}
+
+	// Why the input interface would not open (one line), shown on the overlay; the guitar then comes from the output
+	// interface. Cleared when it opens or is set back to "same as output".
+	std::string WideToUtf8(const std::wstring& text)
+	{
+		if (text.empty()) return std::string();
+		const int size = WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+		std::string out(static_cast<size_t>(size > 0 ? size : 0), '\0');
+		if (size > 0) WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), &out[0], size, nullptr, nullptr);
+		return out;
+	}
+
+	std::mutex g_inputErrorMutex;
+	std::string g_inputError;
+	void SetInputError(const std::string& text) { std::lock_guard<std::mutex> lock(g_inputErrorMutex); g_inputError = text; }
+
+	// The device whose routes an input role uses: its input interface when it has one, else the output's.
+	std::wstring CurrentInputRouteTarget(int role)
+	{
+		const std::wstring output = CurrentRouteTarget();
+		const std::wstring input = SplitInputTarget(role, output);
+		return input.empty() ? output : input;
+	}
+
+	// The input role a host input channel belongs to: the RS_ASIO.ini section that asks the bridge for that channel
+	// (Player 1 first when two share one, as RouteTable::Map does). A channel no section names counts as Player 1.
+	int InputRoleOfHostChannel(long hostChannel)
+	{
+		for (int role : { RoutePlayer1, RoutePlayer2, RouteMic })
+		{
+			const RouteRoleInfo info = ReadRouteRole(role);
+			if (info.viaBridge && info.hostChannel == hostChannel) return role;
+		}
+		return RoutePlayer1;
 	}
 
 	// Resolve an ASIO driver name to its DLL path + CLSID via HKLM/HKCU Software\ASIO\<name>.
@@ -457,7 +554,12 @@ class AsioProxyDriver : public IAsioDriver
 {
 public:
 	static AsioProxyDriver* s_active;   // ASIO callbacks carry no context; only one driver is active
-	AsioProxyDriver() { m_virtualCable.SetTestMode(g_virtualCaptureTestMode.load(std::memory_order_acquire)); m_virtualCable.SetLog(&ProxyLog); }
+	AsioProxyDriver()
+	{
+		m_virtualCable.SetTestMode(g_virtualCaptureTestMode.load(std::memory_order_acquire));
+		m_virtualCable.SetLog(&ProxyLog);
+		for (auto& slot : m_splitInputs) slot.store(new AsioProxy::SplitInput(), std::memory_order_release);   // never allocated on the audio thread
+	}
 	int OutputModeValue() const
 	{
 		if (!m_callbackSeen.load(std::memory_order_acquire)) return 0;
@@ -489,6 +591,20 @@ public:
 		return driverName && driverName[0] != L'\0' && TryRebindReal(driverName) ? 1 : 0;
 	}
 	int Reroute() { return RerouteReal() ? 1 : 0; }
+	// The input that runs on another clock for `role` and how well it is being kept in time: 1 its input interface,
+	// 2 the Real Tone Cable (speaker mode), 0 none (it shares the output's clock, so there is nothing to correct).
+	int InputClock(int role, AsioProxy::VirtualCableCapture::Stats& stats) const
+	{
+		const long code = role >= 0 && role < RouteRoleCount ? m_roleSplit[static_cast<size_t>(role)] : 0;
+		const long slots = static_cast<long>(AsioProxy::SplitInput::kMaxChannels);
+		if (code < 0 && (-1 - code) / slots < static_cast<long>(m_splitInputs.size()))
+		{
+			const auto& input = Split(static_cast<size_t>((-1 - code) / slots));
+			if (input.IsOpen()) { stats = input.Stats(static_cast<size_t>((-1 - code) % slots)); return 1; }
+		}
+		if (m_mode.load(std::memory_order_acquire) == OutputMode::Virtual && m_virtualCable.HasPhysicalCapture()) { stats = m_virtualCable.GetStats(); return 2; }
+		return 0;
+	}
 	bool IsReal() const { return m_mode.load(std::memory_order_acquire) == OutputMode::Real; }
 	std::wstring BoundTarget() const { return m_bindTarget; }
 	~AsioProxyDriver()
@@ -498,6 +614,11 @@ public:
 		DisableRealCallbacksAndWait();   // a host that releases without stop/dispose must not race the bridge free
 		FreeBridge();
 		if (s_active == this) s_active = nullptr;
+		for (auto& slot : m_splitInputs)
+		{
+			AsioProxy::SplitInput* input = slot.exchange(nullptr);
+			if (input && !input->IsQuarantined()) delete input;   // a quarantined one may still be inside its callback
+		}
 		if (m_real) m_real->Release();
 		if (m_realModule) FreeLibrary(m_realModule);
 	}
@@ -708,7 +829,17 @@ private:
 				}
 			}
 		}
+		// Each input role's picker lists its own interface's channels: an input interface's when it has one open.
+		std::vector<std::string> roleNames[RouteRoleCount];
+		const long slots = static_cast<long>(AsioProxy::SplitInput::kMaxChannels);
+		for (int role = RoutePlayer1; role < RouteRoleCount; ++role)
+		{
+			const long code = m_roleSplit[static_cast<size_t>(role)];
+			const bool split = code < 0 && (-1 - code) / slots < static_cast<long>(m_splitInputs.size()) && Split(static_cast<size_t>((-1 - code) / slots)).IsOpen();
+			roleNames[role] = split ? Split(static_cast<size_t>((-1 - code) / slots)).ChannelNames() : inputs;
+		}
 		std::lock_guard<std::mutex> lock(g_channelNamesMutex);
+		for (int role = 0; role < RouteRoleCount; ++role) g_roleInputNames[role] = std::move(roleNames[role]);
 		g_inputNames = std::move(inputs);
 		g_outputNames = std::move(outputs);
 		g_boundTarget = m_real && m_mode.load(std::memory_order_acquire) == OutputMode::Real ? m_bindTarget : std::wstring();
@@ -802,17 +933,84 @@ private:
 	{
 		FreeBridge();
 		routed = false;
-		const RouteTable routes = useRoutes ? RouteTable::Load(m_bindTarget.empty() ? ReadTargetDriverName() : m_bindTarget) : RouteTable{};
+		const std::wstring outputTarget = m_bindTarget.empty() ? ReadTargetDriverName() : m_bindTarget;
+		const RouteTable routes = useRoutes ? RouteTable::Load(outputTarget) : RouteTable{};
 		long realInputs = 0, realOutputs = 0;
 		m_real->getChannels(&realInputs, &realOutputs);
 		std::vector<ASIOBufferInfo> real;
 		std::vector<long> types;
 		std::vector<long> hostToReal(static_cast<size_t>(numChannels), 0);
 		bool convert = false;
+
+		// Input interfaces (SplitInput.hpp), per input role: each host input belongs to the RS_ASIO.ini section that asks
+		// for its channel (Player 1, Player 2, mic), and that role's input interface, if it has one, supplies it. Each
+		// distinct interface is one SplitInput (up to three), each distinct channel on it one capture slot; a host input
+		// served that way maps to -1 - (device * kMaxChannels + slot) instead of a real buffer. An interface that will
+		// not open leaves its roles on the output interface as before, with the reason shown on the overlay.
+		constexpr long kSlots = static_cast<long>(AsioProxy::SplitInput::kMaxChannels);
+		std::vector<long> hostSplit(static_cast<size_t>(numChannels), 0);   // 0 = output interface, else the code above
+		m_roleSplit.fill(0);
+		{
+			struct Pending { std::wstring driver; std::vector<long> channels; std::vector<long> hosts; };
+			std::vector<Pending> wanted;
+			for (long i = 0; i < numChannels; ++i)
+			{
+				if (!infos[i].isInput) continue;
+				const int role = InputRoleOfHostChannel(infos[i].channelNum);
+				const std::wstring driver = SplitInputTarget(role, outputTarget);
+				if (driver.empty()) continue;
+				auto at = std::find_if(wanted.begin(), wanted.end(), [&](const Pending& p) { return _wcsicmp(p.driver.c_str(), driver.c_str()) == 0; });
+				if (at == wanted.end())
+				{
+					if (wanted.size() >= m_splitInputs.size()) continue;   // more than three interfaces: the rest stay on the output's
+					wanted.push_back(Pending{ driver, {}, {} });
+					at = wanted.end() - 1;
+				}
+				const RouteTable inputRoutes = useRoutes ? RouteTable::Load(driver) : RouteTable{};
+				const long channel = inputRoutes.Map(true, infos[i].channelNum);
+				if (std::find(at->channels.begin(), at->channels.end(), channel) == at->channels.end() && at->channels.size() < static_cast<size_t>(kSlots))
+					at->channels.push_back(channel);
+				at->hosts.push_back(i);
+			}
+			std::string errors;
+			for (size_t device = 0; device < wanted.size(); ++device)
+			{
+				const Pending& pending = wanted[device];
+				std::wstring dllPath; CLSID clsid{};
+				std::string failure;
+				if (!ResolveAsioDriver(pending.driver, dllPath, clsid)) failure = "it is not installed as an ASIO driver";
+				else if (Split(device).Open(pending.driver, dllPath, clsid, m_sysHandle, pending.channels, &ProxyLog, failure)) failure.clear();
+				if (!Split(device).IsOpen())
+				{
+					errors += (errors.empty() ? "" : " ") + WideToUtf8(pending.driver) + " would not open as an input interface: " + failure + ". Its inputs come from the output interface.";
+					ProxyLog("BindReal: input interface '%ls' not used: %s", pending.driver.c_str(), failure.c_str());
+					continue;
+				}
+				const RouteTable inputRoutes = useRoutes ? RouteTable::Load(pending.driver) : RouteTable{};
+				for (long host : pending.hosts)
+				{
+					const long channel = inputRoutes.Map(true, infos[host].channelNum);
+					const auto slot = std::find(pending.channels.begin(), pending.channels.end(), channel);
+					const long slotIndex = slot == pending.channels.end() ? 0 : static_cast<long>(slot - pending.channels.begin());
+					hostSplit[static_cast<size_t>(host)] = -1 - (static_cast<long>(device) * kSlots + slotIndex);
+					const int role = InputRoleOfHostChannel(infos[host].channelNum);
+					if (m_roleSplit[static_cast<size_t>(role)] == 0) m_roleSplit[static_cast<size_t>(role)] = hostSplit[static_cast<size_t>(host)];
+					ProxyLog("BindReal: host input channel %ld -> '%ls' channel %ld", infos[host].channelNum, pending.driver.c_str(), channel);
+				}
+			}
+			SetInputError(errors);
+		}
+
 		for (long i = 0; i < numChannels; ++i)
 		{
 			const bool isInput = infos[i].isInput != 0;
 			const long hostChannel = infos[i].channelNum;
+			if (isInput && hostSplit[static_cast<size_t>(i)] < 0)
+			{
+				hostToReal[static_cast<size_t>(i)] = hostSplit[static_cast<size_t>(i)];
+				routed = true;
+				continue;
+			}
 			// A route past the device's channels (another device, fewer channels) falls back to the channel RS_ASIO
 			// asked for, then wraps onto the device, so it plays something instead of refusing.
 			const long count = isInput ? realInputs : realOutputs;
@@ -857,7 +1055,7 @@ private:
 
 		m_realInfos = std::move(real);
 		const ASIOError e = m_real->createBuffers(m_realInfos.data(), static_cast<long>(m_realInfos.size()), bufferSize, &s_ourCallbacks);
-		if (e != 0) { m_realInfos.clear(); return e; }
+		if (e != 0) { m_realInfos.clear(); CloseSplitInputs(); return e; }
 		for (long i = 0; i < numChannels; ++i)
 		{
 			for (int d = 0; d < 2; ++d)
@@ -882,6 +1080,8 @@ private:
 	void FreeBridge()
 	{
 		m_bridged.store(false, std::memory_order_release);
+		CloseSplitInputs();
+		m_roleSplit.fill(0);
 		for (void* buffer : m_bridgeBuffers) free(buffer);
 		m_bridgeBuffers.clear();
 		m_realInfos.clear();
@@ -957,12 +1157,21 @@ private:
 	void BridgeInputs(long index) noexcept
 	{
 		if (!m_bridged.load(std::memory_order_acquire) || !m_bufferInfos || m_bufferSize <= 0) return;
+		for (size_t device = 0; device < m_splitInputs.size(); ++device) Split(device).BeginBlock();   // each input-interface channel is drained once per block, however many players share it
 		for (long i = 0; i < m_numChannels && i < static_cast<long>(m_hostToReal.size()); ++i)
 		{
 			if (!m_bufferInfos[i].isInput) continue;
 			const long r = m_hostToReal[static_cast<size_t>(i)];
-			const auto* src = static_cast<const BYTE*>(m_realInfos[static_cast<size_t>(r)].buffers[index]);
 			auto* dst = static_cast<int32_t*>(m_bufferInfos[i].buffers[index]);
+			if (r < 0)   // an input interface: -1 - (device * kMaxChannels + slot)
+			{
+				const long code = -1 - r;
+				const long slots = static_cast<long>(AsioProxy::SplitInput::kMaxChannels);
+				if (dst && code / slots < static_cast<long>(m_splitInputs.size()))
+					Split(static_cast<size_t>(code / slots)).Read(static_cast<size_t>(code % slots), dst, static_cast<uint32_t>(m_bufferSize));
+				continue;
+			}
+			const auto* src = static_cast<const BYTE*>(m_realInfos[static_cast<size_t>(r)].buffers[index]);
 			if (src && dst) RealToHost(src, dst, m_realTypes[static_cast<size_t>(r)], m_bufferSize);
 		}
 	}
@@ -1259,13 +1468,18 @@ private:
 		const bool wasRunning = m_streamRunning.load(std::memory_order_acquire);
 		// Load and init before touching the running virtual stream, so a driver that will not even load
 		// costs the player nothing. BindReal then skips straight to the rate + buffer step.
-		if (!LoadReal(driverName)) { ReleaseReal(); return false; }
+		// Each refusal is published like a boot-time one (RSModsAsio_GetBindError), so the overlay's interface switch
+		// can say why before it falls back; the bind that follows clears it again (CompleteRealBind).
+		m_bindFailure.clear();
+		if (!LoadReal(driverName)) { ReleaseReal(); PublishBindFailure(); return false; }
 		if (!m_real->init(m_sysHandle))
 		{
 			char message[128]{};
 			m_real->getErrorMessage(message);
 			ProxyLog("TryPromote: the real driver refused init: %s", message);
+			NoteInitRefused(message);
 			ReleaseReal();
+			PublishBindFailure();
 			return false;
 		}
 		if (wasRunning) StopVirtual();
@@ -1273,18 +1487,22 @@ private:
 		FreeVirtualBuffers();
 		for (long i = 0; i < m_numChannels; ++i) m_bufferInfos[i].buffers[0] = m_bufferInfos[i].buffers[1] = nullptr;
 		InstallTrampolines();
-		if (BindReal(driverName, m_bufferInfos, m_numChannels, m_bufferSize) != 0) return RestoreVirtual(wasRunning);
+		if (BindReal(driverName, m_bufferInfos, m_numChannels, m_bufferSize) != 0) { PublishBindFailure(); return RestoreVirtual(wasRunning); }
 		CompleteRealBind(m_bufferInfos, m_numChannels, m_bufferSize);
 		m_realCallbacksEnabled.store(true, std::memory_order_release);
 		m_callbackSeen.store(false);
 		if (!wasRunning) return true;
 		if (m_real->start() == 0)
 		{
-			for (int attempt = 0; attempt < 10 && !m_callbackSeen.load(std::memory_order_acquire); ++attempt)
-				std::this_thread::sleep_for(std::chrono::milliseconds(5));
+			// Up to a second for the first callback: ASIO4ALL (kernel streaming) and some USB drivers take a few hundred
+			// ms to start, and 50 ms rejected ASIO4ALL as "never started playing" (2026-10-11).
+			for (int attempt = 0; attempt < 100 && !m_callbackSeen.load(std::memory_order_acquire); ++attempt)
+				std::this_thread::sleep_for(std::chrono::milliseconds(10));
 			if (m_callbackSeen.load(std::memory_order_acquire)) { ProxyLog("TryPromote: real device running; mode Real"); return true; }
 		}
 		ProxyLog("TryPromote: real driver bound but never called back; back to Virtual");
+		NoteBindFailure("it opened but never started playing");
+		PublishBindFailure();
 		// The real driver bound but never called back: hand the stream back to the virtual clock.
 		DisableRealCallbacksAndWait();
 		m_real->stop();
@@ -1370,6 +1588,37 @@ private:
 		return false;
 	}
 
+	// The output stalled. If an input interface opened just before, it most likely stopped the output (2026-10-11:
+	// Realtek ASIO opened as Player 1's input took the sound chip ASIO4ALL was playing through; the output went quiet
+	// 3.5 s later). Its players go back to the output interface, saved, so the next launch does not repeat the clash, and
+	// the overlay says why.
+	void BlameRecentInputInterface()
+	{
+		static const char* const kRoleLabels[RouteRoleCount] = { "Output", "Player 1", "Player 2", "Mic" };
+		const uint64_t now = GetTickCount64();
+		const long slots = static_cast<long>(AsioProxy::SplitInput::kMaxChannels);
+		std::string message;
+		for (size_t device = 0; device < m_splitInputs.size(); ++device)
+		{
+			AsioProxy::SplitInput& input = Split(device);
+			if (!input.IsOpen() || input.OpenedTick() == 0 || now - input.OpenedTick() > 10000) continue;
+			std::string players;
+			for (int role = 0; role < RouteRoleCount; ++role)
+			{
+				const long code = m_roleSplit[static_cast<size_t>(role)];
+				if (code >= 0 || static_cast<size_t>((-1 - code) / slots) != device) continue;
+				WriteInputTargetDriverName(role, std::wstring());   // same as output
+				players += (players.empty() ? "" : " and ") + std::string(kRoleLabels[role]);
+			}
+			const std::string name = WideToUtf8(input.DriverName());
+			ProxyLog("Output stalled %llu ms after input interface '%ls' opened; %s set back to the output interface",
+				static_cast<unsigned long long>(now - input.OpenedTick()), input.DriverName().c_str(), players.empty() ? "no role" : players.c_str());
+			message += (message.empty() ? "" : " ") + std::string("The output stopped right after ") + name + " opened as an input; they probably share the same sound hardware. "
+				+ (players.empty() ? std::string("Its inputs") : players) + " now come from the output interface.";
+		}
+		if (!message.empty()) SetInputError(message);
+	}
+
 	bool TryDemoteToVirtual()
 	{
 		std::lock_guard<std::mutex> transition(m_transitionMutex);
@@ -1378,6 +1627,7 @@ private:
 		// A stalled ASIO driver may be inside stop/dispose or may invoke a callback concurrently.
 		// Disable the trampoline first, detach both handles, and quarantine the driver/module.
 		DisableRealCallbacksAndWait();
+		BlameRecentInputInterface();
 		FreeBridge();   // the host is moved onto virtual buffers below; the quarantined driver keeps its own
 		m_real = nullptr;
 		m_realModule = nullptr;
@@ -1423,6 +1673,12 @@ private:
 			return false;
 		}
 		m_realModule = LoadLibraryW(dllPath.c_str());
+		// Pinned: an ASIO driver's own threads can outlive Release() (a USB worker waking late), and once its DLL is
+		// unmapped they run into freed code and take the game down (2026-10-11: M-Track driver +0x6E10, execute fault,
+		// after switching interfaces live). Pinned, every FreeLibrary below is only a reference count; the code stays
+		// mapped until the game exits. A driver loaded again reuses the same mapping.
+		HMODULE pinned = nullptr;
+		if (m_realModule) GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, reinterpret_cast<LPCWSTR>(m_realModule), &pinned);
 		if (!m_realModule)
 		{
 			const DWORD error = GetLastError();
@@ -1839,7 +2095,34 @@ private:
 	std::atomic<bool> m_bridged{ false };
 	std::vector<ASIOBufferInfo> m_realInfos;   // the real driver's own buffers
 	std::vector<long> m_realTypes;             // the real driver's sample type per real buffer
-	std::vector<long> m_hostToReal;            // host buffer index -> m_realInfos index (channel routing)
+	std::vector<long> m_hostToReal;            // host buffer index -> m_realInfos index (channel routing); -1 - slot = input interface
+	// Input interfaces, open only while set and bound. Owned by pointer so one whose driver stays wedged in its callback
+	// can be abandoned (leaked, never freed under that callback) and replaced; see CloseSplitInputs.
+	std::array<std::atomic<AsioProxy::SplitInput*>, AsioProxy::SplitInput::kMaxDevices> m_splitInputs{};
+	AsioProxy::SplitInput& Split(size_t device) const
+	{
+		AsioProxy::SplitInput* input = m_splitInputs[device].load(std::memory_order_acquire);
+		if (!input)
+		{
+			// First use: create it (only the bind/transition path reaches here with no object yet).
+			auto* created = new AsioProxy::SplitInput();
+			AsioProxy::SplitInput* expected = nullptr;
+			if (const_cast<std::atomic<AsioProxy::SplitInput*>&>(m_splitInputs[device]).compare_exchange_strong(expected, created)) input = created;
+			else { delete created; input = expected; }
+		}
+		return *input;
+	}
+	void CloseSplitInputs()
+	{
+		for (size_t device = 0; device < m_splitInputs.size(); ++device)
+		{
+			AsioProxy::SplitInput* input = m_splitInputs[device].load(std::memory_order_acquire);
+			if (!input || input->Close()) continue;
+			// Quarantined: abandon it (never deleted) and give the slot a fresh object.
+			m_splitInputs[device].store(new AsioProxy::SplitInput(), std::memory_order_release);
+		}
+	}
+	std::array<long, RouteRoleCount> m_roleSplit{};   // per input role: its input-interface code (-1 - device * slots - slot), 0 = output's
 	std::vector<void*> m_bridgeBuffers;        // the host's Int32 buffers while bridged
 	AsioProxy::VirtualCableCapture m_virtualCable;
 
@@ -1931,7 +2214,7 @@ extern "C" __declspec(dllexport) int RSModsAsio_GetRoute(int role, long* hostCha
 {
 	if (role < 0 || role >= RouteRoleCount) return 0;
 	const RouteRoleInfo info = ReadRouteRole(role);
-	const long saved = ReadSavedRoute(CurrentRouteTarget(), role);
+	const long saved = ReadSavedRoute(role == RouteOutput ? CurrentRouteTarget() : CurrentInputRouteTarget(role), role);
 	if (hostChannel) *hostChannel = info.hostChannel;
 	if (deviceChannel) *deviceChannel = saved >= 0 ? saved : info.hostChannel;
 	return info.viaBridge ? 1 : 0;
@@ -1962,7 +2245,7 @@ extern "C" __declspec(dllexport) int RSModsAsio_GetChannelName(int isInput, long
 extern "C" __declspec(dllexport) int RSModsAsio_SetRoute(int role, long deviceChannel)
 {
 	if (role < 0 || role >= RouteRoleCount) return 0;
-	const std::wstring target = CurrentRouteTarget();
+	const std::wstring target = role == RouteOutput ? CurrentRouteTarget() : CurrentInputRouteTarget(role);
 	if (!WriteSavedRoute(target, role, deviceChannel < 0 ? -1 : deviceChannel)) return 0;
 	ProxyLog("SetRoute: '%ls' %ls -> device channel %ld", target.c_str(), kRouteValueNames[role], deviceChannel);
 	AsioProxyDriver* active = AsioProxyDriver::s_active;
@@ -1971,6 +2254,78 @@ extern "C" __declspec(dllexport) int RSModsAsio_SetRoute(int role, long deviceCh
 	const int result = active->Reroute();
 	active->Release();
 	return result;
+}
+
+// Input interfaces (SplitInput.hpp), per input role: 1 Player 1, 2 Player 2, 3 Mic. The role's input interface
+// name, or "" when its input comes from the output interface. Returns 1 when it has one.
+extern "C" __declspec(dllexport) int RSModsAsio_GetRoleInputTarget(int role, wchar_t* buffer, int chars)
+{
+	if (role < RoutePlayer1 || role >= RouteRoleCount) return 0;
+	const std::wstring input = SplitInputTarget(role, CurrentRouteTarget());
+	if (buffer && chars > 0) wcsncpy_s(buffer, static_cast<size_t>(chars), input.c_str(), _TRUNCATE);
+	return input.empty() ? 0 : 1;
+}
+
+// Saves a role's input interface (null or "" = the output interface; role -1 = every input role) and applies it now
+// by re-creating the bound interface's buffers. 1 applied live, 2 saved for the next bind (speaker mode), 0 failed.
+// Whether it actually opened is RSModsAsio_GetInputError. Blocks for the re-bind: call it off the render thread.
+extern "C" __declspec(dllexport) int RSModsAsio_SetRoleInputTarget(int role, const wchar_t* driver)
+{
+	if (role != -1 && (role < RoutePlayer1 || role >= RouteRoleCount)) return 0;
+	const std::wstring name = driver ? driver : L"";
+	if (!WriteInputTargetDriverName(role, name)) return 0;
+	ProxyLog("SetInputTarget: %ls -> '%ls'", role < 0 ? L"every input" : kRouteValueNames[role], name.empty() ? L"(same as output)" : name.c_str());
+	AsioProxyDriver* active = AsioProxyDriver::s_active;
+	if (!active || !active->IsReal()) return 2;
+	active->AddRef();
+	const int result = active->Reroute();
+	active->Release();
+	return result;
+}
+
+// Why an input interface would not open this time (UTF-8, one line per interface). Returns 1 and fills the buffer
+// when there is one.
+extern "C" __declspec(dllexport) int RSModsAsio_GetInputError(char* buffer, int chars)
+{
+	std::lock_guard<std::mutex> lock(g_inputErrorMutex);
+	if (g_inputError.empty()) return 0;
+	if (buffer && chars > 0) strncpy_s(buffer, static_cast<size_t>(chars), g_inputError.c_str(), _TRUNCATE);
+	return 1;
+}
+
+// How a role's input on another clock is kept in time, for the overlay's drift pill. Returns 1 for an input
+// interface, 2 for the Real Tone Cable, 0 when it shares the output's clock (nothing to correct). ppm: the correction
+// applied now; fill and margin in frames; underruns since it opened; primed 1 while it is delivering sound.
+extern "C" __declspec(dllexport) int RSModsAsio_GetRoleInputClock(int role, int* ppm, int* fill, int* margin, unsigned* underruns, int* primed)
+{
+	AsioProxyDriver* active = AsioProxyDriver::s_active;
+	if (!active) return 0;
+	AsioProxy::VirtualCableCapture::Stats stats{};
+	const int source = active->InputClock(role, stats);
+	if (ppm) *ppm = stats.correctionPpm;
+	if (fill) *fill = stats.fillFrames;
+	if (margin) *margin = stats.marginFrames;
+	if (underruns) *underruns = stats.underruns;
+	if (primed) *primed = stats.primed;
+	return source;
+}
+
+// A role's input channel names (its own interface's), for the overlay's per-role pickers.
+extern "C" __declspec(dllexport) int RSModsAsio_GetRoleChannelCount(int role)
+{
+	if (role < 0 || role >= RouteRoleCount) return 0;
+	std::lock_guard<std::mutex> lock(g_channelNamesMutex);
+	return static_cast<int>(role == RouteOutput ? g_outputNames.size() : g_roleInputNames[role].size());
+}
+
+extern "C" __declspec(dllexport) int RSModsAsio_GetRoleChannelName(int role, long channel, char* buffer, int chars)
+{
+	if (!buffer || chars <= 0 || role < 0 || role >= RouteRoleCount) return 0;
+	std::lock_guard<std::mutex> lock(g_channelNamesMutex);
+	const auto& names = role == RouteOutput ? g_outputNames : g_roleInputNames[role];
+	if (channel < 0 || channel >= static_cast<long>(names.size())) return 0;
+	strncpy_s(buffer, static_cast<size_t>(chars), names[static_cast<size_t>(channel)].c_str(), _TRUNCATE);
+	return 1;
 }
 
 extern "C" __declspec(dllexport) int RSModsAsio_GetInputMode()

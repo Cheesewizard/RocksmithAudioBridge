@@ -47,6 +47,10 @@ namespace AsioProxy
 
 		bool Start();
 		void Stop();
+		// Fed mode: no cable, no capture thread. Another clock's producer (SplitInput's ASIO callback) pushes mono
+		// float blocks with PushFed and the reader works exactly as for the cable: margin, drift servo, resampler.
+		bool StartFed() { testMode.store(true, std::memory_order_release); return Start(); }
+		void PushFed(const float* mono, uint32_t frames) { PushMono(mono, frames); }
 		void SetTestMode(bool enabled) { testMode.store(enabled, std::memory_order_release); }
 		void SetLog(LogFn log) { logFn = log; }
 		// Audio thread: produce `frames` interleaved stereo int32 samples (mono cable duplicated).

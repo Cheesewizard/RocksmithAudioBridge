@@ -1964,7 +1964,7 @@ namespace Overlay
 				if (vst.songKey.empty()) {
 					const std::string note = vst.preloadingName.empty() ? std::string("Start a song to give it its own tone.")
 						: vst.waitingOnBackground ? "Waiting for " + vst.preloadingName + " to finish loading in the background, then your change goes through..."
-						: "Getting " + vst.preloadingName + " ready in the background, for fast tone changes...";
+						: "Getting " + vst.preloadingName + " ready in the background...";
 					Text(list, caption, ImVec2(sx, song.y + 2.0f), vst.waitingOnBackground ? Ink::Amber : Ink::Dim, note.c_str());
 				}
 				else {
@@ -2497,7 +2497,7 @@ namespace Overlay
 							else s.selectedPlugin = plugin.path;
 						}
 						if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && canAdd) VstHostLink::AddPlugin(plugin.path);
-						Hint("Double-click to add it to the end of the chain, or drag it onto the board: between two pedals to put it there, onto a pedal to replace it. Right-click to keep it loaded for fast tone changes, and more. The star marks a favourite.");
+						Hint("Double-click to add it to the end of the chain, or drag it onto the board: between two pedals to put it there, onto a pedal to replace it. Right-click to keep it loaded, and more. The star marks a favourite.");
 						if (plugin.kind != VstHostLink::Kind::Instrument && ImGui::BeginDragDropSource()) {
 							PluginDrag drag{};
 							wcsncpy_s(drag.path, plugin.path.c_str(), _TRUNCATE);
@@ -3181,6 +3181,77 @@ namespace Overlay
 		}
 
 		// A switch that is checked for a few seconds and undone if the new device does not play.
+		// ---- Interface switching ----------------------------------------------------------------------------------
+		// Which ASIO interface the bridge opens, switched live: RS_ASIO.ini keeps naming the bridge, so the game never
+		// notices. The switch parks the game on the bridge's virtual clock, releases the old driver and opens the new
+		// one (engine op 25, OutputTap::TryRebindProxyOutput / TryPromoteProxyOutput). A driver that will not open
+		// (busy in another app, a buffer size it refuses) costs nothing: the previous interface is opened again and
+		// the reason shown. Only a switch that worked is saved (HKCU Target), so the next launch starts there.
+
+		// Every 32-bit ASIO driver installed, except the bridge itself: what RS_ASIO itself could open.
+		std::vector<std::wstring> InstalledAsioDrivers()
+		{
+			static std::vector<std::wstring> cached;
+			static ULONGLONG readAt = 0;
+			if (readAt != 0 && GetTickCount64() - readAt < 3000) return cached;
+			readAt = GetTickCount64();
+			cached.clear();
+			HKEY asio{};
+			if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ASIO", 0, KEY_READ | KEY_WOW64_32KEY, &asio) != ERROR_SUCCESS) return cached;
+			wchar_t name[256];
+			for (DWORD index = 0;; ++index) {
+				DWORD length = 256;
+				if (RegEnumKeyExW(asio, index, name, &length, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
+				if (_wcsicmp(name, L"Rocksmith Audio Bridge ASIO") != 0 && _wcsicmp(name, L"Rocksmith Audio Bridge") != 0) cached.push_back(name);
+			}
+			RegCloseKey(asio);
+			std::sort(cached.begin(), cached.end(), [](const std::wstring& a, const std::wstring& b) { return _wcsicmp(a.c_str(), b.c_str()) < 0; });
+			return cached;
+		}
+
+		void SaveInterfaceTarget(const std::wstring& driver)
+		{
+			HKEY key{};
+			if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\RSMods\\AsioProxy", 0, nullptr, 0, KEY_SET_VALUE | KEY_WOW64_32KEY, nullptr, &key, nullptr) != ERROR_SUCCESS) return;
+			RegSetValueExW(key, L"Target", 0, REG_SZ, reinterpret_cast<const BYTE*>(driver.c_str()), static_cast<DWORD>((driver.size() + 1) * sizeof(wchar_t)));
+			const DWORD one = 1;
+			RegSetValueExW(key, L"PreferReal", 0, REG_DWORD, reinterpret_cast<const BYTE*>(&one), sizeof(one));
+			RegCloseKey(key);
+		}
+
+		// 0 idle, 1 switching, 2 switched, 3 refused and back on the previous one, 4 refused and nothing open.
+		std::atomic<int> g_interfaceState{ 0 };
+		std::mutex g_interfaceMessageMutex;
+		std::string g_outputSwitchMessage;   // SwitchInterface, shown on Switch output
+		std::string g_inputSwitchMessage;    // SwitchInputInterface, shown on Guitar input
+
+		void SwitchInterface(const std::wstring& driver, const std::wstring& previous)
+		{
+			g_interfaceState.store(1);
+			std::thread([driver, previous] {
+				int state = 2;
+				std::string message;
+				if (SUCCEEDED(BridgeControl(25, driver.c_str()).result)) {
+					SaveInterfaceTarget(driver);
+					message = "Now on " + Utf8(driver) + ". It is remembered for the next launch.";
+				}
+				else {
+					// The proxy's own reason (busy, refused the buffer size...), read before the fallback clears it.
+					const std::wstring why = Audio::OutputTap::ProxyBindError();
+					const bool back = !previous.empty() && SUCCEEDED(BridgeControl(25, previous.c_str()).result);
+					state = back ? 3 : 4;
+					message = (why.empty() ? Utf8(driver) + " would not open." : Utf8(why))
+						+ (back ? " Back on " + Utf8(previous) + "." : " Pick an interface to try again.");
+				}
+				LOG_INFO("(AUDIO BRIDGE) Interface switch to " << Utf8(driver) << ": " << message << std::endl);
+				{
+					std::lock_guard<std::mutex> lock(g_interfaceMessageMutex);
+					g_outputSwitchMessage = message;
+				}
+				g_interfaceState.store(state);
+			}).detach();
+		}
+
 		struct PendingSwitch
 		{
 			bool active = false;
@@ -3319,7 +3390,8 @@ namespace Overlay
 			if (!bindError.empty()) {
 				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Color::Bad));
 				ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + RowWidth());
-				ImGui::TextUnformatted((Utf8(bindError) + " Close other apps using it (its control app, a DAW, OBS) and restart Rocksmith.").c_str());
+				// No restart needed: picking it again in Switch output binds it live (PromoteToAsio / SwitchInterface).
+				ImGui::TextUnformatted((Utf8(bindError) + " Plug it in, or close other apps using it (its control app, a DAW, OBS), then pick it in Switch output below. No restart needed.").c_str());
 				ImGui::PopTextWrapPos();
 				ImGui::PopStyleColor();
 			}
@@ -3335,33 +3407,59 @@ namespace Overlay
 				EndCard();
 				return;
 			}
-			Caption("Moves the game's sound to another device now, without restarting. It is remembered: next launch starts there if the device is plugged in. Pick the ASIO entry to go back.");
+			Caption("Moves the game's sound to another device now, without restarting. An ASIO interface also takes the guitar, unless Guitar input below names another one. It is remembered: next launch starts there if it is plugged in.");
 			if (!snapshot.ok) Caption("Looking for devices...");
 
 			const bool unidentified = snapshot.asioUnidentified;
+			// The list is grouped (ASIO interfaces, then Windows devices) under small subheaders, with rows packed
+			// closer than the page's default spacing so a long device list stays short.
+			ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, 2.0f));
 			ImGui::BeginDisabled(pending.active);
 			if (canRoute) {
-				// The ASIO interface itself. Bound already: stop any route so the game plays straight out of it
-				// again. Virtual (booted without it): bind it for input and output, see PromoteToAsio.
+				ImGui::Dummy(ImVec2(0, 4));
+				SectionLabel("ASIO interfaces");
+				ImGui::Dummy(ImVec2(0, 2));
+				// Every ASIO interface (what RS_ASIO can open). The current one: stop any route so the game plays straight
+				// out of it again, or, when the bridge is virtual (booted without it), bind it (PromoteToAsio). Another
+				// one: switch the bridge to it live (SwitchInterface), falling back to the current one if it will not open.
 				const bool virtualProxy = Audio::OutputTap::ProxyOutputMode() == 1;
-				const std::string asioLabel = asioName + "##asio";
-				const bool asioClicked = ChoiceRow("asio", asioLabel.c_str(), "ASIO, lowest latency", !routing && !virtualProxy);
-				if (asioClicked && virtualProxy && !asioDriver.empty()) {
-					pending = PendingSwitch{};
-					pending.active = true;
-					pending.promote = true;
-					pending.name = asioName;
-					pending.started = GetTickCount64();
-					OutputSay("Opening " + asioName + " for input and output...", false);
-					PromoteToAsio(asioDriver);
-				}
-				else if (asioClicked && routing) {
-					BridgeControl(22);
-					OutputSay("Back on " + asioName + ".", false);
+				const bool interfaceBusy = g_interfaceState.load() == 1;
+				for (const std::wstring& driver : InstalledAsioDrivers()) {
+					const bool isCurrent = _wcsicmp(driver.c_str(), asioDriver.c_str()) == 0;
+					const std::string name = Utf8(driver);
+					const std::string label = name + "##asio-" + name;
+					const bool clicked = ChoiceRow(("asio-" + name).c_str(), label.c_str(), isCurrent ? "ASIO, lowest latency" : "ASIO", isCurrent && !routing && !virtualProxy && !interfaceBusy);
+					if (!clicked || interfaceBusy) continue;
+					if (isCurrent && virtualProxy) {
+						pending = PendingSwitch{};
+						pending.active = true;
+						pending.promote = true;
+						pending.name = name;
+						pending.started = GetTickCount64();
+						OutputSay("Opening " + name + " for input and output...", false);
+						PromoteToAsio(driver);
+					}
+					else if (isCurrent && routing) {
+						BridgeControl(22);
+						OutputSay("Back on " + name + ".", false);
+					}
+					else if (!isCurrent) {
+						if (routing) BridgeControl(22);
+						OutputSay(std::string(), false);
+						SwitchInterface(driver, asioDriver);
+					}
 				}
 			}
 			ImGui::BeginDisabled(unidentified && !snapshot.asioDrivers.empty());
+			bool windowsLabelled = false;
 			for (const auto& device : snapshot.devices) {
+				if (canRoute && device.isAsioTwin) continue;   // see below
+				if (!windowsLabelled) {
+					ImGui::Dummy(ImVec2(0, 6));
+					SectionLabel("Windows devices");
+					ImGui::Dummy(ImVec2(0, 2));
+					windowsLabelled = true;
+				}
 				// The ASIO interface is listed once, as the ASIO entry above; its Windows endpoint is the same box and
 				// is hidden, bound or not. While bound it would silence the interface; while unbound the ASIO entry
 				// is the right pick because it moves the input too.
@@ -3395,7 +3493,12 @@ namespace Overlay
 			}
 			ImGui::EndDisabled();
 			ImGui::EndDisabled();
+			ImGui::PopStyleVar();
+			ImGui::Dummy(ImVec2(0, 2));
 
+			if (!snapshot.asioWrapper.empty() && canRoute)
+				Caption((snapshot.asioWrapper + " wraps your Windows devices rather than being one. A device it is using itself will not open here; switch that device off in "
+					+ snapshot.asioWrapper + "'s own panel, or pick another.").c_str());
 			if (unidentified && !snapshot.asioDrivers.empty()) {
 				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Color::Warn));
 				ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + RowWidth());
@@ -3403,6 +3506,22 @@ namespace Overlay
 					+ "), and playing to that device would silence it.").c_str());
 				ImGui::PopTextWrapPos();
 				ImGui::PopStyleColor();
+			}
+			{
+				std::string switchMessage;
+				{
+					std::lock_guard<std::mutex> lock(g_interfaceMessageMutex);
+					switchMessage = g_outputSwitchMessage;
+				}
+				const int state = g_interfaceState.load();
+				if (state == 1) switchMessage = "Switching interface...";
+				if (!switchMessage.empty()) {
+					ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(state >= 3 ? Color::Bad : Color::Muted));
+					ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + RowWidth());
+					ImGui::TextUnformatted(switchMessage.c_str());
+					ImGui::PopTextWrapPos();
+					ImGui::PopStyleColor();
+				}
 			}
 			if (!g_outputMessage.empty()) {
 				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(g_outputMessageIsError ? Color::Bad : Color::Muted));
@@ -3495,13 +3614,6 @@ namespace Overlay
 		// once (a short gap while it re-creates the interface's buffers), saved per interface for the next launch.
 		// One interface for every role for now: per-player interfaces are step 2 of the ticket.
 
-		struct RouteView
-		{
-			bool viaBridge[4]{};
-			long host[4]{};
-			long device[4]{};
-			std::vector<std::string> inputs, outputs;
-		};
 
 		// 0 idle, 1 applying, 2 applied, 3 saved for next launch, 4 failed.
 		std::atomic<int> g_routeState{ 0 };
@@ -3515,81 +3627,240 @@ namespace Overlay
 			}).detach();
 		}
 
+		void SwitchInputInterface(int role, const std::wstring& driver)
+		{
+			g_interfaceState.store(1);
+			std::thread([role, driver] {
+				const int result = Audio::OutputTap::SetProxyInputTarget(role, driver);
+				const std::string error = Audio::OutputTap::ProxyInputError();
+				static const char* const names[4] = { "the output", "Player 1", "Player 2", "the mic" };
+				const std::string who = role >= 1 && role <= 3 ? names[role] : "every input";
+				std::string message;
+				if (result == 0) message = "Could not change the interface for " + who + ".";
+				else if (!error.empty()) message.clear();   // the card shows the input error itself
+				else if (driver.empty()) message = who + " comes from the output interface again.";
+				else message = who + " now comes from " + Utf8(driver) + (result == 2 ? " once the output interface opens." : ".");
+				if (!message.empty()) message[0] = static_cast<char>(toupper(static_cast<unsigned char>(message[0])));
+				LOG_INFO("(AUDIO BRIDGE) Input interface for " << who << ": " << (driver.empty() ? std::string("same as output") : Utf8(driver)) << ", result " << result << (error.empty() ? "" : ", " + error) << std::endl);
+				{
+					std::lock_guard<std::mutex> lock(g_interfaceMessageMutex);
+					g_inputSwitchMessage = message;
+				}
+				g_interfaceState.store(result == 0 ? 4 : 2);
+			}).detach();
+		}
+
+		// "In sync" / "Catching up" for a role's input on another clock (its own input interface, or the Real Tone
+		// Cable), with the numbers on hover. Nothing when it shares the output's clock: there is nothing to drift.
+		// The pill's state for a role, shared by the clock row and the role's fold-out header. `shown` false: the
+		// input shares the output's clock.
+		struct ClockView
+		{
+			bool shown = false;
+			bool settled = false;
+			char detail[256]{};
+		};
+
+		ClockView InputClockState(int role)
+		{
+			ClockView view;
+			const Audio::OutputTap::InputClock clock = Audio::OutputTap::ProxyInputClock(role);
+			if (clock.source == 0) return view;
+			// "Catching up": not delivering yet, or a dropout in the last 5 s, or the correction near its limit.
+			static unsigned lastUnderruns[4]{};
+			static ULONGLONG lastDropoutAt[4]{};
+			const size_t r = static_cast<size_t>(role & 3);
+			if (clock.underruns != lastUnderruns[r]) { lastUnderruns[r] = clock.underruns; lastDropoutAt[r] = GetTickCount64(); }
+			const bool recentDropout = lastDropoutAt[r] != 0 && GetTickCount64() - lastDropoutAt[r] < 5000;
+			view.shown = true;
+			view.settled = clock.primed && !recentDropout && std::abs(clock.ppm) < 2500;
+			sprintf_s(view.detail, "%s runs on its own clock. Correcting by %+d ppm (%.3f%%); %d frames buffered (margin %d); %u dropout%s since it opened.",
+				clock.source == 1 ? "Its interface" : "The Real Tone Cable", clock.ppm, clock.ppm / 10000.0, clock.fill, clock.margin, clock.underruns, clock.underruns == 1 ? "" : "s");
+			return view;
+		}
+
+		void InputClockPill(int role, const char* label)
+		{
+			const ClockView clock = InputClockState(role);
+			if (!clock.shown) return;
+			PillRow(label, clock.settled ? "In sync" : "Catching up", clock.settled ? Color::Good : Color::Warn, clock.detail);
+		}
+
+		// ---- Routing (ticket #109) ----------------------------------------------------------------------------
+		// Each part of the game's audio picks an interface and a channel, the way RS_ASIO.ini can, but live: the output
+		// pair on the output interface (Switch output above picks that interface), and each input (Player 1, Player 2,
+		// the mic) on any ASIO interface, the output's by default. RS_ASIO.ini keeps naming the bridge at fixed
+		// channels; the bridge maps them. An input on another interface runs on that interface's clock and is kept in
+		// time with the output (SplitInput); its pill shows how well. Changes apply at once with a short gap.
 		void ChannelRoutingCard()
 		{
 			if (!Audio::OutputTap::ProxyAvailable()) return;
+			struct View
+			{
+				bool viaBridge[4]{};
+				long host[4]{};
+				long device[4]{};
+				std::vector<std::string> names[4];     // per role: its interface's channel names (role 0 = outputs)
+				std::wstring interfaceOf[4];           // per input role: its own input interface, empty = the output's
+			};
 			// The route reads open RS_ASIO.ini and the registry: once a second, and right after a change lands.
-			static RouteView view;
+			static View view;
 			static ULONGLONG polled = 0;
-			static int lastState = 0;
+			static int lastRouteState = 0, lastInterfaceState = 0;
 			const int state = g_routeState.load();
-			if (state != 1 && (GetTickCount64() - polled > 1000 || state != lastState)) {
-				RouteView fresh;
-				for (int role = 0; role < 4; ++role) fresh.viaBridge[role] = Audio::OutputTap::ProxyRoute(role, fresh.host[role], fresh.device[role]);
-				fresh.inputs = Audio::OutputTap::ProxyChannelNames(true);
-				fresh.outputs = Audio::OutputTap::ProxyChannelNames(false);
+			const int interfaceState = g_interfaceState.load();
+			if (state != 1 && interfaceState != 1 && (GetTickCount64() - polled > 1000 || state != lastRouteState || interfaceState != lastInterfaceState)) {
+				View fresh;
+				for (int role = 0; role < 4; ++role) {
+					fresh.viaBridge[role] = Audio::OutputTap::ProxyRoute(role, fresh.host[role], fresh.device[role]);
+					fresh.names[role] = Audio::OutputTap::ProxyRoleChannelNames(role);
+					if (role > 0) fresh.interfaceOf[role] = Audio::OutputTap::ProxyInputTarget(role);
+				}
 				view = std::move(fresh);
 				polled = GetTickCount64();
 			}
-			lastState = state;
+			lastRouteState = state;
+			lastInterfaceState = interfaceState;
 
-			BeginCard("Channels");
-			if (view.inputs.empty() && view.outputs.empty()) {
-				Caption("Pick which inputs and outputs of your ASIO interface to use once it is open. The bridge is on speaker mode right now.");
+			BeginCard("Routing");
+			bool anyNames = !view.names[0].empty();
+			for (int role = 1; role < 4; ++role) anyNames = anyNames || !view.names[role].empty();
+			if (!anyNames) {
+				Caption("Pick each part's interface and channels here once an ASIO interface is open. The bridge is on speaker mode right now.");
 				EndCard();
 				return;
 			}
-			std::string asioName = Utf8(ReadPassthroughOutputName());
-			if (asioName.empty()) asioName = "your ASIO interface";
-			Caption(("Which inputs and outputs of " + asioName + " the game uses. A change applies straight away, with a short gap in the sound, and is remembered for this interface.").c_str());
+			const std::wstring outputInterface = ReadPassthroughOutputName();
+			Caption("Which interface and channel each part uses. Inputs can come from any ASIO interface; one other than the output's is kept in time with it, adding a few milliseconds. Changes apply at once and are remembered.");
 
-			ImGui::BeginDisabled(state == 1);
-			if (view.viaBridge[0] && view.outputs.size() >= 2) {
+			const std::vector<std::wstring> drivers = InstalledAsioDrivers();
+			ImGui::BeginDisabled(state == 1 || interfaceState == 1);
+			if (view.viaBridge[0] && view.names[0].size() >= 2) {
 				std::vector<std::string> labels;
 				std::vector<long> channels;
 				int index = -1;
-				for (long channel = 0; channel + 1 < static_cast<long>(view.outputs.size()); channel += 2) {
+				for (long channel = 0; channel + 1 < static_cast<long>(view.names[0].size()); channel += 2) {
 					if (channel == view.device[0]) index = static_cast<int>(labels.size());
-					labels.push_back(view.outputs[channel] + " / " + view.outputs[channel + 1]);
+					labels.push_back(view.names[0][channel] + " / " + view.names[0][channel + 1]);
 					channels.push_back(channel);
 				}
-				if (index < 0 && view.device[0] + 1 < static_cast<long>(view.outputs.size())) {   // an odd pair saved earlier
+				if (index < 0 && view.device[0] + 1 < static_cast<long>(view.names[0].size())) {   // an odd pair saved earlier
 					index = static_cast<int>(labels.size());
-					labels.push_back(view.outputs[view.device[0]] + " / " + view.outputs[view.device[0] + 1]);
+					labels.push_back(view.names[0][view.device[0]] + " / " + view.names[0][view.device[0] + 1]);
 					channels.push_back(view.device[0]);
 				}
-				if (DropdownRow("Output", &index, labels, "The pair of outputs the game's sound plays on."))
+				// The output pair stands apart from the inputs: its own inset strip with a speaker icon.
+				BeginInset(ImGui::GetFrameHeight(), Glyph::Speaker, Color::AccentHi);
+				if (DropdownRow("Output pair", &index, labels, ("The pair of outputs of " + Utf8(outputInterface) + " the game's sound plays on. The interface itself is picked in Switch output above.").c_str()))
 					ApplyRoute(0, channels[static_cast<size_t>(index)]);
+				EndInset();
 			}
+			// The inputs share one strip of tabs (Player 1 | Player 2 | Mic) and only the selected role's rows show,
+			// without the role name on every label ("Interface", not "Player 1 interface"). Each tab has a muted
+			// monogram badge and an icon; red, amber and green are kept for status, so a tab only shows a coloured
+			// dot when its role has a clock state, and a problem on another tab still shows. The selected role is
+			// kept for the session (Player 1 first); the Mic tab only exists while RS_ASIO.ini sends the mic here.
 			static const char* const roleNames[4] = { "Output", "Player 1", "Player 2", "Mic" };
-			bool missing = false;
+			static const char* const roleBadges[4] = { "", "P1", "P2", "MIC" };
+			static const ImU32 roleTints[4] = { Color::AccentHi, Color::TintBlue, Color::TintCyan, Color::TintViolet };
+			static int selectedRole = 1;
+			std::string missing;   // the roles RS_ASIO.ini does not send through the bridge, named in the note below
+			std::vector<int> present;
 			for (int role = 1; role < 4; ++role) {
-				if (!view.viaBridge[role]) { missing = true; continue; }
-				int index = view.device[role] >= 0 && view.device[role] < static_cast<long>(view.inputs.size()) ? static_cast<int>(view.device[role]) : -1;
-				// RS_ASIO.ini gives this role the same channel as an earlier one, so there is one buffer for both and
-				// it follows that role. Picking it separately needs its own Channel= in RS_ASIO.ini.
+				if (view.viaBridge[role]) { present.push_back(role); continue; }
+				const std::string name = role == 3 ? "the mic" : roleNames[role];
+				missing += missing.empty() ? name : " and " + name;
+			}
+			if (!present.empty()) {
+				ImGui::Spacing();
+				SectionLabel("Inputs");
+				std::vector<RoleTab> tabs;
+				std::vector<std::string> hints;
+				hints.reserve(present.size());
+				int tabIndex = 0;
+				for (size_t i = 0; i < present.size(); ++i) {
+					const int role = present[i];
+					if (role == selectedRole) tabIndex = static_cast<int>(i);
+					const ClockView clock = InputClockState(role);
+					hints.push_back(std::string("Where ") + (role == 3 ? "the mic" : roleNames[role]) + "'s input comes from."
+						+ (clock.shown ? std::string(clock.settled ? " In sync. " : " Catching up. ") + clock.detail : std::string()));
+					RoleTab tab;
+					tab.label = roleNames[role];
+					tab.badge = roleBadges[role];
+					tab.tint = roleTints[role];
+					tab.icon = role == 3 ? RoleIcon::Mic : RoleIcon::Guitar;
+					tab.hasStatus = clock.shown;
+					tab.status = clock.settled ? Color::Good : Color::Warn;
+					tabs.push_back(tab);
+				}
+				for (size_t i = 0; i < tabs.size(); ++i) tabs[i].hint = hints[i].c_str();
+				if (std::find(present.begin(), present.end(), selectedRole) == present.end()) tabIndex = 0;
+				RoleTabs("##roles", tabs.data(), static_cast<int>(tabs.size()), &tabIndex);
+				selectedRole = present[static_cast<size_t>(tabIndex)];
+
+				const int role = selectedRole;
+				ImGui::PushID(role);
+				// RS_ASIO.ini gives this role the same Channel as an earlier one, so there is one input for both and it
+				// follows that role. Picking it separately needs its own Channel= in RS_ASIO.ini.
 				int sharesWith = 0;
 				for (int earlier = 1; earlier < role; ++earlier)
 					if (view.viaBridge[earlier] && view.host[earlier] == view.host[role]) { sharesWith = earlier; break; }
+				// Interface: "Same as output" or any ASIO interface.
+				std::vector<std::string> interfaceLabels{ "Same as output" };
+				int interfaceIndex = 0;
+				for (size_t i = 0; i < drivers.size(); ++i) {
+					interfaceLabels.push_back(Utf8(drivers[i]));
+					if (!view.interfaceOf[role].empty() && _wcsicmp(drivers[i].c_str(), view.interfaceOf[role].c_str()) == 0) interfaceIndex = static_cast<int>(i) + 1;
+				}
+				const std::vector<std::string>& inputs = view.names[role];
+				int index = view.device[role] >= 0 && view.device[role] < static_cast<long>(inputs.size()) ? static_cast<int>(view.device[role]) : -1;
+
+				BeginTabBody();
 				ImGui::BeginDisabled(sharesWith != 0);
-				if (DropdownRow(roleNames[role], &index, view.inputs, "The input this part listens to.") && sharesWith == 0)
+				if (DropdownRow("Interface", &interfaceIndex, interfaceLabels, "Where this part's input comes from. Same as output: the interface the sound plays on.") && sharesWith == 0)
+					SwitchInputInterface(role, interfaceIndex == 0 ? std::wstring() : drivers[static_cast<size_t>(interfaceIndex - 1)]);
+				// Channel on that interface.
+				if (DropdownRow("Input channel", &index, inputs, "The input on that interface this part listens to.") && sharesWith == 0)
 					ApplyRoute(role, index);
 				ImGui::EndDisabled();
 				if (sharesWith != 0)
-					Caption((std::string(roleNames[role]) + " has the same Channel as " + roleNames[sharesWith] + " in RS_ASIO.ini, so it follows it. Give it its own Channel there to pick it here.").c_str());
+					Caption((std::string(roleNames[role]) + " follows " + roleNames[sharesWith] + ": it has the same Channel in RS_ASIO.ini. Give it its own Channel there to pick it here.").c_str());
+				InputClockPill(role, "Clock");
+				EndTabBody();
+				ImGui::PopID();
 			}
 			ImGui::EndDisabled();
-			if (missing) Caption("Player 2 and the mic show up here once RS_ASIO.ini sends them to Rocksmith Audio Bridge ASIO too.");
+			if (!missing.empty()) {
+				missing[0] = static_cast<char>(toupper(static_cast<unsigned char>(missing[0])));
+				Caption((missing + " show" + (missing.find(" and ") == std::string::npos ? "s" : "") + " up here once RS_ASIO.ini sends "
+					+ (missing.find(" and ") == std::string::npos ? "it" : "them") + " to Rocksmith Audio Bridge ASIO too.").c_str());
+			}
 
-			const char* message = nullptr;
+			const std::string inputError = Audio::OutputTap::ProxyInputError();
+			if (!inputError.empty()) {
+				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Color::Warn));
+				ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + RowWidth());
+				ImGui::TextUnformatted(inputError.c_str());
+				ImGui::PopTextWrapPos();
+				ImGui::PopStyleColor();
+			}
+			std::string message;
 			ImU32 color = Color::Muted;
-			if (state == 1) message = "Applying...";
-			else if (state == 2) message = "Applied.";
-			else if (state == 3) message = "Saved. It applies when the interface opens.";
-			else if (state == 4) { message = "The interface would not take that channel. Check the Playing to card above."; color = Color::Bad; }
-			if (message) {
+			if (state == 1 || interfaceState == 1) message = "Applying...";
+			else {
+				{
+					std::lock_guard<std::mutex> lock(g_interfaceMessageMutex);
+					message = g_inputSwitchMessage;
+				}
+				if (state == 2) message = "Applied.";
+				else if (state == 3) message = "Saved. It applies when the interface opens.";
+				else if (state == 4) { message = "The interface would not take that channel. Check the Playing to card above."; color = Color::Bad; }
+			}
+			if (!message.empty()) {
 				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(color));
-				ImGui::TextUnformatted(message);
+				ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + RowWidth());
+				ImGui::TextUnformatted(message.c_str());
+				ImGui::PopTextWrapPos();
 				ImGui::PopStyleColor();
 			}
 			EndCard();

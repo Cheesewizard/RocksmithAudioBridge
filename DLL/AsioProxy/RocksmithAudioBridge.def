@@ -31,3 +31,9 @@ EXPORTS
 	RSModsAsio_GetChannelCount
 	RSModsAsio_GetChannelName
 	RSModsAsio_SetRoute
+	RSModsAsio_GetRoleInputTarget
+	RSModsAsio_SetRoleInputTarget
+	RSModsAsio_GetInputError
+	RSModsAsio_GetRoleInputClock
+	RSModsAsio_GetRoleChannelCount
+	RSModsAsio_GetRoleChannelName
