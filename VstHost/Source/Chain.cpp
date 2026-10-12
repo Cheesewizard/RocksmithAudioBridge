@@ -363,7 +363,10 @@ namespace VstHost
 		FILE* out = nullptr;
 		if (_wfopen_s(&out, temp.c_str(), L"wb") != 0 || !out) { Log("tone: cannot write %ls", temp.c_str()); return false; }
 		fwrite(kToneMagic, 1, sizeof(kToneMagic), out);
-		const int32_t levels[2] = { m_inputTenths, m_outputTenths };
+		// The trims are the player's, not the tone's (2026-10-11): a shared tone must not carry its author's input and
+		// output levels, and switching tones must not move them. Tones are written level-neutral; the fields stay
+		// for the file format; an older tone's are ignored on load.
+		const int32_t levels[2] = { 0, 0 };
 		fwrite(levels, sizeof(levels), 1, out);
 		const uint32_t count = static_cast<uint32_t>(m_slots.size());
 		fwrite(&count, sizeof(count), 1, out);
@@ -517,8 +520,7 @@ namespace VstHost
 		for (auto& old : slots) if (old && old->plugin) Park(std::move(old->plugin), old->path);
 		Log("tone: kept %d plugin(s) (%d of them spares), loaded %d", static_cast<int>(entries.size()) - toLoad,
 			static_cast<int>(std::count(fromSpare.begin(), fromSpare.end(), true)), toLoad);
-		SetLevels(levels[0], levels[1]);
-		m_structureDirty = false;
+		m_structureDirty = false;   // levels[] not applied: the trims are global (see SaveTone)
 		Log("tone: loaded %ls (%d plugin(s)%s%s%s)", file.c_str(), Count(), v1 ? ", converted from the pre-JUCE format" : "",
 			missing.empty() ? "" : ", missing: ", missing.c_str());
 		return true;

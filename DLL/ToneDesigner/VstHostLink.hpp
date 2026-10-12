@@ -23,6 +23,7 @@ namespace VstHostLink
 	{
 		bool hostInstalled = false;   // the exe is in the game folder
 		bool hostRunning = false;
+		bool standby = false;         // running but off: the game's amp plays, the plugins stay loaded (TurnOff)
 		bool hostHung = false;        // the process is there but has stopped answering (not while loading)
 		bool busy = false;            // plugins loading, or commands not yet handled
 		std::vector<SlotView> slots;
@@ -54,7 +55,6 @@ namespace VstHostLink
 		// asked for; they queue and run once it has loaded. waitingOnBackground: something is queued behind it.
 		bool backgroundOnly = false;
 		bool waitingOnBackground = false;
-		int keepRecent = 4;           // plugins that left the chain kept loaded
 		std::vector<std::wstring> alwaysLoaded;    // "Always keep loaded": loaded in the background each session
 		std::vector<std::wstring> preloadFailed;   // plugins that went down while loading in the background
 		std::vector<std::pair<std::wstring, std::string>> preloadFailedWhy;   // (path, why) for those, when the host said
@@ -99,13 +99,13 @@ namespace VstHostLink
 	void SetFavouriteTone(const std::string& tone, bool favourite);
 
 	// Host.
-	void StartHost();
-	void StopHost();
+	void StartHost(bool standby = false);   // turns a host in standby on; standby = true starts a new one off
+	void TurnOff();                      // the power button: standby, plugins kept loaded so turning on is instant
+	void StopHost();                     // closes the host completely (its plugins unload)
 	void ForceCloseHost();               // only for a host that has stopped answering
 	void SetAutoStart(bool on);
 	void SetMuteWhileTuning(bool on);   // the chain goes quiet in the tuner screens
 	void SetPopout(bool wanted);
-	void SetKeepRecent(int count);       // 0 = unload plugins as they leave the chain
 	// Plugins kept loaded outside the chain, so tones using them switch at once (the host's spares).
 	void LoadInBackground(const std::wstring& path);              // now, until the game closes (host running)
 	void SetAlwaysLoaded(const std::wstring& path, bool on);      // every session, loaded in the background
@@ -135,6 +135,9 @@ namespace VstHostLink
 	// Tone designer page layout: which sections are open (bit per section), remembered.
 	unsigned SectionsOpen(unsigned fallback);
 	void SetSectionsOpen(unsigned bits);
+	// The divider between the board and the pane under it: pixels added to (or, negative, taken from) that pane.
+	int BottomPaneExtra();
+	void SetBottomPaneExtra(int pixels);
 
 	// Per-song tones: the current song (Snapshot::songKey) gets this tone when it starts.
 	void SetSongTone(const std::string& tone);

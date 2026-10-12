@@ -52,10 +52,16 @@ namespace VstHostLink
 		ULONGLONG g_snapshotAt = 0;
 
 		bool g_wasRunning = false;
+		bool g_wasStandby = false;      // the host was in standby when last seen (a crash restart keeps it so)
 		std::string g_crashNote;
 		std::deque<ULONGLONG> g_crashRestarts;   // when the host was restarted after a crash, for the loop guard
 		constexpr size_t kMaxCrashRestarts = 3;      // within kCrashWindowMs; then it stays off and says so
 		constexpr ULONGLONG kCrashWindowMs = 5 * 60 * 1000;
+		// After a crash restart: what crashed, and since when the restarted host has been reloading. The note says
+		// "loading again" until the host is idle, then whether the tone came back complete (2026-10-11: a crash while
+		// AmpliTube 5 loaded left the note up long after the reload had finished, reading as a broken tone).
+		std::string g_recoveringWhat;
+		ULONGLONG g_recoveringSince = 0;
 
 		bool g_autoStartChecked = false;
 		bool g_mutedForTuning = false;
@@ -178,10 +184,11 @@ namespace VstHostLink
 			return shared->loading != 0 || shared->preloading != 0 || now - g_hostBeatSeenAt <= kHungMs;
 		}
 
-		void Launch(const std::wstring& plugin)
+		// standby: start it off (the game's amp plays), only to have the plugins loaded and ready.
+		void Launch(const std::wstring& plugin, bool standby = false)
 		{
 			if (VstHostControl::Shared* shared = Shared()) InterlockedExchange(&shared->quitRequested, 0);
-			const std::wstring args = L"--overlay" + (plugin.empty() ? std::wstring() : L" \"" + plugin + L"\"");
+			const std::wstring args = L"--overlay" + std::wstring(standby ? L" --standby" : L"") + (plugin.empty() ? std::wstring() : L" \"" + plugin + L"\"");
 			ShellExecuteW(nullptr, L"open", HostPath().c_str(), args.c_str(), nullptr, SW_SHOWNORMAL);
 		}
 
@@ -478,7 +485,6 @@ namespace VstHostLink
 			std::vector<std::pair<std::string, SongLoad>> songLoads;
 			std::vector<std::wstring> scanFolders;
 			std::string defaultTone;   // loads when a song without a tone of its own starts (empty: none)
-			int keepRecent = 4;
 			std::vector<std::wstring> alwaysLoaded;
 			std::vector<std::wstring> preloadFailed;
 			std::vector<std::pair<std::wstring, std::string>> preloadFailedWhy;
@@ -517,7 +523,6 @@ namespace VstHostLink
 				fresh.songLoads = ReadSongLoads();
 				fresh.scanFolders = ExtraFolders();
 				fresh.defaultTone = Utf8(ReadString(L"DefaultTone"));
-				fresh.keepRecent = static_cast<int>(ReadDword(L"KeepRecentPlugins", 4));
 				fresh.alwaysLoaded = ReadList(L"KeepLoadedPlugins");
 				fresh.preloadFailed = ReadList(L"PreloadFailed");
 				// The host writes "path|reason" for each: why the "Load failed" pill is showing.
@@ -613,7 +618,7 @@ namespace VstHostLink
 			g_preparedSong = key;
 			std::string tone = SongTone(key);
 			if (tone.empty()) tone = ReadSlow([](SlowState& slow) { return slow.defaultTone; });
-			if (tone.empty() || ReadSlow([](SlowState& slow) { return slow.keepRecent; }) <= 0) return;
+			if (tone.empty()) return;
 			LOG_INFO("(VST HOST) song " << key << " highlighted: getting its tone '" << tone << "' ready" << std::endl);
 			Queue(Command::PrepareTone, 0, 0, Wide(tone));
 		}
@@ -771,9 +776,33 @@ namespace VstHostLink
 		// LastCrashAt = seconds since boot, Main.cpp OnCrash); seeing the host gone with a fresh note, the overlay
 		// starts it again with the last autosaved chain and tells the player which plugin it was. Three crashes
 		// within five minutes and it stays off, so a plugin that crashes on load cannot loop.
-		void FollowCrashes(bool hostRunning)
+		void FollowCrashes(VstHostControl::Shared* shared, bool hostRunning)
 		{
-			if (hostRunning) { g_wasRunning = true; return; }
+			if (g_recoveringSince && shared)
+			{
+				const ULONGLONG since = GetTickCount64() - g_recoveringSince;
+				const bool idle = hostRunning && shared->loading == 0 && g_commands.empty() && shared->commandDone == shared->commandSeq;
+				if (idle && since > 1500)
+				{
+					char tone[VstHostControl::kNameChars + 1]{};
+					memcpy(tone, shared->toneName, VstHostControl::kNameChars);
+					char error[sizeof(shared->loadError) + 1]{};
+					memcpy(error, shared->loadError, sizeof(shared->loadError));
+					const std::string name = tone[0] ? "'" + std::string(tone) + "'" : std::string("your last autosave");
+					g_crashNote = g_recoveringWhat + ". Tone designer restarted and loaded " + name + " again"
+						+ (error[0] ? std::string(", but: ") + error : std::string(": the tone is complete."));
+					LOG_INFO("(VST HOST) back after the crash: " << name << (error[0] ? std::string(" with a problem: ") + error : std::string(" complete")) << std::endl);
+					g_recoveringSince = 0;
+					g_snapshotAt = 0;
+				}
+				else if (!hostRunning && since > 60000)
+				{
+					g_crashNote = g_recoveringWhat + ". Tone designer did not come back after restarting; start it again from the power button.";
+					g_recoveringSince = 0;
+					g_snapshotAt = 0;
+				}
+			}
+			if (hostRunning) { g_wasRunning = true; g_wasStandby = shared && shared->standby != 0; return; }
 			if (!g_wasRunning || !HostProcessGone()) return;
 			g_wasRunning = false;
 			const ULONGLONG now = GetTickCount64();
@@ -802,13 +831,21 @@ namespace VstHostLink
 				return;
 			}
 			g_crashRestarts.push_back(now);
-			g_crashNote = what + ". Tone designer restarted with your last autosave (up to 30 s of changes may be lost).";
+			g_crashNote = what + ". Tone designer is restarting and loading your tone again...";
 			LOG_WARNING("(VST HOST) " << what << "; restarting it" << std::endl);
 			g_commands.clear();
-			Launch({});
+			g_recoveringWhat = what;
+			g_recoveringSince = now;
+			// The restart brings back the last autosave, which may not be the song's tone (the crash can come while
+			// that tone loads, and its queued load was just dropped): apply the song's tone again once the host runs.
+			g_appliedSong.clear();
+			g_preparedSong.clear();
+			Launch({}, g_wasStandby);
 		}
 
-		// Starts the host once per game session, when the player has used it before and the amp link exists.
+		// Starts the host once per game session, when the player has used it before and the amp link exists. With
+		// "Start with the game" off but plugins marked "Always keep loaded", it starts in standby: off, the game's amp
+		// playing, those plugins loading in the background so turning Tone designer on is instant.
 		void AutoStart(bool hostRunning)
 		{
 			if (g_autoStartChecked || !GameState::GameLoaded) return;
@@ -817,10 +854,12 @@ namespace VstHostLink
 			g_autoStartChecked = true;
 			const bool usedBefore = GetFileAttributesW((DataDirectory() + L"\\Current.rabtone").c_str()) != INVALID_FILE_ATTRIBUTES
 				|| !ReadString(L"LastPlugin").empty();
-			if (hostRunning || !usedBefore || ReadDword(L"AutoStart", 1) == 0) return;
+			const bool on = usedBefore && ReadDword(L"AutoStart", 1) != 0;
+			const bool standby = !on && !ReadList(L"KeepLoadedPlugins").empty();
+			if (hostRunning || (!on && !standby)) return;
 			if (GetFileAttributesW(HostPath().c_str()) == INVALID_FILE_ATTRIBUTES) return;
-			LOG_INFO("(VST HOST) starting with the game" << std::endl);
-			Launch({});
+			LOG_INFO("(VST HOST) starting with the game" << (standby ? " in standby, to load the always-loaded plugins" : "") << std::endl);
+			Launch({}, standby);
 		}
 
 		// Mute while tuning: the chain plays nothing in the tuner screens, so tuning is not through a wall of gain.
@@ -847,7 +886,6 @@ namespace VstHostLink
 				s.exclusiveFullscreen = slow.exclusiveFullscreen;
 				s.songTone = slow.songKey == g_songKey ? slow.songTone : std::string();
 				s.defaultTone = slow.defaultTone;
-				s.keepRecent = slow.keepRecent;
 				s.alwaysLoaded = slow.alwaysLoaded;
 				s.preloadFailed = slow.preloadFailed;
 				s.preloadFailedWhy = slow.preloadFailedWhy;
@@ -858,6 +896,7 @@ namespace VstHostLink
 			if (shared)
 			{
 				s.hostRunning = HostAlive(shared);
+				s.standby = s.hostRunning && shared->standby != 0;
 				s.hostHung = !s.hostRunning && shared->hostPid != 0 && shared->loading == 0 && shared->preloading == 0 && !HostProcessGone()
 					&& GetTickCount64() - g_hostBeatSeenAt > kHungMs;
 				if (s.hostRunning)
@@ -913,6 +952,9 @@ namespace VstHostLink
 			InterlockedIncrement(&shared->overlayBeat);
 		}
 		const bool hostRunning = HostAlive(shared);
+		// Standby (off, plugins kept loaded): the game's amp plays, so songs, the tone readout and the tuner mute
+		// leave the chain alone. Turning it on applies the song's tone then (g_appliedSong was never set).
+		const bool on = hostRunning && shared->standby == 0;
 		// A plugin that did not load is marked in the browser for the rest of the session (or until a rescan).
 		wchar_t failed[VstHostControl::kPathChars + 1]{};
 		memcpy(failed, const_cast<const wchar_t*>(shared->failedPath), sizeof(shared->failedPath));
@@ -922,10 +964,10 @@ namespace VstHostLink
 			if (!ListHas(g_failed, failed)) g_failed.push_back(failed);
 		}
 		AutoStart(hostRunning);
-		FollowCrashes(hostRunning);
-		FollowSong(shared, hostRunning);
-		PublishPopupName(shared, hostRunning);
-		FollowTuner(hostRunning);
+		FollowCrashes(shared, hostRunning);
+		FollowSong(shared, on);
+		PublishPopupName(shared, on);
+		FollowTuner(on);
 		PumpCommands(shared, hostRunning);
 	}
 
@@ -1075,6 +1117,8 @@ namespace VstHostLink
 
 	unsigned SectionsOpen(unsigned fallback) { return ReadDword(L"ToneDesignerSections", fallback); }
 	void SetSectionsOpen(unsigned bits) { WriteDword(L"ToneDesignerSections", bits); }
+	int BottomPaneExtra() { return static_cast<int>(ReadDword(L"ToneDesignerPaneExtra", 0)); }
+	void SetBottomPaneExtra(int pixels) { WriteDword(L"ToneDesignerPaneExtra", static_cast<DWORD>(pixels)); }
 
 	void AddScanFolder()
 	{
@@ -1125,7 +1169,19 @@ namespace VstHostLink
 		ShellExecuteW(nullptr, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 	}
 
-	void StartHost() { Launch({}); }
+	// A host in standby turns on at once; otherwise a new one starts (on, or in standby).
+	void StartHost(bool standby)
+	{
+		VstHostControl::Shared* shared = Shared();
+		if (shared && HostAlive(shared)) { if (!standby && shared->standby != 0) Queue(Command::SetStandby, 0); g_snapshotAt = 0; return; }
+		Launch({}, standby);
+	}
+
+	void TurnOff()
+	{
+		Queue(Command::SetStandby, 1);
+		g_snapshotAt = 0;
+	}
 
 	void StopHost()
 	{
@@ -1153,13 +1209,6 @@ namespace VstHostLink
 	{
 		WriteDword(L"AutoStart", on ? 1 : 0);
 		ReadSlow([&](SlowState& slow) { slow.autoStart = on; return 0; });
-		g_snapshotAt = 0;
-	}
-
-	void SetKeepRecent(int count)
-	{
-		WriteDword(L"KeepRecentPlugins", static_cast<DWORD>(std::clamp(count, 0, 16)));
-		KickSlow();
 		g_snapshotAt = 0;
 	}
 

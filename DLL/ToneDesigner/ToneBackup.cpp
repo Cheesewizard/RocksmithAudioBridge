@@ -22,6 +22,7 @@ namespace ToneBackup
 		ULONGLONG g_statusAt = 0;
 		std::wstring g_restoreZip;
 		bool g_hostWasRunning = false;
+		bool g_hostWasStandby = false;   // it was off with its plugins loaded: it comes back that way
 		ULONGLONG g_stopAskedAt = 0;
 		bool g_autoDone = false;
 
@@ -102,6 +103,7 @@ namespace ToneBackup
 		if (!g_step.compare_exchange_strong(idle, Step::StoppingHost)) return;
 		g_restoreZip = zip;
 		g_hostWasRunning = VstHostLink::HostProcessRunning();
+		g_hostWasStandby = VstHostLink::GetSnapshot().standby;
 		g_stopAskedAt = GetTickCount64();
 		if (g_hostWasRunning) VstHostLink::StopHost();
 		SetStatus("Restoring: closing Tone designer first...");
@@ -129,7 +131,7 @@ namespace ToneBackup
 			{
 				if (GetTickCount64() - g_stopAskedAt > 20000)
 				{
-					SetStatus("Tone designer did not close, so nothing was restored. Close it with its power button and try again.");
+					SetStatus("Tone designer did not close, so nothing was restored. Close it from its File menu (Close Tone designer) and try again.");
 					g_step = Step::Idle;
 				}
 				break;
@@ -146,7 +148,7 @@ namespace ToneBackup
 			break;
 		case Step::RestartHost:
 			VstHostLink::ReloadSettings();
-			if (g_hostWasRunning) VstHostLink::StartHost();
+			if (g_hostWasRunning) VstHostLink::StartHost(g_hostWasStandby);
 			g_step = Step::Idle;
 			break;
 		default:

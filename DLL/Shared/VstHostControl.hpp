@@ -10,12 +10,12 @@
 
 namespace VstHostControl
 {
-	// v6: spare plugins kept loaded (preloading, sparePaths, preloadAllowed). v5: one window per plugin (openWindows, HideSlot). v4: slot paths, chain bypass and the Tone designer page's
+	// v7: standby (off with the plugins kept loaded). v6: spare plugins kept loaded (preloading, sparePaths, preloadAllowed). v5: one window per plugin (openWindows, HideSlot). v4: slot paths, chain bypass and the Tone designer page's
 	// commands. v3: plugin chains, tones, levels. A new mapping name per version, so an old host and a new overlay
 	// never meet.
-	constexpr wchar_t kMappingName[] = L"Local\\RocksmithAudioBridge.VstHost.v6";
+	constexpr wchar_t kMappingName[] = L"Local\\RocksmithAudioBridge.VstHost.v7";
 	constexpr uint32_t kMagic = 0x56424152;   // "RABV"
-	constexpr uint32_t kVersion = 6;
+	constexpr uint32_t kVersion = 7;
 	constexpr int kBeatMs = 250;              // both sides bump their beat at least this often
 	constexpr int kAliveMs = 1500;            // a side is gone when its beat stops this long
 	constexpr int kPathChars = 520;
@@ -47,6 +47,7 @@ namespace VstHostControl
 		PrepareTone = 17,   // text = tone name: load the plugins it needs as spares; the chain plays on unchanged
 		LoadSpare = 18,     // text = plugin path: load it now as a spare and keep it while the host runs
 		UnloadSpare = 19,   // text = plugin path: unload its spares (not the chain's)
+		SetStandby = 20,    // arg = 1: off, the game's amp plays and the plugins stay loaded; 0: on again
 	};
 
 	struct Slot
@@ -114,6 +115,8 @@ namespace VstHostControl
 		wchar_t sparePaths[kMaxSpares][kPathChars];
 		// Written by the overlay (v6).
 		volatile LONG preloadAllowed;  // 0 while a song plays: a plugin starting up could cost late buffers
+		// Written by the host (v7).
+		volatile LONG standby;         // off: the amp link is released, the plugins stay loaded (Command::SetStandby)
 	};
 
 	// Creates or opens the block. Returns nullptr on failure; `mapping` must stay open while it is used.
