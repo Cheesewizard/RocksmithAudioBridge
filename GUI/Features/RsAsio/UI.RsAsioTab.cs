@@ -17,12 +17,12 @@ namespace RSMods
 			tab_RSASIO.SuspendLayout();
 			tab_RSASIO.BackColor = OverlayLook.Window;
 			tab_RSASIO.ForeColor = OverlayLook.Text;
-			ReplaceWithCard(groupBox_ASIO_Input0, "Input 1 · Player 1");
-			ReplaceWithCard(groupBox_ASIO_Input1, "Input 2 · Player 2");
-			ReplaceWithCard(groupBox_ASIO_Output, "Output");
+			rsAsioInput0Card = ReplaceWithCard(groupBox_ASIO_Input0, "Input 1 · Player 1");
+			rsAsioInput1Card = ReplaceWithCard(groupBox_ASIO_Input1, "Input 2 · Player 2");
+			rsAsioOutputCard = ReplaceWithCard(groupBox_ASIO_Output, "Output");
 			ReplaceWithCard(groupBox_ASIO_InputMic, "Microphone");
 			ReplaceWithCard(groupBox_ASIO_BufferSize, "Buffer size");
-			ReplaceWithCard(groupBox_ASIO_Config, "Config");
+			rsAsioConfigCard = ReplaceWithCard(groupBox_ASIO_Config, "Config");
 			label_ASIO_Credits.Font = StudioTheme.Small;
 			label_ASIO_Credits.ForeColor = OverlayLook.Faint;
 			label_ASIO_Credits.BackColor = OverlayLook.Window;
@@ -30,7 +30,10 @@ namespace RSMods
 			tab_RSASIO.ResumeLayout(true);
 		}
 
-		private void ReplaceWithCard(GroupBox group, string title)
+		// Kept for the Audit card (under Config) and its Details panel (over the device cards): UI.AuditTab.cs.
+		private RsAsioCard rsAsioInput0Card, rsAsioInput1Card, rsAsioOutputCard, rsAsioConfigCard;
+
+		private RsAsioCard ReplaceWithCard(GroupBox group, string title)
 		{
 			var card = new RsAsioCard { Bounds = group.Bounds, Anchor = group.Anchor };
 			var heading = new Label { Text = title.ToUpperInvariant(), Font = StudioTheme.SectionFont, ForeColor = OverlayLook.Muted, BackColor = OverlayLook.Card, AutoSize = true, Location = new Point(card.LogicalToDeviceUnits(10), card.LogicalToDeviceUnits(8)) };
@@ -54,6 +57,7 @@ namespace RSMods
 			tab_RSASIO.Controls.Remove(group);
 			tab_RSASIO.Controls.Add(card);
 			tab_RSASIO.Controls.SetChildIndex(card, index);
+			return card;
 		}
 
 		private static void StyleRsAsioControls(Control parent)

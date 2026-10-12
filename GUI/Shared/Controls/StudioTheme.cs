@@ -122,7 +122,8 @@ namespace RSMods.Audio
 			selector.Font = Body;
 			selector.FlatStyle = FlatStyle.Flat;
 			selector.DropDownStyle = ComboBoxStyle.DropDownList;
-			selector.ItemHeight = 22;
+			// Tall enough for the font at this display's scaling: a fixed 22 px clipped the text at 150% and up.
+			selector.ItemHeight = Math.Max(selector.LogicalToDeviceUnits(22), TextRenderer.MeasureText("Ag", Body).Height + selector.LogicalToDeviceUnits(6));
 			selector.DrawMode = DrawMode.OwnerDrawFixed;
 			selector.Margin = new Padding(0, 2, 0, 6);
 			selector.DrawItem += DrawSelectorItem;
