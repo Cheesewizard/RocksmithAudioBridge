@@ -3760,11 +3760,15 @@ namespace Overlay
 					labels.push_back(view.names[0][view.device[0]] + " / " + view.names[0][view.device[0] + 1]);
 					channels.push_back(view.device[0]);
 				}
-				// The output pair stands apart from the inputs: its own inset strip with a speaker icon.
-				BeginInset(ImGui::GetFrameHeight(), Glyph::Speaker, Color::AccentHi);
-				if (DropdownRow("Output pair", &index, labels, ("The pair of outputs of " + Utf8(outputInterface) + " the game's sound plays on. The interface itself is picked in Switch output above.").c_str()))
-					ApplyRoute(0, channels[static_cast<size_t>(index)]);
-				EndInset();
+				// The output pair stands apart from the inputs: its own inset strip with a speaker icon. Most interfaces
+				// have one stereo pair, where a dropdown that can't change anything only confuses, so it only shows when
+				// there is a real choice (4+ outputs, or an odd pair saved earlier to move off).
+				if (labels.size() > 1) {
+					BeginInset(ImGui::GetFrameHeight(), Glyph::Speaker, Color::AccentHi);
+					if (DropdownRow("Output pair", &index, labels, ("The pair of outputs of " + Utf8(outputInterface) + " the game's sound plays on. The interface itself is picked in Switch output above.").c_str()))
+						ApplyRoute(0, channels[static_cast<size_t>(index)]);
+					EndInset();
+				}
 			}
 			// The inputs share one strip of tabs (Player 1 | Player 2 | Mic) and only the selected role's rows show,
 			// without the role name on every label ("Interface", not "Player 1 interface"). Each tab has a muted
