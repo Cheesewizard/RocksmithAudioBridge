@@ -31,6 +31,7 @@ namespace RSMods
 			StyleFeatureControls(tab_RSModsPlus);
 			StudioTheme.EnableDoubleBuffering(tab_RSModsPlus);
 			tab_RSModsPlus.ResumeLayout(true);
+			WireBridgeSettingsSync();
 		}
 
 		private static Label CreateFeatureDescription(string text)

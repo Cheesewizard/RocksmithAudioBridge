@@ -183,6 +183,8 @@ namespace RSMods
 		{
 			InitializeComponent();
 			InitializeRsModsPlusPages();
+			InitializeRsAsioPage();
+			InitializeAuditTab();
 			AddProductVersionLabel();
 			Text = $"{ProductInfo.DISPLAY_NAME} (based on RSMods {Assembly.GetExecutingAssembly().GetName().Version})"; // Product version, plus the upstream RSMods version it is based on.
 		}
@@ -390,9 +392,10 @@ namespace RSMods
 
         private void Startup_VerifyInstallOfASIO()
         {
-            // Always hidden: this GUI never writes RS_ASIO.ini (its save handler is a no-op), so the inherited tab
-            // would silently discard edits. The Audio Bridge setup page shows the Driver= line to use instead.
-            TabController.TabPages.Remove(tab_RSASIO);
+            if (!ASIO.ReadSettings.VerifySettingsExist())
+                TabController.TabPages.Remove(tab_RSASIO);
+            else
+                Startup_LoadASIODevices();
         }
 
         private void Startup_LoadRocksmithProfiles()
@@ -1239,6 +1242,7 @@ namespace RSMods
             foreach (Control controlToChange in ControlList)
             {
 				if (controlToChange == tab_RSModsPlus || tab_RSModsPlus.Contains(controlToChange)) continue;
+				if (controlToChange == tab_RSASIO || tab_RSASIO.Contains(controlToChange)) continue;   // drawn in the overlay palette (UI.RsAsioTab.cs)
                 controlToChange.ForeColor = textColor;
 
                 if (controlToChange is Button)
@@ -1595,9 +1599,8 @@ namespace RSMods
             if (!AllowSaving)
                 return;
 
-			// RS_ASIO.ini is owned by RS_ASIO and by the user. RSMods only toggles the presence of
-			// RS_ASIO.dll and avrt.dll; all ASIO settings remain a manual configuration requirement.
-			return;
+            ASIO.WriteSettings.SaveChanges(identifierToChange, section, ChangedSettingValue, checkBox_ASIO_Output_Disabled.Checked, checkBox_ASIO_Input0_Disabled.Checked, checkBox_ASIO_Input1_Disabled.Checked, checkBox_ASIO_InputMic_Disabled.Checked);
+            SaveSettings_ShowLabel();
         }
 
         private void SaveSettings_Rocksmith_Middleware(string identifierToChange, string ChangedSettingValue)

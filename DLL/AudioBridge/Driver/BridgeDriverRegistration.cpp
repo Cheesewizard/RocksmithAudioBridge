@@ -82,3 +82,12 @@ void AsioProxyRegistration::Heal()
 	else
 		LOG_ERROR("(ASIO PROXY) Repair failed (status " << status << ", resolves to '" << Narrow(after) << "'). Use Repair on the RSMods Rocksmith Audio Bridge tab." << std::endl);
 }
+
+// The bridge driver (RocksmithAudioBridgeAsio.dll) has no log of its own: RS_ASIO loads it into the game, next to
+// this DLL, and it finds this export and writes through it, so one RSMods_debug.txt holds the whole audio story
+// (RS_ASIO's view is still RS_ASIO-log.txt). The driver is only meant to run inside Rocksmith, so outside it
+// the lines are dropped. Callable from any thread, including the driver's audio threads; the logger locks.
+extern "C" __declspec(dllexport) void __cdecl RSMods_BridgeDriverLog(const char* line)
+{
+	if (line) LOG_INFO("(ASIO bridge) " << line << std::endl);
+}

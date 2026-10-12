@@ -159,11 +159,24 @@ namespace Audio::OutputDevices
 		}
 
 		// Marks protected endpoints. Returns false when some bound driver matched nothing (unidentified).
+		// Wrapper drivers are not hardware: ASIO4ALL, FlexASIO, ASIO2WASAPI and ASIO2KS open ordinary Windows devices
+		// (whichever their own panel picks), so no endpoint "is" them. Treating one as an unidentified interface switched
+		// every Windows device off for no reason (2026-10-11); a device the wrapper really holds just fails to open,
+		// which the route reports as stalled.
+		bool IsWrapperDriver(const std::wstring& driver)
+		{
+			const std::wstring name = Lower(driver);
+			for (const wchar_t* wrapper : { L"asio4all", L"flexasio", L"asio2wasapi", L"asio2ks" })
+				if (name.find(wrapper) != std::wstring::npos) return true;
+			return false;
+		}
+
 		bool Protect(const std::vector<std::wstring>& drivers, const std::vector<Endpoint>& endpoints, std::set<std::wstring>& protectedIds)
 		{
 			bool allIdentified = true;
 			std::vector<GUID> containers;
 			for (const std::wstring& driver : drivers) {
+				if (IsWrapperDriver(driver)) continue;
 				const std::wstring core = DeviceCore(driver);
 				bool matched = false;
 				for (const Endpoint& endpoint : endpoints) {
@@ -207,7 +220,10 @@ namespace Audio::OutputDevices
 		const std::vector<std::wstring> drivers = BoundAsioDrivers();
 		std::set<std::wstring> protectedIds;
 		snapshot.asioUnidentified = !Protect(drivers, endpoints, protectedIds);
-		for (const std::wstring& driver : drivers) snapshot.asioDrivers.push_back(Utf8(driver));
+		for (const std::wstring& driver : drivers) {
+			snapshot.asioDrivers.push_back(Utf8(driver));
+			if (IsWrapperDriver(driver) && snapshot.asioWrapper.empty()) snapshot.asioWrapper = Utf8(driver);
+		}
 		// The same hardware's Windows endpoints, bound or not: the overlay lists the interface once, as its ASIO entry.
 		std::set<std::wstring> twinIds;
 		Protect(BoundAsioDrivers(false), endpoints, twinIds);

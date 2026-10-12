@@ -178,6 +178,13 @@
     <Compile Include="Features\AudioBridge\UI.BridgeSettingsSync.cs" />
     <Compile Include="Features\AudioBridge\UI.AudioBridgeSetup.cs" />
     <Compile Include="Features\AudioBridge\UI.AudioBridgeTab.cs" />
+    <Compile Include="Features\RsAsio\UI.RsAsioTab.cs" />
+    <Compile Include="Features\RsAsio\IniText.cs" />
+    <Compile Include="Features\RsAsio\RsAsioIniSetup.cs" />
+    <Compile Include="Features\Audit\AuditChecks.cs" />
+    <Compile Include="Features\Audit\UI.AuditTab.cs" />
+    <Compile Include="Features\BugReport\BugReport.cs" />
+    <Compile Include="Features\BugReport\UI.BugReport.cs" />
     <Compile Include="Controls\ColourWheel.cs" />
     <Compile Include="Controls\ColourChip.cs" />
     <Compile Include="Controls\FeatureSection.cs" />

@@ -15,11 +15,11 @@ namespace RSMods.Audio
 	/// hosts enumerate drivers only from HKLM) and store the wrapped driver name in
 	/// HKCU\Software\RSMods\AsioProxy\Target so the proxy can resolve the real device at boot.
 	///
-	/// It NEVER edits RS_ASIO.ini. Pointing RS_ASIO at the bridge (Output and Input Driver=Rocksmith Audio
-	/// Bridge ASIO) is left entirely to the user, so the GUI can never silently revert an ini the user configured.
-	/// The old Link/Unlink machinery did exactly that on the bridge power toggle and stranded users on the raw
-	/// driver, which then failed to boot when the interface was absent. IsLinked only READS the ini to report
-	/// whether the user has pointed it at the bridge; nothing here writes it.
+	/// Nothing here writes RS_ASIO.ini. The old Link/Unlink machinery rewrote it on the bridge power toggle and
+	/// stranded users on the raw driver, which then failed to boot when the interface was absent. Pointing RS_ASIO at
+	/// the bridge is now the job of one explicit tool, RsAsioIniSetup ("Set up for me" on the Audit tab, and a fresh
+	/// install), which backs the player's file up first and never acts on a toggle. The RS_ASIO Settings tab (upstream)
+	/// lets the player edit the file directly. IsLinked only READS the ini.
 	/// </summary>
 	internal static class AsioProxySetup
 	{
@@ -50,6 +50,24 @@ namespace RSMods.Audio
 				catch { /* hive unreadable; skip */ }
 			}
 			return new List<string>(names);
+		}
+
+		/// <summary>ASIO drivers registered for 64-bit programs only. Rocksmith and RS_ASIO are 32-bit and cannot see
+		/// them, so an interface listed here is invisible to the game (the Audit says so).</summary>
+		public static List<string> ListDriversOnlyIn64Bit()
+		{
+			var only64 = new List<string>();
+			if (!Environment.Is64BitOperatingSystem) return only64;
+			var x86 = new HashSet<string>(ListRealDrivers(), StringComparer.OrdinalIgnoreCase);
+			try
+			{
+				using (var asio = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64).OpenSubKey(@"Software\ASIO"))
+					if (asio != null)
+						foreach (string name in asio.GetSubKeyNames())
+							if (!x86.Contains(name) && !string.Equals(name, ProxyName, StringComparison.OrdinalIgnoreCase)) only64.Add(name);
+			}
+			catch { /* unreadable: report nothing */ }
+			return only64;
 		}
 
 		/// <summary>True once the proxy is discoverable by ASIO hosts, i.e. its name is under HKLM\Software\ASIO.</summary>
@@ -254,8 +272,60 @@ namespace RSMods.Audio
 			catch { return ""; }
 		}
 
+		/// <summary>Why the bridge driver could not open the real interface on the last launch, written by
+		/// DLL/AsioProxy/AsioProxyDriver.cpp (LastBindError, LastBindErrorDriver) and removed once it binds. Lets the
+		/// settings app explain a silent guitar after the game has closed. False when the last launch bound fine.</summary>
+		public static bool ReadLastBindError(out string driver, out string reason)
+		{
+			driver = reason = "";
+			try
+			{
+				using (var key = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Registry32).OpenSubKey(TargetKey))
+				{
+					reason = key?.GetValue("LastBindError") as string ?? "";
+					driver = key?.GetValue("LastBindErrorDriver") as string ?? "";
+				}
+			}
+			catch { reason = ""; }
+			return reason.Length > 0;
+		}
+
 		/// <summary>Records which real ASIO driver the proxy forwards to. This is the one piece of setup the GUI
 		/// still owns; the proxy reads it from HKCU at boot. RS_ASIO.ini stays the user's to edit.</summary>
+		/// <summary>The separate input interface for the guitar (DLL/AsioProxy/SplitInput.hpp, HKCU InputTarget), or ""
+		/// when the guitar comes from the output interface.</summary>
+		public static string ReadInputTarget()
+		{
+			try
+			{
+				using (var key = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Registry32).OpenSubKey(TargetKey))
+					return key?.GetValue("InputTarget") as string ?? "";
+			}
+			catch { return ""; }
+		}
+
+		/// <summary>Saves the input interface ("" = same as the output). The proxy reads it at each bind; the running
+		/// game applies it live through engine op 30.</summary>
+		public static void SelectInputTarget(string realDriverName)
+		{
+			using (var key = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Registry32).CreateSubKey(TargetKey))
+			{
+				if (string.IsNullOrEmpty(realDriverName)) key.DeleteValue("InputTarget", throwOnMissingValue: false);
+				else key.SetValue("InputTarget", realDriverName, RegistryValueKind.String);
+				// One interface for every input: per-player choices (made in the overlay) would override it, so they go.
+				foreach (string role in new[] { "Player1", "Player2", "Mic" }) key.DeleteValue("InputTarget." + role, throwOnMissingValue: false);
+			}
+		}
+
+		/// <summary>One input role's own interface ("Player1", "Player2", "Mic"; HKCU InputTarget.&lt;role&gt;). "" stores
+		/// the "(output)" marker, so the role stays on the output interface even when Player 1 has another one (an unset
+		/// Player 2 and mic follow Player 1, see ReadInputTargetDriverName in AsioProxyDriver.cpp).</summary>
+		public static void SelectInputTarget(string role, string realDriverName)
+		{
+			using (var key = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Registry32).CreateSubKey(TargetKey))
+				key.SetValue("InputTarget." + role, string.IsNullOrEmpty(realDriverName) ? "(output)" : realDriverName, RegistryValueKind.String);
+		}
+
 		public static void SelectTarget(string realDriverName)
 		{
 			using (var key = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Registry32)
@@ -322,8 +392,11 @@ namespace RSMods.Audio
 			{
 				if (arguments.Length != 2) throw new ArgumentException("Usage: " + InstallArgument + " <Rocksmith directory>");
 				Install(arguments[1]);
+				// A fresh install also points RS_ASIO.ini at the bridge, backing the player's file up first. Only a
+				// file nobody set up yet that uses one interface throughout (RsAsioIniSetup.SetUpOnInstall).
+				string iniSetup = RsAsioIniSetup.SetUpOnInstall(arguments[1]);
 				string target = ReadTarget();
-				File.WriteAllText(log, "Driver registered; " + (string.IsNullOrEmpty(target) ? "no interface chosen yet." : "wraps " + target + "."));
+				File.WriteAllText(log, "Driver registered; " + (string.IsNullOrEmpty(target) ? "no interface chosen yet." : "wraps " + target + ".") + Environment.NewLine + iniSetup);
 			}
 			catch (OperationCanceledException error) { exitCode = 2; File.WriteAllText(log, error.Message); }
 			catch (Exception error) { exitCode = 1; File.WriteAllText(log, error.ToString()); }
@@ -338,7 +411,7 @@ namespace RSMods.Audio
 			return File.Exists(ini) ? ReadDriver(ini) : "";
 		}
 
-		// RS_ASIO reads its .ini itself; we only ever READ it, to report link state. We never write it.
+		// RS_ASIO reads its .ini itself; this class only READS it, to report link state (RsAsioIniSetup writes it).
 		private static string ReadDriver(string ini) => ReadSection(ini, "Asio.Output", "Driver");
 
 		private static string ReadSection(string ini, string section, string key)

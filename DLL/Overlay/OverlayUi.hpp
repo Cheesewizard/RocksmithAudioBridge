@@ -30,6 +30,10 @@ namespace Overlay
 		constexpr ImU32 Warn = IM_COL32(251, 191, 36, 255);
 		constexpr ImU32 Bad = IM_COL32(248, 113, 113, 255);
 		constexpr ImU32 Record = IM_COL32(239, 68, 68, 255);
+		// Muted identity tints (role badges). Red, amber and green stay reserved for status.
+		constexpr ImU32 TintBlue = IM_COL32(104, 144, 222, 255);
+		constexpr ImU32 TintCyan = IM_COL32(84, 172, 196, 255);
+		constexpr ImU32 TintViolet = IM_COL32(150, 128, 220, 255);
 	}
 
 	// Segoe Fluent Icons / Segoe MDL2 Assets code points (same values in both fonts).
@@ -96,6 +100,8 @@ namespace Overlay
 	bool SliderRow(const char* label, float* value, float min, float max, const char* format,
 		bool* committed = nullptr, const char* hint = nullptr);
 	bool SegmentedRow(const char* label, int* index, const char* const* options, int count, const char* hint = nullptr);
+	// Labelled drop-down list; `index` -1 shows an empty box. Returns true on the frame a different item is picked.
+	bool DropdownRow(const char* label, int* index, const std::vector<std::string>& items, const char* hint = nullptr);
 	bool ColorSwatch(const char* label, float rgb[3], bool* committed, const char* hint = nullptr);
 	bool Button(const char* label, bool primary = false, const char* hint = nullptr);
 	// One selectable line in a list (output devices): radio mark, label, optional caption on the right.
@@ -103,6 +109,32 @@ namespace Overlay
 	bool ChoiceRow(const char* id, const char* label, const char* caption, bool selected);
 	void Meter(const char* label, float fraction, const char* hint = nullptr);
 	void StatusPill(const char* text, ImU32 color, bool pulse = false);
+	// Labelled row whose control column holds a status pill, lined up with DropdownRow/SliderRow controls.
+	void PillRow(const char* label, const char* text, ImU32 color, const char* hint = nullptr);
+
+	// Segmented tab strip for picking one role (Player 1 | Player 2 | Mic) whose rows show underneath. Each tab:
+	// a small rounded monogram badge in a muted `tint`, a drawn guitar or the microphone glyph, the label, and a
+	// tiny status dot (Good/Warn/Bad colour) only when `hasStatus`, so a problem on another tab still shows. The
+	// selected tab is lighter with a soft blue underline. Returns true on the frame `selected` changes; wrap the
+	// selected role's rows in BeginTabBody/EndTabBody, which frame them under the strip (no nesting).
+	enum class RoleIcon { None, Guitar, Mic };
+	struct RoleTab
+	{
+		const char* label = "";
+		const char* badge = nullptr;     // "P1", "P2", "MIC"
+		ImU32 tint = 0;
+		RoleIcon icon = RoleIcon::None;
+		bool hasStatus = false;
+		ImU32 status = 0;
+		const char* hint = nullptr;
+	};
+	bool RoleTabs(const char* id, const RoleTab* tabs, int count, int* selected);
+	void BeginTabBody();
+	void EndTabBody();
+	// A darker inset strip with a coloured edge and an icon in its gutter, for rows that stand apart from the
+	// ones around them. `contentHeight` is the height of the rows inside (one row: ImGui::GetFrameHeight()).
+	void BeginInset(float contentHeight, unsigned glyph, ImU32 accent);
+	void EndInset();
 
 	// Chrome
 	bool NavItem(unsigned glyph, const char* label, bool selected);

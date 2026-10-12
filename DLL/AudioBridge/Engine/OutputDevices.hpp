@@ -34,6 +34,8 @@ namespace Audio::OutputDevices
 		std::vector<Device> devices;           // active playback endpoints, default first
 		std::vector<std::string> asioDrivers;  // real ASIO drivers RS_ASIO is bound to (UTF-8), empty in Cable mode
 		bool asioUnidentified = false;         // a bound driver matched no Windows endpoint: switching is unsafe
+		std::string asioWrapper;               // a bound wrapper driver (ASIO4ALL, FlexASIO...): it sits on Windows devices
+		                                       // instead of being one, so none is protected; the overlay explains instead
 		bool ok = false;                       // enumeration succeeded
 	};
 

@@ -92,6 +92,12 @@ namespace Overlay
 			return state;
 		}
 
+		// Set by a page that sizes itself to fill the window (Tone designer's panel) rather than to its content. The
+		// window's height normally follows the page's content; a page that also follows the window's height would
+		// feed back and grow every frame, so DrawShell gives such a page the full allowed height instead.
+		bool g_pageFillsHeight = false;
+		float g_pageNaturalHeight = 0.0f;   // a fill page's preferred height (page padding included), set while it draws
+
 		// Linear peak (guitar input or game output) to meter fraction on a -60..0 dBFS scale, as the D3D diagnostics HUD does.
 		float MeterFraction(float peak)
 		{
@@ -823,6 +829,8 @@ namespace Overlay
 				std::vector<std::string> toneOrder, toneOrderNext;
 				// The main area: the pedalboard, or the songs (give songs a tone without playing them).
 				bool songsMode = false;
+				float browserH = 0.0f;          // the plugin browser's height last frame, so the board can fill the rest
+				float libraryContentH = 0.0f;   // the tone list's full height last frame, for the window's natural height
 				char songSearch[64] = {};
 				int songFilter = 0;
 				std::vector<std::string> selectedSongs;   // song keys, chosen the same way as tones
@@ -971,6 +979,15 @@ namespace Overlay
 				else VstHostLink::ClearChain();
 			}
 
+			// Tone file actions (new, open, save, rename) only wait behind a plugin loading in the background: they
+			// queue and run once it has loaded, rather than greying out with no reason given.
+			bool FileIdle(const VstHostLink::Snapshot& vst) { return !vst.busy || vst.backgroundOnly; }
+
+			std::string WaitNote(const VstHostLink::Snapshot& vst)
+			{
+				return vst.backgroundOnly ? vst.preloadingName + " is loading in the background; this happens once it is ready." : std::string();
+			}
+
 			void Save(const VstHostLink::Snapshot& vst)
 			{
 				if (vst.toneName.empty()) Ask(Dialog::SaveAs);
@@ -999,10 +1016,17 @@ namespace Overlay
 			}
 
 			// Each pedal has its own plugin window (VstHost Main.cpp). Opening one also turns "Show plugin windows" on.
+			// A plugin window can take seconds to appear (a big amp sim builds its editor first): the pedal shows a
+			// spinner from the request until its window is open, or for 15 s at most.
+			int g_openingSlot = -1;
+			double g_openingSince = 0.0;
+
 			void OpenWindow(int slot)
 			{
 				VstHostLink::ShowSlot(slot);
 				VstHostLink::SetPopout(true);
+				g_openingSlot = slot;
+				g_openingSince = ImGui::GetTime();
 			}
 
 			// The bar's button: all open windows on or off. Turned on with none open, it opens the selected pedal's.
@@ -1028,13 +1052,27 @@ namespace Overlay
 
 			// The plugins as menu items, vendor on the right. Instruments are left out (they make no sound from a
 			// guitar); the browser still lists them.
+			// Dragging: a pedal carries its slot ("RAB_PEDAL", an int); a plugin from the browser carries its path
+			// ("RAB_PLUGIN"). Either can be dropped between two pedals to go in there.
+			struct PluginDrag { wchar_t path[VstHostControl::kPathChars]; };
+
 			template <typename Pick> void PluginMenuItems(Pick pick)
 			{
 				const std::vector<VstHostLink::Plugin>& plugins = VstHostLink::Plugins();
 				if (plugins.empty()) ImGui::TextDisabled("No 64-bit VST3 plugins found");
+				// A dot before each loaded plugin, as in the browser: green in the chain, blue kept loaded outside it
+				// (adding that one is instant).
+				const VstHostLink::Snapshot vst = VstHostLink::GetSnapshot();
 				for (const VstHostLink::Plugin& plugin : plugins) {
 					if (plugin.kind == VstHostLink::Kind::Instrument) continue;
-					if (ImGui::MenuItem(plugin.name.c_str(), plugin.vendor.c_str())) pick(plugin);
+					const std::string label = "    " + plugin.name;   // room for the dot
+					if (ImGui::MenuItem(label.c_str(), plugin.vendor.c_str())) pick(plugin);
+					const bool inChain = InChain(vst, plugin.path), loaded = KeptLoaded(vst, plugin.path);
+					if (inChain || loaded) {
+						const ImVec2 min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
+						ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(min.x + 7.0f, (min.y + max.y) * 0.5f), 3.5f, inChain ? Ink::Good : Ink::AddText, 12);
+						Hint(inChain ? "In the chain now." : "Kept loaded: adding it is instant.");
+					}
 				}
 			}
 
@@ -1066,8 +1104,11 @@ namespace Overlay
 			void FileMenu(const VstHostLink::Snapshot& vst)
 			{
 				if (!ImGui::BeginMenu("File")) return;
-				const bool idle = !vst.busy;
+				const bool idle = FileIdle(vst);
+				const std::string wait = WaitNote(vst);
+				if (!wait.empty()) { ImGui::TextDisabled("Loading %s in the background", vst.preloadingName.c_str()); ImGui::Separator(); }
 				if (ImGui::MenuItem("New tone", nullptr, false, idle)) RequestNew(vst);
+				Hint(wait.c_str());
 				if (ImGui::BeginMenu("Open tone", idle)) {
 					const std::vector<std::string>& tones = VstHostLink::Tones();
 					if (tones.empty()) ImGui::TextDisabled("No saved tones yet");
@@ -1077,9 +1118,13 @@ namespace Overlay
 				}
 				ImGui::Separator();
 				if (ImGui::MenuItem("Save", nullptr, false, idle && (vst.toneName.empty() || vst.toneModified))) Save(vst);
+				Hint(wait.c_str());
 				if (ImGui::MenuItem("Save as...", nullptr, false, idle)) Ask(Dialog::SaveAs, vst.toneName);
+				Hint(wait.c_str());
 				if (ImGui::MenuItem("Revert to saved", nullptr, false, idle && !vst.toneName.empty() && vst.toneModified)) VstHostLink::LoadTone(vst.toneName);
+				Hint(wait.c_str());
 				if (ImGui::MenuItem("Rename...", nullptr, false, idle && !vst.toneName.empty())) Ask(Dialog::Rename, vst.toneName);
+				Hint(wait.c_str());
 				ImGui::Separator();
 				if (ImGui::MenuItem("Show tones folder")) VstHostLink::OpenTonesFolder();
 				// Backups: one zip with tones, song tones, plugin settings and settings (ToneBackup.hpp).
@@ -1263,7 +1308,7 @@ namespace Overlay
 					const float groupW = nameW + 2.0f * (button + 6.0f);
 					float gx = left + std::max(0.0f, (right - left - groupW) * 0.5f);
 					ImGui::SetCursorScreenPos(ImVec2(origin.x + gx, origin.y + y));
-					if (IconSquare("##prevTone", Glyph::ChevronLeft, false, "Previous saved tone.", button) && !vst.busy) StepTone(vst, -1);
+					if (IconSquare("##prevTone", Glyph::ChevronLeft, false, "Previous saved tone.", button) && FileIdle(vst)) StepTone(vst, -1);
 					gx += button + 6.0f;
 					const ImVec2 box(origin.x + gx, origin.y + y);
 					ImGui::SetCursorScreenPos(box);
@@ -1282,14 +1327,14 @@ namespace Overlay
 					if (dot) list->AddCircleFilled(ImVec2(std::min(tx + textW - 3.5f, box.x + nameW - 8.0f), ty + ImGui::GetFontSize() * 0.55f), 3.5f, Ink::Amber, 12);
 					gx += nameW + 6.0f;
 					ImGui::SetCursorScreenPos(ImVec2(origin.x + gx, origin.y + y));
-					if (IconSquare("##nextTone", Glyph::ChevronRight, false, "Next saved tone.", button) && !vst.busy) StepTone(vst, +1);
+					if (IconSquare("##nextTone", Glyph::ChevronRight, false, "Next saved tone.", button) && FileIdle(vst)) StepTone(vst, +1);
 					if (ImGui::BeginPopup("##toneList")) {
 						const std::vector<std::string>& tones = VstHostLink::Tones();
 						if (tones.empty()) ImGui::TextDisabled("No saved tones yet");
 						for (const std::string& tone : tones)
-							if (ImGui::MenuItem(tone.c_str(), nullptr, _stricmp(tone.c_str(), vst.toneName.c_str()) == 0) && !vst.busy) RequestLoad(vst, tone);
+							if (ImGui::MenuItem(tone.c_str(), nullptr, _stricmp(tone.c_str(), vst.toneName.c_str()) == 0) && FileIdle(vst)) RequestLoad(vst, tone);
 						ImGui::Separator();
-						if (ImGui::MenuItem("Save as...", nullptr, false, !vst.busy)) Ask(Dialog::SaveAs, vst.toneName);
+						if (ImGui::MenuItem("Save as...", nullptr, false, FileIdle(vst))) Ask(Dialog::SaveAs, vst.toneName);
 						ImGui::EndPopup();
 					}
 					ImGui::EndMenuBar();
@@ -1327,7 +1372,7 @@ namespace Overlay
 				const std::vector<std::string> batch = s.selectedTones;
 				ImGui::TextDisabled("%d tones", static_cast<int>(batch.size()));
 				ImGui::Separator();
-				if (ImGui::BeginMenu("Move to folder", !vst.busy)) {
+				if (ImGui::BeginMenu("Move to folder", FileIdle(vst))) {
 					if (ImGui::MenuItem("No folder")) for (const std::string& t : batch) MoveToFolder(t, {});
 					ImGui::Separator();
 					for (const std::string& folder : ToneFolders(VstHostLink::Tones()))
@@ -1342,7 +1387,7 @@ namespace Overlay
 				if (ImGui::MenuItem("Select none")) { s.selectedTones.clear(); s.toneAnchor.clear(); }
 				ImGui::Separator();
 				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Bad));
-				if (ImGui::MenuItem(("Delete " + std::to_string(batch.size()) + " tones...").c_str(), nullptr, false, !vst.busy)) {
+				if (ImGui::MenuItem(("Delete " + std::to_string(batch.size()) + " tones...").c_str(), nullptr, false, FileIdle(vst))) {
 					Ask(Dialog::DeleteTones);
 					s.dialogTones = batch;
 				}
@@ -1370,7 +1415,7 @@ namespace Overlay
 					if (onStar) VstHostLink::SetFavouriteTone(tone, !favourite);
 					else { SelectClick(s.selectedTones, s.toneAnchor, s.toneOrder, tone); s.selectedTone = tone; }
 				}
-				if (hovered && !onStar && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && !current && !vst.busy) RequestLoad(vst, tone);
+				if (hovered && !onStar && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && !current && FileIdle(vst)) RequestLoad(vst, tone);
 				// Drag onto songs (Songs mode) to give them this tone.
 				if (s.songsMode && ImGui::BeginDragDropSource()) {
 					ImGui::SetDragDropPayload("RAB_TONE", tone.c_str(), tone.size() + 1);
@@ -1407,7 +1452,7 @@ namespace Overlay
 					s.selectedTone = tone;
 					ImGui::TextDisabled("%s", tone.c_str());
 					ImGui::Separator();
-					if (ImGui::MenuItem("Load", "or double-click it", false, !current && !vst.busy)) RequestLoad(vst, tone);
+					if (ImGui::MenuItem("Load", "or double-click it", false, !current && FileIdle(vst))) RequestLoad(vst, tone);
 					if (s.songsMode && !s.selectedSongs.empty()) {
 						const std::string label = "Give to the " + (s.selectedSongs.size() == 1 ? std::string("selected song") : std::to_string(s.selectedSongs.size()) + " selected songs");
 						if (ImGui::MenuItem(label.c_str())) for (const std::string& key : s.selectedSongs) VstHostLink::SetToneForSong(key, tone);
@@ -1423,8 +1468,8 @@ namespace Overlay
 						if (!current) RequestLoad(vst, tone);
 					}
 					ImGui::Separator();
-					if (ImGui::MenuItem("Rename...", nullptr, false, !vst.busy)) Ask(Dialog::Rename, tone);
-					if (ImGui::BeginMenu("Move to folder", !vst.busy)) {
+					if (ImGui::MenuItem("Rename...", nullptr, false, FileIdle(vst))) Ask(Dialog::Rename, tone);
+					if (ImGui::BeginMenu("Move to folder", FileIdle(vst))) {
 						if (ImGui::MenuItem("No folder", nullptr, FolderOf(tone).empty())) MoveToFolder(tone, {});
 						ImGui::Separator();
 						for (const std::string& folder : ToneFolders(VstHostLink::Tones()))
@@ -1436,7 +1481,7 @@ namespace Overlay
 					if (ImGui::MenuItem("Show in folder")) VstHostLink::OpenTonesFolder();
 					ImGui::Separator();
 					ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Bad));
-					if (ImGui::MenuItem("Delete...", nullptr, false, !vst.busy)) Ask(Dialog::Delete, tone);
+					if (ImGui::MenuItem("Delete...", nullptr, false, FileIdle(vst))) Ask(Dialog::Delete, tone);
 					ImGui::PopStyleColor();
 					}
 					ImGui::EndPopup();
@@ -1493,8 +1538,11 @@ namespace Overlay
 					ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Muted));
 					ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + rowW);
 					ImGui::TextUnformatted("None yet. File, Save as keeps the chain with every plugin's settings.");
+					// Where they live, so a tone saved elsewhere can be copied in (installing never touches this folder).
+					ImGui::TextUnformatted(("Saved in " + Utf8(VstHostLink::TonesFolder())).c_str());
 					ImGui::PopTextWrapPos();
 					ImGui::PopStyleColor();
+					if (ImGui::SmallButton("Open tones folder")) VstHostLink::OpenTonesFolder();
 					ImGui::PopFont();
 				}
 				for (const std::string& tone : tones) if (FolderOf(tone).empty() && matches(tone)) ToneRow(vst, tone, rowW, "tones");
@@ -1540,14 +1588,15 @@ namespace Overlay
 				if (ImGui::IsItemClicked()) { s.songsMode = true; s.songFilter = songs == 0 ? 0 : 1; }
 				Hint("Songs that load their own tone when they start. Click to see them (Songs, at the top), or give more songs a tone there.");
 				ImGui::PopStyleColor();
+				s.libraryContentH = ImGui::GetCursorPosY() + 10.0f;   // plus the bottom padding
 
 				// Right-click on the empty part of the column.
 				PushPopupPadding();
 				if (ImGui::BeginPopupContextWindow("##libraryMenu", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
 					ImGui::TextDisabled("Tones");
 					ImGui::Separator();
-					if (ImGui::MenuItem("New tone", nullptr, false, !vst.busy)) RequestNew(vst);
-					if (ImGui::MenuItem("Save current as...", nullptr, false, !vst.busy)) Ask(Dialog::SaveAs, vst.toneName);
+					if (ImGui::MenuItem("New tone", nullptr, false, FileIdle(vst))) RequestNew(vst);
+					if (ImGui::MenuItem("Save current as...", nullptr, false, FileIdle(vst))) Ask(Dialog::SaveAs, vst.toneName);
 					if (ImGui::MenuItem("Open tones folder")) VstHostLink::OpenTonesFolder();
 					ImGui::EndPopup();
 				}
@@ -1561,6 +1610,32 @@ namespace Overlay
 				list->AddCircle(center, 7.0f, Ink::Jack, 16, 3.0f);
 				ImFont* caption = CaptionFont();
 				Text(list, caption, ImVec2(center.x - TextWidth(caption, label) * 0.5f, center.y + 12.0f), Ink::Dim, label);
+			}
+
+			// A vertical segmented meter in a column `width` wide whose left edge is at `at.x`, centred on `at.y`:
+			// green, then amber, then red at the top; all lit with a red top while it clips. Click for the levels.
+			void MeterColumn(ImDrawList* list, ImVec2 at, float width, const char* label, float peak, const char* id, const VstHostLink::Snapshot& vst)
+			{
+				constexpr int kSegments = 6;
+				const float segH = 8.0f, gap = 3.0f, barW = 10.0f;
+				const float barH = kSegments * (segH + gap) - gap;
+				ImFont* caption = CaptionFont();
+				const float labelTop = at.y - (barH + caption->FontSize + 6.0f) * 0.5f;
+				const float barTop = labelTop + caption->FontSize + 6.0f;
+				const float cx = at.x + width * 0.5f;
+				ImGui::SetCursorScreenPos(ImVec2(at.x, labelTop));
+				if (ImGui::InvisibleButton(id, ImVec2(width, barTop + barH - labelTop))) Ask(Dialog::Levels);
+				Hint(vst.outputPeak > 1.0f ? "The chain's output is clipping. Click to lower the output trim, or lower the last plugin's volume."
+					: "Your guitar into the chain (IN) and the chain's output (OUT). Click for the levels.");
+				Text(list, caption, ImVec2(cx - TextWidth(caption, label) * 0.5f, labelTop), Ink::Dim, label);
+				const bool clipping = peak > 1.0f;
+				const int lit = clipping ? kSegments : static_cast<int>(std::lround(MeterFraction(peak) * kSegments));
+				for (int i = 0; i < kSegments; ++i) {
+					const float y = barTop + barH - (i + 1) * (segH + gap) + gap;
+					const ImVec2 a(cx - barW * 0.5f, y), b(cx + barW * 0.5f, y + segH);
+					const ImU32 on = i == kSegments - 1 ? Ink::Bad : i == kSegments - 2 ? Ink::Amber : Ink::Meter;
+					list->AddRectFilled(a, b, i < lit ? on : Ink::Edge, 2.0f);   // unlit segments stay visible on the rack
+				}
 			}
 
 			// Over the rack while plugins load: which plugin, the step of a tone, the seconds so far, and a bar that keeps
@@ -1618,19 +1693,30 @@ namespace Overlay
 				ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14, 14));
 				ImGui::BeginChild("##board", ImVec2(width, height), false, ImGuiWindowFlags_AlwaysUseWindowPadding | ImGuiWindowFlags_NoScrollbar);
 				const float hintH = CaptionFont()->FontSize * 2.0f + 8.0f;
-				const float rackW = ImGui::GetContentRegionAvail().x;
+				const float boardW = ImGui::GetContentRegionAvail().x;
 				const float rackH = std::max(150.0f, ImGui::GetContentRegionAvail().y - hintH);
-				const ImVec2 rack = ImGui::GetCursorScreenPos();
+				const ImVec2 board = ImGui::GetCursorScreenPos();
 				ImDrawList* outer = ImGui::GetWindowDrawList();
-				outer->AddRectFilled(rack, ImVec2(rack.x + rackW, rack.y + rackH), Ink::Rack, 10.0f);
-				outer->AddRect(rack, ImVec2(rack.x + rackW, rack.y + rackH), Ink::RackEdge, 10.0f);
+				outer->AddRectFilled(board, ImVec2(board.x + boardW, board.y + rackH), Ink::Rack, 10.0f);
+				outer->AddRect(board, ImVec2(board.x + boardW, board.y + rackH), Ink::RackEdge, 10.0f);
+				const float pedalH = 124.0f;
+
+				// IN and OUT meters stand at the board's two ends, outside the scrolling rack so a long chain never
+				// scrolls them away (View > Meters hides them). Click either for the levels.
+				const float meterCol = IsOpen(Meters) ? 44.0f : 0.0f;
+				if (meterCol > 0.0f) {
+					const float midY = board.y + std::max(0.0f, (rackH - 6.0f - pedalH) * 0.5f) + pedalH * 0.5f;
+					MeterColumn(outer, ImVec2(board.x, midY), meterCol, "IN", vst.inputPeak, "##inMeter", vst);
+					MeterColumn(outer, ImVec2(board.x + boardW - meterCol, midY), meterCol, "OUT", vst.outputPeak, "##outMeter", vst);
+				}
+				const float rackW = boardW - 2.0f * meterCol;
+				ImGui::SetCursorScreenPos(ImVec2(board.x + meterCol, board.y));
 
 				ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10, 0));
 				ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, 6.0f);
 				ImGui::BeginChild("##rack", ImVec2(rackW, rackH), false, ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_AlwaysUseWindowPadding);
 				ImDrawList* list = ImGui::GetWindowDrawList();
 				ImFont* caption = CaptionFont();
-				const float pedalH = 124.0f;
 				const float top = ImGui::GetCursorScreenPos().y + std::max(0.0f, (rackH - 6.0f - pedalH) * 0.5f);
 				const float midY = top + pedalH * 0.5f;
 				float x = ImGui::GetCursorScreenPos().x;
@@ -1641,7 +1727,11 @@ namespace Overlay
 				Jack(list, ImVec2(x + 21.0f, midY - 6.0f), "In");
 				x += 42.0f + 8.0f;
 				cable();
+				// The gaps before each pedal and after the last: drop targets that insert there (see the drop
+				// handling after the Add tile). Each spans the cable into the pedal, a little into the pedal too.
+				std::vector<ImRect> gaps;
 				for (int i = 0; i < count; ++i) {
+					gaps.emplace_back(ImVec2(x - 26.0f, top), ImVec2(x + 6.0f, top + pedalH));
 					const VstHostLink::SlotView& slot = vst.slots[i];
 					const VstHostLink::Plugin* plugin = FindPlugin(slot.path);
 					const PedalLook look = LookFor(plugin ? plugin->kind : VstHostLink::Kind::Unknown);
@@ -1676,6 +1766,8 @@ namespace Overlay
 							const int from = *static_cast<const int*>(payload->Data);
 							if (from != i && !vst.busy) MovePedal(from, i);
 						}
+						if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("RAB_PLUGIN"))
+							if (!vst.busy) VstHostLink::ReplaceSlot(i, static_cast<const PluginDrag*>(payload->Data)->path);
 						ImGui::EndDragDropTarget();
 					}
 					PushPopupPadding();
@@ -1712,11 +1804,24 @@ namespace Overlay
 					}
 					list->AddCircleFilled(footswitch, 12.0f, fade(hovered && onSwitch ? IM_COL32(190, 198, 212, 255) : Ink::Switch), 20);
 					list->AddCircle(footswitch, 12.0f, fade(Ink::SwitchEdge), 20, 2.0f);
+					// Its window was asked for and is not open yet: dim the pedal and turn a spinner over it.
+					if (i == g_openingSlot) {
+						if (slot.windowOpen || ImGui::GetTime() - g_openingSince > 15.0) g_openingSlot = -1;
+						else {
+							list->AddRectFilled(at, end, IM_COL32(0, 0, 0, 120), 9.0f);
+							const ImVec2 c(x + look.width * 0.5f, top + pedalH * 0.5f - 6.0f);
+							const float a0 = static_cast<float>(ImGui::GetTime()) * 6.0f;
+							list->PathArcTo(c, 14.0f, a0, a0 + 4.2f, 24);
+							list->PathStroke(Ink::AddText, 0, 3.0f);
+							Text(list, caption, ImVec2(c.x - TextWidth(caption, "Opening") * 0.5f, c.y + 20.0f), IM_COL32_WHITE, "Opening");
+						}
+					}
 					ImGui::PopID();
 					x = end.x + 8.0f;
 					cable();
 				}
 
+				gaps.emplace_back(ImVec2(x - 26.0f, top), ImVec2(x + 6.0f, top + pedalH));
 				// Add: a dashed tile, opening the plugin list.
 				if (count < VstHostControl::kMaxSlots) {
 					const float addW = 70.0f;
@@ -1727,7 +1832,12 @@ namespace Overlay
 					ImGui::SetItemUsingMouseWheel();
 					const bool hovered = ImGui::IsItemHovered();
 					ImGui::EndDisabled();
-					Hint("Add a plugin at the end of the chain. The plugin browser below has search.");
+					Hint("Add a plugin at the end of the chain. The plugin browser below has search; drag one from it onto the board.");
+					if (ImGui::BeginDragDropTarget()) {
+						if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("RAB_PLUGIN"))
+							if (!vst.busy) VstHostLink::AddPlugin(static_cast<const PluginDrag*>(payload->Data)->path);
+						ImGui::EndDragDropTarget();
+					}
 					const ImU32 dash = hovered ? Ink::AddText : Ink::Jack;
 					for (float d = at.x + 9.0f; d < end.x - 9.0f; d += 8.0f) {
 						list->AddLine(ImVec2(d, at.y), ImVec2(std::min(d + 4.0f, end.x - 9.0f), at.y), dash);
@@ -1741,6 +1851,37 @@ namespace Overlay
 					Text(list, caption, ImVec2(at.x + (addW - TextWidth(caption, "Add")) * 0.5f, midY + 6.0f), Ink::AddText, "Add");
 					x = end.x + 8.0f;
 					cable();
+				}
+
+				// Dropping into a gap inserts there: a dragged pedal moves to that place (the pedals after it shift
+				// along, rather than two pedals swapping), a plugin from the browser goes in at that slot. While
+				// something is dragged, every gap shows a faint marker and the one under the mouse a bright bar.
+				if (const ImGuiPayload* dragging = ImGui::GetDragDropPayload();
+					dragging && (dragging->IsDataType("RAB_PEDAL") || dragging->IsDataType("RAB_PLUGIN"))) {
+					for (int g = 0; g < static_cast<int>(gaps.size()); ++g) {
+						const ImRect& gap = gaps[g];
+						const float gx = gap.Min.x + 14.0f;
+						// A pedal's own two sides are no move: no marker there.
+						const int from = dragging->IsDataType("RAB_PEDAL") ? *static_cast<const int*>(dragging->Data) : -1;
+						if (from >= 0 && (g == from || g == from + 1)) continue;
+						if (from < 0 && count >= VstHostControl::kMaxSlots) continue;   // a full chain takes no more
+						list->AddLine(ImVec2(gx, gap.Min.y + 18.0f), ImVec2(gx, gap.Max.y - 18.0f), Ink::Jack, 2.0f);
+						if (!ImGui::BeginDragDropTargetCustom(gap, ImGui::GetID(("##gap" + std::to_string(g)).c_str())))
+							continue;
+						const ImGuiDragDropFlags peek = ImGuiDragDropFlags_AcceptBeforeDelivery | ImGuiDragDropFlags_AcceptNoDrawDefaultRect;
+						if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("RAB_PEDAL", peek)) {
+							list->AddLine(ImVec2(gx, gap.Min.y), ImVec2(gx, gap.Max.y), Ink::Outline, 4.0f);
+							if (payload->IsDelivery() && !vst.busy) MovePedal(from, g > from ? g - 1 : g);
+						}
+						if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("RAB_PLUGIN", peek)) {
+							list->AddLine(ImVec2(gx, gap.Min.y), ImVec2(gx, gap.Max.y), Ink::Outline, 4.0f);
+							if (payload->IsDelivery() && !vst.busy && count < VstHostControl::kMaxSlots) {
+								VstHostLink::AddPlugin(static_cast<const PluginDrag*>(payload->Data)->path, g);
+								S().selected = g;
+							}
+						}
+						ImGui::EndDragDropTarget();
+					}
 				}
 				Jack(list, ImVec2(x + 21.0f, midY - 6.0f), "Out");
 				x += 42.0f;
@@ -1786,10 +1927,10 @@ namespace Overlay
 				// Under the rack: what to do, or why it is quiet.
 				ImGui::PushFont(caption);
 				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Dim));
-				ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + rackW);
+				ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + boardW);
 				ImGui::TextUnformatted(count == 0 ? "The chain is empty, so you hear your clean guitar. Click Add for an amp sim, then pedals before it (gate, drive) or after it (delay, reverb)."
 					: vst.chainBypassed ? "The whole chain is bypassed (Edit menu): you hear your clean guitar."
-					: "Right-click a pedal, a tone, or the board. Double-click a pedal to open its window. Click a footswitch to bypass. Drag pedals to reorder; scroll or middle-drag to move along a long chain.");
+					: "Right-click a pedal, a tone, or the board. Double-click a pedal to open its window. Click a footswitch to bypass. Drag a pedal or a plugin from the browser between two pedals to put it there; scroll or middle-drag to move along a long chain.");
 				ImGui::PopTextWrapPos();
 				ImGui::PopStyleColor();
 				ImGui::PopFont();
@@ -1797,42 +1938,17 @@ namespace Overlay
 				ImGui::PopStyleVar();
 			}
 
-			void MeterBar(ImDrawList* list, ImVec2 at, float width, float peak)
-			{
-				const float height = 7.0f;
-				list->AddRectFilled(at, ImVec2(at.x + width, at.y + height), Ink::Field, 4.0f);
-				const float fill = MeterFraction(peak);
-				if (fill > 0.0f) list->AddRectFilled(at, ImVec2(at.x + width * fill, at.y + height), peak > 1.0f ? Ink::Bad : Ink::Meter, 4.0f);
-			}
-
-			// The strip: IN and OUT meters, the link's latency and late buffers, and the current song's tone.
-			void Strip(const VstHostLink::Snapshot& vst, const ExternalAmp::Snapshot& amp, float width)
+			// The strip under the board: the current song and its tone.
+			void Strip(const VstHostLink::Snapshot& vst, float width)
 			{
 				ImDrawList* list = ImGui::GetWindowDrawList();
 				ImFont* caption = CaptionFont();
 				const ImVec2 at = ImGui::GetCursorScreenPos();
-				const float rowH = caption->FontSize + 6.0f;
 				const float pad = 14.0f;
-				// IN and OUT; the link's latency and late buffers are in the Amp link card above.
-				const float labelsW = TextWidth(caption, "IN") + TextWidth(caption, "OUT") + 4.0f * 10.0f;
-				const float meterW = std::max(40.0f, (width - 2.0f * pad - labelsW) * 0.5f);
-				float x = at.x + pad;
-				const float y = at.y + 9.0f;
-				Text(list, caption, ImVec2(x, y), Ink::Muted, "IN");
-				x += TextWidth(caption, "IN") + 10.0f;
-				MeterBar(list, ImVec2(x, y + (caption->FontSize - 7.0f) * 0.5f), meterW, vst.inputPeak);
-				x += meterW + 10.0f;
-				Text(list, caption, ImVec2(x, y), Ink::Muted, "OUT");
-				x += TextWidth(caption, "OUT") + 10.0f;
-				MeterBar(list, ImVec2(x, y + (caption->FontSize - 7.0f) * 0.5f), meterW, vst.outputPeak);
-				ImGui::SetCursorScreenPos(at);
-				ImGui::InvisibleButton("##levels", ImVec2(width, rowH + 6.0f));
-				Hint(vst.outputPeak > 1.0f ? "The chain's output is clipping. Click to lower the output trim, or lower the last plugin's volume."
-					: "Your guitar into the chain and the chain's output. Click for the levels.");
-				if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) Ask(Dialog::Levels);
+				// The IN and OUT meters are on the board's ends (MeterColumn); the link's numbers are in the Amp link bar.
 
 				// Song row: the song, its tone, and a button to give it the tone playing now (or forget its own).
-				const ImVec2 song(at.x + pad, at.y + rowH + 12.0f);
+				const ImVec2 song(at.x + pad, at.y + 10.0f);
 				std::string songAction;
 				bool songActionEnabled = true;
 				if (!vst.songKey.empty()) {
@@ -1847,8 +1963,9 @@ namespace Overlay
 				float sx = song.x + 22.0f;
 				if (vst.songKey.empty()) {
 					const std::string note = vst.preloadingName.empty() ? std::string("Start a song to give it its own tone.")
-						: "Getting " + vst.preloadingName + " ready in the background, for fast tone changes...";
-					Text(list, caption, ImVec2(sx, song.y + 2.0f), Ink::Dim, note.c_str());
+						: vst.waitingOnBackground ? "Waiting for " + vst.preloadingName + " to finish loading in the background, then your change goes through..."
+						: "Getting " + vst.preloadingName + " ready in the background...";
+					Text(list, caption, ImVec2(sx, song.y + 2.0f), vst.waitingOnBackground ? Ink::Amber : Ink::Dim, note.c_str());
 				}
 				else {
 					list->AddText(ImVec2(sx, song.y), Ink::Soft, vst.songKey.c_str());
@@ -1919,16 +2036,72 @@ namespace Overlay
 				}
 			}
 
-			// Status: what happens if it is added.
-			void PluginStatus(const VstHostLink::Snapshot& vst, const VstHostLink::Plugin& plugin, const char*& text, ImU32& color)
+			// A status pill's text and colours.
+			struct PillLook { const char* text; ImU32 fill, edge, ink; };
+			PillLook TintPill(const char* text, ImU32 hue) { return { text, Mix(Ink::App, hue, 0.18f), Mix(Ink::App, hue, 0.55f), hue }; }
+
+			// A plugin's status is two separate things, each its own pill: where it stands with the chain (in it,
+			// ready to add, or why not), and whether a copy is kept loaded outside it for fast tone changes. One
+			// word for both hid "In chain" behind "Always loaded".
+			PillLook ChainPill(const VstHostLink::Snapshot& vst, const VstHostLink::Plugin& plugin)
 			{
-				if (VstHostLink::FailedToLoad(plugin.path)) { text = "Failed to load"; color = Ink::Bad; }
-				else if (InChain(vst, plugin.path)) { text = "In chain"; color = Ink::Good; }
-				else if (plugin.kind == VstHostLink::Kind::Instrument) { text = "Not for guitar"; color = Ink::Amber; }
-				else if (Loading(vst, plugin.path)) { text = "Loading..."; color = Ink::Amber; }
-				else if (KeptLoaded(vst, plugin.path)) { text = Listed(vst.alwaysLoaded, plugin.path) ? "Always loaded" : "Loaded"; color = Ink::Blue; }
-				else if (Listed(vst.alwaysLoaded, plugin.path)) { text = Listed(vst.preloadFailed, plugin.path) ? "Failed to load" : "Loads soon"; color = Ink::Amber; }
-				else { text = "Ready"; color = Ink::Good; }
+				if (VstHostLink::FailedToLoad(plugin.path)) return TintPill("Failed to load", Ink::Bad);
+				if (InChain(vst, plugin.path)) return TintPill("In chain", Ink::Good);
+				if (plugin.kind == VstHostLink::Kind::Instrument) return TintPill("Not for guitar", Ink::Amber);
+				if (Loading(vst, plugin.path)) return TintPill("Loading...", Ink::Amber);
+				return { "Ready", IM_COL32(40, 45, 55, 255), Ink::FieldEdge, Ink::Soft };
+			}
+
+			bool MemoryPill(const VstHostLink::Snapshot& vst, const VstHostLink::Plugin& plugin, PillLook& look)
+			{
+				// "Always keep loaded" on a plugin in the chain: the chain's copy is the loaded one (the host keeps no
+				// spare copy beside it), so it is loaded now, not waiting. "Loads soon" is only for one that is not
+				// loaded yet: the host loads always-loaded plugins in the background outside songs.
+				const bool always = Listed(vst.alwaysLoaded, plugin.path);
+				if (KeptLoaded(vst, plugin.path) || (always && InChain(vst, plugin.path)))
+					look = { always ? "Always loaded" : "Loaded", Ink::Blue, Ink::Blue, IM_COL32_WHITE };
+				else if (always) look = TintPill(Listed(vst.preloadFailed, plugin.path) ? "Load failed" : "Loads soon", Ink::Amber);
+				else return false;
+				return true;
+			}
+
+			// Why a starred plugin shows "Load failed". Marks from before the host saved a reason only ever came from
+			// the host closing mid-load, so that is the answer for those too.
+			std::string PreloadFailedWhy(const VstHostLink::Snapshot& vst, const std::wstring& path)
+			{
+				for (const auto& [failedPath, why] : vst.preloadFailedWhy)
+					if (_wcsicmp(failedPath.c_str(), path.c_str()) == 0 && !why.empty()) return why;
+				return "The plugin host closed while this loaded in the background, most likely because the plugin crashed it.";
+			}
+
+			float PillWidth(ImFont* font, const char* text, bool dot = false) { return TextWidth(font, text) + 22.0f + (dot ? 14.0f : 0.0f); }
+
+			// The status column's two pill widths: each as wide as its longest label, so every row's pills line up.
+			float ChainPillWidth(ImFont* font)
+			{
+				float w = 0.0f;
+				for (const char* t : { "In chain", "Ready", "Not for guitar", "Failed to load", "Loading..." }) w = std::max(w, PillWidth(font, t));
+				return w;
+			}
+			float MemoryPillWidth(ImFont* font)
+			{
+				float w = 0.0f;
+				for (const char* t : { "Always loaded", "Loaded", "Loads soon", "Load failed" }) w = std::max(w, PillWidth(font, t));
+				return w;
+			}
+
+			// Draws a pill at `at`, `height` tall, with an optional status dot before the text; returns its width.
+			// A `fixedWidth` makes it that wide with the text centred (the status column).
+			float DrawPill(ImDrawList* list, ImFont* font, ImVec2 at, float height, const PillLook& look, ImU32 dot = 0, float fixedWidth = 0.0f)
+			{
+				const float width = fixedWidth > 0.0f ? fixedWidth : PillWidth(font, look.text, dot != 0);
+				const ImVec2 end(at.x + width, at.y + height);
+				list->AddRectFilled(at, end, look.fill, height * 0.5f);
+				list->AddRect(at, end, look.edge, height * 0.5f);
+				float x = fixedWidth > 0.0f ? at.x + (width - TextWidth(font, look.text)) * 0.5f : at.x + 11.0f;
+				if (dot) { list->AddCircleFilled(ImVec2(x + 4.0f, at.y + height * 0.5f), 4.0f, dot, 12); x += 14.0f; }
+				Text(list, font, ImVec2(x, at.y + (height - font->FontSize) * 0.5f), look.ink, look.text);
+				return width;
 			}
 
 			bool Chip(const char* label, bool on)
@@ -2220,28 +2393,29 @@ namespace Overlay
 				ImGui::AlignTextToFramePadding();
 				ImGui::TextUnformatted("Plugin browser");
 				ImGui::PopStyleColor();
-				ImGui::SameLine(0.0f, 10.0f);
+				// Two summary chips: what was found and how much of it is in the chain, then how many plugins are
+				// loaded outside the chain (the host's spares), so the speed of a tone change is not a mystery.
+				const float chipH = ImGui::GetFrameHeight();
+				auto summaryChip = [&](const char* id, const std::string& text, ImU32 hue, const char* hint) {
+					ImGui::SameLine(0.0f, 10.0f);
+					const PillLook look = { text.c_str(), Mix(Ink::App, hue, 0.12f), Mix(Ink::App, hue, 0.6f), Ink::Text };
+					const ImVec2 at = ImGui::GetCursorScreenPos();
+					ImGui::InvisibleButton(id, ImVec2(PillWidth(caption, look.text, true), chipH));
+					Hint(hint);
+					DrawPill(ImGui::GetWindowDrawList(), caption, at, chipH, look, hue);
+				};
 				const size_t folders = VstHostLink::ScanFolders().size() + 1;
-				const std::string count = std::to_string(plugins.size()) + " found, " + std::to_string(folders) + (folders == 1 ? " folder" : " folders");
-				ImGui::PushFont(caption);
-				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Dim));
-				ImGui::AlignTextToFramePadding();
-				ImGui::TextUnformatted(count.c_str());
-				ImGui::PopStyleColor();
-				// How many plugins are loaded outside the chain (the host's spares): visible, so the speed is not a mystery.
+				const std::string found = std::to_string(plugins.size()) + (plugins.size() == 1 ? " plugin" : " plugins") + " found, "
+					+ std::to_string(vst.slots.size()) + " in chain";
+				const std::string foundHint = "Found in " + std::to_string(folders) + (folders == 1 ? " folder" : " folders") + ". View > Add plugin folder for more; Rescan after installing.";
+				summaryChip("##foundChip", found, Ink::Good, foundHint.c_str());
 				int loadedOutside = 0;
 				for (const std::wstring& spare : vst.spares) if (!InChain(vst, spare)) ++loadedOutside;
 				if (loadedOutside > 0 || !vst.preloadingName.empty()) {
-					ImGui::SameLine(0.0f, 8.0f);
-					const std::string kept = !vst.preloadingName.empty() ? "loading " + vst.preloadingName + " in the background..."
+					const std::string kept = !vst.preloadingName.empty() ? "Loading " + vst.preloadingName + " in the background..."
 						: std::to_string(loadedOutside) + (loadedOutside == 1 ? " plugin" : " plugins") + " loaded for fast tone changes";
-					ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Blue));
-					ImGui::AlignTextToFramePadding();
-					ImGui::TextUnformatted(kept.c_str());
-					ImGui::PopStyleColor();
-					Hint("Plugins kept loaded outside the chain: a tone that uses them switches at once instead of waiting seconds for each one to start. Right-click a plugin to load it in the background, always keep it loaded, or unload it. View > Fast tone changes sets how many recent ones stay.");
+					summaryChip("##keptChip", kept, Ink::Blue, "Plugins kept loaded outside the chain: a tone that uses them switches at once instead of waiting seconds for each one to start. Right-click a plugin to load it in the background, always keep it loaded, or unload it. View > Fast tone changes sets how many recent ones stay.");
 				}
-				ImGui::PopFont();
 				const float searchW = std::min(240.0f, inner * 0.4f);
 				ImGui::SameLine(left + inner - searchW);
 				ImGui::SetNextItemWidth(searchW);
@@ -2274,7 +2448,11 @@ namespace Overlay
 				}
 
 				// Table.
-				const float nameX = 28.0f, vendorX = inner * 0.40f, kindX = inner * 0.66f;
+				// Status holds two pills ("In chain" + "Always loaded" is the widest pair), so it starts where they fit.
+				const float chainW = ChainPillWidth(caption), memoryW = MemoryPillWidth(caption);
+				const float statusW = chainW + 6.0f + memoryW + 16.0f;   // 16: clear of the list's scrollbar
+				const float nameX = 28.0f, vendorX = inner * 0.38f, kindX = inner * 0.58f;
+				const float statusX = std::max(kindX + 80.0f, inner - statusW);
 				ImDrawList* list = ImGui::GetWindowDrawList();
 				ImGui::SetCursorPosX(left);
 				{
@@ -2282,7 +2460,7 @@ namespace Overlay
 					Text(list, caption, ImVec2(at.x + nameX, at.y), Ink::Dim, "Plugin");
 					Text(list, caption, ImVec2(at.x + vendorX, at.y), Ink::Dim, "Vendor");
 					Text(list, caption, ImVec2(at.x + kindX, at.y), Ink::Dim, "Type");
-					Text(list, caption, ImVec2(at.x + inner - TextWidth(caption, "Status") - 10.0f, at.y), Ink::Dim, "Status");
+					Text(list, caption, ImVec2(at.x + statusX, at.y), Ink::Dim, "Status");
 					ImGui::Dummy(ImVec2(inner, caption->FontSize + 2.0f));
 					list->AddLine(ImVec2(at.x, at.y + caption->FontSize + 4.0f), ImVec2(at.x + inner, at.y + caption->FontSize + 4.0f), Ink::Edge);
 				}
@@ -2319,7 +2497,14 @@ namespace Overlay
 							else s.selectedPlugin = plugin.path;
 						}
 						if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && canAdd) VstHostLink::AddPlugin(plugin.path);
-						Hint("Double-click to add it to the end of the chain. Right-click to keep it loaded for fast tone changes, and more. The star marks a favourite.");
+						Hint("Double-click to add it to the end of the chain, or drag it onto the board: between two pedals to put it there, onto a pedal to replace it. Right-click to keep it loaded, and more. The star marks a favourite.");
+						if (plugin.kind != VstHostLink::Kind::Instrument && ImGui::BeginDragDropSource()) {
+							PluginDrag drag{};
+							wcsncpy_s(drag.path, plugin.path.c_str(), _TRUNCATE);
+							ImGui::SetDragDropPayload("RAB_PLUGIN", &drag, sizeof(drag));
+							ImGui::TextUnformatted(plugin.name.c_str());
+							ImGui::EndDragDropSource();
+						}
 						PushPopupPadding();
 						if (ImGui::BeginPopupContextItem("##pluginMenu")) {
 							s.selectedPlugin = plugin.path;
@@ -2358,10 +2543,25 @@ namespace Overlay
 						Text(rowsList, caption, ImVec2(at.x + vendorX, captionY), Ink::Muted, plugin.vendor.empty() ? "-" : plugin.vendor.c_str());
 						rowsList->PopClipRect();
 						Text(rowsList, caption, ImVec2(at.x + kindX, captionY), KindColor(plugin.kind), KindName(plugin.kind));
-						const char* status = nullptr;
-						ImU32 statusColor = Ink::Muted;
-						PluginStatus(vst, plugin, status, statusColor);
-						Text(rowsList, caption, ImVec2(end.x - TextWidth(caption, status) - 10.0f, captionY), statusColor, status);
+						const float pillH = rowH - 8.0f;
+						float px = at.x + statusX;
+						rowsList->PushClipRect(ImVec2(px, at.y), end, true);
+						px += DrawPill(rowsList, caption, ImVec2(px, at.y + 4.0f), pillH, ChainPill(vst, plugin), 0, chainW) + 6.0f;
+						PillLook memory{};
+						if (MemoryPill(vst, plugin, memory)) DrawPill(rowsList, caption, ImVec2(px, at.y + 4.0f), pillH, memory, 0, memoryW);
+						rowsList->PopClipRect();
+						// "Load failed" on its own says nothing: hovering it says why, and how to try again.
+						if (memory.text && strcmp(memory.text, "Load failed") == 0 && ImGui::IsWindowHovered()
+							&& ImGui::IsMouseHoveringRect(ImVec2(px, at.y + 4.0f), ImVec2(px + memoryW, at.y + 4.0f + pillH)))
+						{
+							const std::string why = PreloadFailedWhy(vst, plugin.path);
+							ImGui::BeginTooltip();
+							ImGui::PushTextWrapPos(ImGui::GetFontSize() * 24.0f);
+							ImGui::TextUnformatted(why.c_str());
+							ImGui::TextDisabled("It is not loaded in the background again until you right-click it and pick Load in the background.");
+							ImGui::PopTextWrapPos();
+							ImGui::EndTooltip();
+						}
 						ImGui::PopID();
 					}
 					ImGui::EndChild();
@@ -2579,8 +2779,16 @@ namespace Overlay
 			{
 				const float width = ImGui::GetContentRegionAvail().x;
 				const float barH = ImGui::GetFontSize() + 20.0f;
-				const float mainH = 250.0f;
-				const float stripH = IsOpen(Meters) ? CaptionFont()->FontSize + ImGui::GetFontSize() + 34.0f : 0.0f;
+				const float stripH = ImGui::GetFontSize() + 20.0f;   // the song row; the meters are on the board
+				// The board (or songs view) takes whatever height the page has left, never less than 250. The
+				// browser's height is only known after it is drawn, so last frame's is used; a frame late on a resize.
+				const float browserH = IsOpen(Browser) ? S().browserH : 0.0f;
+				g_pageFillsHeight = true;
+				// The height the page would like until the window is dragged: the board's own, or the tone list's when
+				// that is taller, so a short library does not open as an empty column (the shell caps it to the screen).
+				const float naturalMainH = std::max(300.0f, IsOpen(Library) ? S().libraryContentH : 0.0f);
+				g_pageNaturalHeight = ImGui::GetCursorPosY() + barH + naturalMainH + stripH + browserH + 12.0f + 20.0f;
+				const float mainH =std::max(250.0f, std::floor(ImGui::GetContentRegionAvail().y - barH - stripH - browserH - 12.0f));
 				const float libraryW = IsOpen(Library) ? std::min(240.0f, width * 0.32f) : 0.0f;
 				const ImVec2 at = ImGui::GetCursorScreenPos();
 				ImDrawList* list = ImGui::GetWindowDrawList();
@@ -2598,10 +2806,11 @@ namespace Overlay
 				if (S().songsMode) SongsView(vst, width - libraryW, mainH);
 				else Board(vst, width - libraryW, mainH);
 				ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + barH + mainH));
-				if (stripH > 0.0f) Strip(vst, amp, width);
+				Strip(vst, width);
 				const float browserTop = ImGui::GetCursorScreenPos().y;
 				if (IsOpen(Browser)) PluginBrowser(vst, width);
 				const float bottom = std::max(ImGui::GetCursorScreenPos().y, browserTop);
+				S().browserH = bottom - browserTop;
 
 				list->ChannelsSetCurrent(0);
 				const ImVec2 end(at.x + width, bottom);
@@ -2699,8 +2908,11 @@ namespace Overlay
 		// Audio Bridge ASIO driver (AmpliTube standalone, TONE3000, a DAW). On top, the link's own settings, the
 		// same whichever plays (what is connected, latency, late buffers, the safety buffer, compare with the
 		// game's amp); under it a tab for each. The page opens on the tab whose app holds the link.
+		// Tone designer needs the height, so on its tab the title and tabs share one row and the Amp link card
+		// folds into a one-line status bar (click it to open the card); External app keeps the card open.
 		enum class AmpTab { ToneDesigner, ExternalApp };
 		AmpTab g_ampTab = AmpTab::ToneDesigner;
+		bool g_ampLinkOpen = false;   // Tone designer tab: the Amp link card shown in full (session only)
 
 		void AmpLinkCard(const ExternalAmp::Snapshot& amp)
 		{
@@ -2795,12 +3007,75 @@ namespace Overlay
 			EndCard();
 		}
 
-		// Two tabs as a segmented strip.
-		void AmpTabs()
+		// The Amp link card folded to one line: what plays, the format and late buffers, and a chevron. The whole bar
+		// opens and folds the card under it.
+		void AmpLinkBar(const ExternalAmp::Snapshot& amp)
+		{
+			const AmpLink::Status& link = amp.link;
+			const float width = ImGui::GetContentRegionAvail().x;
+			const float height = ImGui::GetFrameHeight() + 6.0f;
+			const ImVec2 at = ImGui::GetCursorScreenPos();
+			if (ImGui::InvisibleButton("##ampLinkBar", ImVec2(width, height))) g_ampLinkOpen = !g_ampLinkOpen;
+			const bool hovered = ImGui::IsItemHovered();
+			Hint(g_ampLinkOpen ? "Fold the amp link settings back into this line." : "The amp link's settings: extra safety buffer, compare with the game's amp, and what the numbers mean.");
+
+			std::string summary;
+			ImU32 dot = Color::Muted;
+			if (!amp.proxyLoaded) { summary = "Rocksmith Audio Bridge ASIO is not loaded"; dot = Color::Warn; }
+			else {
+				const bool toneDesigner = link.guestPresent && VstHostLink::IsHostGuest(link.guestName);
+				const std::string name = toneDesigner ? "Tone designer" : link.guestName[0] ? link.guestName : "an amp sim";
+				if (amp.comparing) { summary = "The game's amp (comparing)"; dot = Color::Warn; }
+				else if (link.connected) { summary = name; dot = Color::Good; }
+				else if (link.guestPresent) { summary = name + " (audio stopped)"; dot = Color::Warn; }
+				else summary = "The game's amp (nothing connected)";
+				char text[96];
+				if (link.frames > 0) {
+					sprintf_s(text, "   48 kHz, %d samples, +%.1f ms", link.frames, link.frames * (link.latencyBlocks > 1 ? 2 : 1) * 1000.0 / AmpLink::kSampleRate);
+					summary += text;
+				}
+				if (amp.safetyBuffer) summary += ", safety buffer on";
+			}
+
+			ImDrawList* list = ImGui::GetWindowDrawList();
+			const ImVec2 end(at.x + width, at.y + height);
+			list->AddRectFilled(at, end, hovered ? Color::Hover : Color::Card, 6.0f);
+			list->AddRect(at, end, Color::CardEdge, 6.0f);
+			ImFont* caption = GetFonts().caption ? GetFonts().caption : ImGui::GetFont();
+			const float textY = at.y + (height - caption->FontSize) * 0.5f;
+			float x = at.x + 12.0f;
+			list->AddText(caption, caption->FontSize, ImVec2(x, textY), Color::Faint, "AMP LINK");
+			x += caption->CalcTextSizeA(caption->FontSize, FLT_MAX, 0.0f, "AMP LINK").x + 14.0f;
+			list->AddCircleFilled(ImVec2(x + 4.0f, at.y + height * 0.5f), 4.0f, dot, 12);
+			x += 16.0f;
+
+			// Right: late buffers (amber once there are any), then the chevron.
+			float right = end.x - 12.0f;
+			const float chevron = 4.5f, cy = at.y + height * 0.5f;
+			const float cx = right - chevron;
+			if (g_ampLinkOpen) list->AddTriangleFilled(ImVec2(cx - chevron, cy + chevron * 0.5f), ImVec2(cx + chevron, cy + chevron * 0.5f), ImVec2(cx, cy - chevron * 0.5f), Color::Muted);
+			else list->AddTriangleFilled(ImVec2(cx - chevron, cy - chevron * 0.5f), ImVec2(cx + chevron, cy - chevron * 0.5f), ImVec2(cx, cy + chevron * 0.5f), Color::Muted);
+			right -= 2.0f * chevron + 12.0f;
+			if (amp.proxyLoaded) {
+				char late[48];
+				sprintf_s(late, link.lateBlocks == 1 ? "1 late buffer" : "%u late buffers", link.lateBlocks);
+				const float lateW = caption->CalcTextSizeA(caption->FontSize, FLT_MAX, 0.0f, late).x;
+				right -= lateW;
+				list->AddText(caption, caption->FontSize, ImVec2(right, textY), link.lateBlocks > 0 ? Color::Warn : Color::Muted, late);
+				right -= 16.0f;
+			}
+			list->PushClipRect(ImVec2(x, at.y), ImVec2(std::max(x, right), end.y), true);
+			list->AddText(caption, caption->FontSize, ImVec2(x, textY), Color::Text, summary.c_str());
+			list->PopClipRect();
+			ImGui::SetCursorScreenPos(ImVec2(at.x, end.y));
+			ImGui::Dummy(ImVec2(0, 4));
+		}
+
+		// Two tabs as a segmented strip, `width` wide at the cursor; returns its height.
+		float AmpTabs(float width)
 		{
 			static const char* const labels[] = { "Tone designer", "External app" };
 			const float height = ImGui::GetFrameHeight() + 4.0f;
-			const float width = ImGui::GetContentRegionAvail().x;
 			const ImVec2 at = ImGui::GetCursorScreenPos();
 			ImDrawList* list = ImGui::GetWindowDrawList();
 			list->AddRectFilled(at, ImVec2(at.x + width, at.y + height), Color::Card, 6.0f);
@@ -2818,22 +3093,45 @@ namespace Overlay
 				const ImVec2 size = ImGui::CalcTextSize(labels[i]);
 				list->AddText(ImVec2(tab.x + (width * 0.5f - size.x) * 0.5f, tab.y + (height - size.y) * 0.5f), on ? Color::Text : Color::Muted, labels[i]);
 			}
-			ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + height));
-			ImGui::Dummy(ImVec2(0, 6));
+			return height;
 		}
 
 		void AmpSimPage()
 		{
 			const ExternalAmp::Snapshot amp = ExternalAmp::GetSnapshot();
-			PageHeader("Amp sim", "Play through an amp sim instead of the game's amp: VST3 plugins in Tone designer, or an app on Rocksmith Audio Bridge ASIO. Rocksmith keeps reading your clean signal.");
 			// The first time the page opens this session, the tab of whatever holds the link.
 			static bool chosen = false;
 			if (!chosen && amp.proxyLoaded) {
 				chosen = true;
 				if (amp.link.guestPresent && !VstHostLink::IsHostGuest(amp.link.guestName)) g_ampTab = AmpTab::ExternalApp;
 			}
-			AmpLinkCard(amp);
-			AmpTabs();
+
+			// Title and a one-line description on the left, the tabs on the right of the same row.
+			const ImVec2 at = ImGui::GetCursorScreenPos();
+			const float width = ImGui::GetContentRegionAvail().x;
+			const float tabsW = std::min(360.0f, std::max(220.0f, width * 0.32f));
+			const float tabsH = ImGui::GetFrameHeight() + 4.0f;   // AmpTabs' height
+			ImGui::BeginGroup();
+			ImGui::PushFont(GetFonts().title ? GetFonts().title : ImGui::GetFont());
+			ImGui::TextUnformatted("Amp sim");
+			ImGui::PopFont();
+			ImGui::PushFont(GetFonts().caption ? GetFonts().caption : ImGui::GetFont());
+			ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Color::Muted));
+			ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + std::max(120.0f, width - tabsW - 24.0f));
+			ImGui::TextUnformatted("Play through an amp sim instead of the game's amp: VST3 plugins in Tone designer, or an app on Rocksmith Audio Bridge ASIO.");
+			ImGui::PopTextWrapPos();
+			ImGui::PopStyleColor();
+			ImGui::PopFont();
+			ImGui::EndGroup();
+			const float headH = ImGui::GetItemRectSize().y;
+			const float rowH = std::max(headH, tabsH);
+			ImGui::SetCursorScreenPos(ImVec2(at.x + width - tabsW, at.y + (rowH - tabsH) * 0.5f));
+			AmpTabs(tabsW);
+			ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + rowH + 8.0f));
+			ImGui::Dummy(ImVec2(0, 0));
+
+			if (g_ampTab == AmpTab::ToneDesigner) AmpLinkBar(amp);
+			if (g_ampTab == AmpTab::ExternalApp || g_ampLinkOpen) AmpLinkCard(amp);
 			if (g_ampTab == AmpTab::ToneDesigner) ToneDesignerTab();
 			else ExternalAppTab(amp);
 		}
@@ -2883,6 +3181,77 @@ namespace Overlay
 		}
 
 		// A switch that is checked for a few seconds and undone if the new device does not play.
+		// ---- Interface switching ----------------------------------------------------------------------------------
+		// Which ASIO interface the bridge opens, switched live: RS_ASIO.ini keeps naming the bridge, so the game never
+		// notices. The switch parks the game on the bridge's virtual clock, releases the old driver and opens the new
+		// one (engine op 25, OutputTap::TryRebindProxyOutput / TryPromoteProxyOutput). A driver that will not open
+		// (busy in another app, a buffer size it refuses) costs nothing: the previous interface is opened again and
+		// the reason shown. Only a switch that worked is saved (HKCU Target), so the next launch starts there.
+
+		// Every 32-bit ASIO driver installed, except the bridge itself: what RS_ASIO itself could open.
+		std::vector<std::wstring> InstalledAsioDrivers()
+		{
+			static std::vector<std::wstring> cached;
+			static ULONGLONG readAt = 0;
+			if (readAt != 0 && GetTickCount64() - readAt < 3000) return cached;
+			readAt = GetTickCount64();
+			cached.clear();
+			HKEY asio{};
+			if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ASIO", 0, KEY_READ | KEY_WOW64_32KEY, &asio) != ERROR_SUCCESS) return cached;
+			wchar_t name[256];
+			for (DWORD index = 0;; ++index) {
+				DWORD length = 256;
+				if (RegEnumKeyExW(asio, index, name, &length, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
+				if (_wcsicmp(name, L"Rocksmith Audio Bridge ASIO") != 0 && _wcsicmp(name, L"Rocksmith Audio Bridge") != 0) cached.push_back(name);
+			}
+			RegCloseKey(asio);
+			std::sort(cached.begin(), cached.end(), [](const std::wstring& a, const std::wstring& b) { return _wcsicmp(a.c_str(), b.c_str()) < 0; });
+			return cached;
+		}
+
+		void SaveInterfaceTarget(const std::wstring& driver)
+		{
+			HKEY key{};
+			if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\RSMods\\AsioProxy", 0, nullptr, 0, KEY_SET_VALUE | KEY_WOW64_32KEY, nullptr, &key, nullptr) != ERROR_SUCCESS) return;
+			RegSetValueExW(key, L"Target", 0, REG_SZ, reinterpret_cast<const BYTE*>(driver.c_str()), static_cast<DWORD>((driver.size() + 1) * sizeof(wchar_t)));
+			const DWORD one = 1;
+			RegSetValueExW(key, L"PreferReal", 0, REG_DWORD, reinterpret_cast<const BYTE*>(&one), sizeof(one));
+			RegCloseKey(key);
+		}
+
+		// 0 idle, 1 switching, 2 switched, 3 refused and back on the previous one, 4 refused and nothing open.
+		std::atomic<int> g_interfaceState{ 0 };
+		std::mutex g_interfaceMessageMutex;
+		std::string g_outputSwitchMessage;   // SwitchInterface, shown on Switch output
+		std::string g_inputSwitchMessage;    // SwitchInputInterface, shown on Guitar input
+
+		void SwitchInterface(const std::wstring& driver, const std::wstring& previous)
+		{
+			g_interfaceState.store(1);
+			std::thread([driver, previous] {
+				int state = 2;
+				std::string message;
+				if (SUCCEEDED(BridgeControl(25, driver.c_str()).result)) {
+					SaveInterfaceTarget(driver);
+					message = "Now on " + Utf8(driver) + ". It is remembered for the next launch.";
+				}
+				else {
+					// The proxy's own reason (busy, refused the buffer size...), read before the fallback clears it.
+					const std::wstring why = Audio::OutputTap::ProxyBindError();
+					const bool back = !previous.empty() && SUCCEEDED(BridgeControl(25, previous.c_str()).result);
+					state = back ? 3 : 4;
+					message = (why.empty() ? Utf8(driver) + " would not open." : Utf8(why))
+						+ (back ? " Back on " + Utf8(previous) + "." : " Pick an interface to try again.");
+				}
+				LOG_INFO("(AUDIO BRIDGE) Interface switch to " << Utf8(driver) << ": " << message << std::endl);
+				{
+					std::lock_guard<std::mutex> lock(g_interfaceMessageMutex);
+					g_outputSwitchMessage = message;
+				}
+				g_interfaceState.store(state);
+			}).detach();
+		}
+
 		struct PendingSwitch
 		{
 			bool active = false;
@@ -3002,11 +3371,41 @@ namespace Overlay
 			else if (endpoint == L"(silent)") { current = "No output"; state = "Silent"; stateColor = Color::Bad; }
 			else if (switching) { current = "Switching"; state = "Switching"; stateColor = Color::Warn; }
 
+			// The real ASIO device refused to open this launch, so the proxy runs on its virtual clock and the
+			// guitar is silent. Without this the card reads "ASIO" in green and the player only notices "no input".
+			// The proxy clears the error once the device binds, so it is only shown while it still applies.
+			const std::wstring bindError = proxy ? Audio::OutputTap::ProxyBindError() : std::wstring();
+			static std::wstring loggedBindError;
+			if (!bindError.empty() && bindError != loggedBindError) {
+				loggedBindError = bindError;
+				LOG_ERROR("(AUDIO BRIDGE) " << Utf8(bindError) << std::endl);
+			}
+			if (!bindError.empty() && !routing && !session && !switching) { current = asioName; state = "Not open"; stateColor = Color::Bad; }
+
 			BeginCard("Playing to");
 			ImGui::PushFont(GetFonts().title);
 			ImGui::TextUnformatted(current.c_str());
 			ImGui::PopFont();
 			StatusPill(state, stateColor);
+			// A setup that crashed the game is not reopened at boot (the driver's last-known-good guard); say what happened.
+			static std::string safeBootNotice;
+			static uint64_t safeBootPolled = 0;
+			if (proxy && GetTickCount64() - safeBootPolled > 1000) { safeBootPolled = GetTickCount64(); safeBootNotice = Audio::OutputTap::ProxySafeBootNotice(); }
+			if (!safeBootNotice.empty()) {
+				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Color::Warn));
+				ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + RowWidth());
+				ImGui::TextUnformatted(safeBootNotice.c_str());
+				ImGui::PopTextWrapPos();
+				ImGui::PopStyleColor();
+			}
+			if (!bindError.empty()) {
+				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Color::Bad));
+				ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + RowWidth());
+				// No restart needed: picking it again in Switch output binds it live (PromoteToAsio / SwitchInterface).
+				ImGui::TextUnformatted((Utf8(bindError) + " Plug it in, or close other apps using it (its control app, a DAW, OBS), then pick it in Switch output below. No restart needed.").c_str());
+				ImGui::PopTextWrapPos();
+				ImGui::PopStyleColor();
+			}
 			Meter("Left", MeterFraction(live.status.outputPeak[0]), "The game's left-channel output level, after the volume cap.");
 			Meter("Right", MeterFraction(live.status.outputPeak[1]), "The game's right-channel output level, after the volume cap.");
 			EndCard();
@@ -3019,33 +3418,59 @@ namespace Overlay
 				EndCard();
 				return;
 			}
-			Caption("Moves the game's sound to another device now, without restarting. It is remembered: next launch starts there if the device is plugged in. Pick the ASIO entry to go back.");
+			Caption("Moves the game's sound to another device now, without restarting. An ASIO interface also takes the guitar, unless Guitar input below names another one. It is remembered: next launch starts there if it is plugged in.");
 			if (!snapshot.ok) Caption("Looking for devices...");
 
 			const bool unidentified = snapshot.asioUnidentified;
+			// The list is grouped (ASIO interfaces, then Windows devices) under small subheaders, with rows packed
+			// closer than the page's default spacing so a long device list stays short.
+			ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, 2.0f));
 			ImGui::BeginDisabled(pending.active);
 			if (canRoute) {
-				// The ASIO interface itself. Bound already: stop any route so the game plays straight out of it
-				// again. Virtual (booted without it): bind it for input and output, see PromoteToAsio.
+				ImGui::Dummy(ImVec2(0, 4));
+				SectionLabel("ASIO interfaces");
+				ImGui::Dummy(ImVec2(0, 2));
+				// Every ASIO interface (what RS_ASIO can open). The current one: stop any route so the game plays straight
+				// out of it again, or, when the bridge is virtual (booted without it), bind it (PromoteToAsio). Another
+				// one: switch the bridge to it live (SwitchInterface), falling back to the current one if it will not open.
 				const bool virtualProxy = Audio::OutputTap::ProxyOutputMode() == 1;
-				const std::string asioLabel = asioName + "##asio";
-				const bool asioClicked = ChoiceRow("asio", asioLabel.c_str(), "ASIO, lowest latency", !routing && !virtualProxy);
-				if (asioClicked && virtualProxy && !asioDriver.empty()) {
-					pending = PendingSwitch{};
-					pending.active = true;
-					pending.promote = true;
-					pending.name = asioName;
-					pending.started = GetTickCount64();
-					OutputSay("Opening " + asioName + " for input and output...", false);
-					PromoteToAsio(asioDriver);
-				}
-				else if (asioClicked && routing) {
-					BridgeControl(22);
-					OutputSay("Back on " + asioName + ".", false);
+				const bool interfaceBusy = g_interfaceState.load() == 1;
+				for (const std::wstring& driver : InstalledAsioDrivers()) {
+					const bool isCurrent = _wcsicmp(driver.c_str(), asioDriver.c_str()) == 0;
+					const std::string name = Utf8(driver);
+					const std::string label = name + "##asio-" + name;
+					const bool clicked = ChoiceRow(("asio-" + name).c_str(), label.c_str(), isCurrent ? "ASIO, lowest latency" : "ASIO", isCurrent && !routing && !virtualProxy && !interfaceBusy);
+					if (!clicked || interfaceBusy) continue;
+					if (isCurrent && virtualProxy) {
+						pending = PendingSwitch{};
+						pending.active = true;
+						pending.promote = true;
+						pending.name = name;
+						pending.started = GetTickCount64();
+						OutputSay("Opening " + name + " for input and output...", false);
+						PromoteToAsio(driver);
+					}
+					else if (isCurrent && routing) {
+						BridgeControl(22);
+						OutputSay("Back on " + name + ".", false);
+					}
+					else if (!isCurrent) {
+						if (routing) BridgeControl(22);
+						OutputSay(std::string(), false);
+						SwitchInterface(driver, asioDriver);
+					}
 				}
 			}
 			ImGui::BeginDisabled(unidentified && !snapshot.asioDrivers.empty());
+			bool windowsLabelled = false;
 			for (const auto& device : snapshot.devices) {
+				if (canRoute && device.isAsioTwin) continue;   // see below
+				if (!windowsLabelled) {
+					ImGui::Dummy(ImVec2(0, 6));
+					SectionLabel("Windows devices");
+					ImGui::Dummy(ImVec2(0, 2));
+					windowsLabelled = true;
+				}
 				// The ASIO interface is listed once, as the ASIO entry above; its Windows endpoint is the same box and
 				// is hidden, bound or not. While bound it would silence the interface; while unbound the ASIO entry
 				// is the right pick because it moves the input too.
@@ -3079,7 +3504,12 @@ namespace Overlay
 			}
 			ImGui::EndDisabled();
 			ImGui::EndDisabled();
+			ImGui::PopStyleVar();
+			ImGui::Dummy(ImVec2(0, 2));
 
+			if (!snapshot.asioWrapper.empty() && canRoute)
+				Caption((snapshot.asioWrapper + " wraps your Windows devices rather than being one. A device it is using itself will not open here; switch that device off in "
+					+ snapshot.asioWrapper + "'s own panel, or pick another.").c_str());
 			if (unidentified && !snapshot.asioDrivers.empty()) {
 				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Color::Warn));
 				ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + RowWidth());
@@ -3087,6 +3517,22 @@ namespace Overlay
 					+ "), and playing to that device would silence it.").c_str());
 				ImGui::PopTextWrapPos();
 				ImGui::PopStyleColor();
+			}
+			{
+				std::string switchMessage;
+				{
+					std::lock_guard<std::mutex> lock(g_interfaceMessageMutex);
+					switchMessage = g_outputSwitchMessage;
+				}
+				const int state = g_interfaceState.load();
+				if (state == 1) switchMessage = "Switching interface...";
+				if (!switchMessage.empty()) {
+					ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(state >= 3 ? Color::Bad : Color::Muted));
+					ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + RowWidth());
+					ImGui::TextUnformatted(switchMessage.c_str());
+					ImGui::PopTextWrapPos();
+					ImGui::PopStyleColor();
+				}
 			}
 			if (!g_outputMessage.empty()) {
 				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(g_outputMessageIsError ? Color::Bad : Color::Muted));
@@ -3173,10 +3619,269 @@ namespace Overlay
 			EndCard();
 		}
 
+		// ---- Channel routing (ticket #109) ------------------------------------------------------------------
+		// Which channels of the ASIO interface the game's output and each player's input use. RS_ASIO.ini keeps
+		// asking for the same channels; the bridge maps them onto the ones picked here and applies a change at
+		// once (a short gap while it re-creates the interface's buffers), saved per interface for the next launch.
+		// One interface for every role for now: per-player interfaces are step 2 of the ticket.
+
+
+		// 0 idle, 1 applying, 2 applied, 3 saved for next launch, 4 failed.
+		std::atomic<int> g_routeState{ 0 };
+
+		void ApplyRoute(int role, long channel)
+		{
+			g_routeState.store(1);
+			std::thread([role, channel] {
+				const int result = Audio::OutputTap::SetProxyRoute(role, channel);
+				g_routeState.store(result == 1 ? 2 : result == 2 ? 3 : 4);
+			}).detach();
+		}
+
+		void SwitchInputInterface(int role, const std::wstring& driver)
+		{
+			g_interfaceState.store(1);
+			std::thread([role, driver] {
+				const int result = Audio::OutputTap::SetProxyInputTarget(role, driver);
+				const std::string error = Audio::OutputTap::ProxyInputError();
+				static const char* const names[4] = { "the output", "Player 1", "Player 2", "the mic" };
+				const std::string who = role >= 1 && role <= 3 ? names[role] : "every input";
+				std::string message;
+				if (result == 0) message = "Could not change the interface for " + who + ".";
+				else if (!error.empty()) message.clear();   // the card shows the input error itself
+				else if (driver.empty()) message = who + " comes from the output interface again.";
+				else message = who + " now comes from " + Utf8(driver) + (result == 2 ? " once the output interface opens." : ".");
+				if (!message.empty()) message[0] = static_cast<char>(toupper(static_cast<unsigned char>(message[0])));
+				LOG_INFO("(AUDIO BRIDGE) Input interface for " << who << ": " << (driver.empty() ? std::string("same as output") : Utf8(driver)) << ", result " << result << (error.empty() ? "" : ", " + error) << std::endl);
+				{
+					std::lock_guard<std::mutex> lock(g_interfaceMessageMutex);
+					g_inputSwitchMessage = message;
+				}
+				g_interfaceState.store(result == 0 ? 4 : 2);
+			}).detach();
+		}
+
+		// "In sync" / "Catching up" for a role's input on another clock (its own input interface, or the Real Tone
+		// Cable), with the numbers on hover. Nothing when it shares the output's clock: there is nothing to drift.
+		// The pill's state for a role, shared by the clock row and the role's fold-out header. `shown` false: the
+		// input shares the output's clock.
+		struct ClockView
+		{
+			bool shown = false;
+			bool settled = false;
+			char detail[256]{};
+		};
+
+		ClockView InputClockState(int role)
+		{
+			ClockView view;
+			const Audio::OutputTap::InputClock clock = Audio::OutputTap::ProxyInputClock(role);
+			if (clock.source == 0) return view;
+			// "Catching up": not delivering yet, or a dropout in the last 5 s, or the correction near its limit.
+			static unsigned lastUnderruns[4]{};
+			static ULONGLONG lastDropoutAt[4]{};
+			const size_t r = static_cast<size_t>(role & 3);
+			if (clock.underruns != lastUnderruns[r]) { lastUnderruns[r] = clock.underruns; lastDropoutAt[r] = GetTickCount64(); }
+			const bool recentDropout = lastDropoutAt[r] != 0 && GetTickCount64() - lastDropoutAt[r] < 5000;
+			view.shown = true;
+			view.settled = clock.primed && !recentDropout && std::abs(clock.ppm) < 2500;
+			sprintf_s(view.detail, "%s runs on its own clock. Correcting by %+d ppm (%.3f%%); %d frames buffered (margin %d); %u dropout%s since it opened.",
+				clock.source == 1 ? "Its interface" : "The Real Tone Cable", clock.ppm, clock.ppm / 10000.0, clock.fill, clock.margin, clock.underruns, clock.underruns == 1 ? "" : "s");
+			return view;
+		}
+
+		void InputClockPill(int role, const char* label)
+		{
+			const ClockView clock = InputClockState(role);
+			if (!clock.shown) return;
+			PillRow(label, clock.settled ? "In sync" : "Catching up", clock.settled ? Color::Good : Color::Warn, clock.detail);
+		}
+
+		// ---- Routing (ticket #109) ----------------------------------------------------------------------------
+		// Each part of the game's audio picks an interface and a channel, the way RS_ASIO.ini can, but live: the output
+		// pair on the output interface (Switch output above picks that interface), and each input (Player 1, Player 2,
+		// the mic) on any ASIO interface, the output's by default. RS_ASIO.ini keeps naming the bridge at fixed
+		// channels; the bridge maps them. An input on another interface runs on that interface's clock and is kept in
+		// time with the output (SplitInput); its pill shows how well. Changes apply at once with a short gap.
+		void ChannelRoutingCard()
+		{
+			if (!Audio::OutputTap::ProxyAvailable()) return;
+			struct View
+			{
+				bool viaBridge[4]{};
+				long host[4]{};
+				long device[4]{};
+				std::vector<std::string> names[4];     // per role: its interface's channel names (role 0 = outputs)
+				std::wstring interfaceOf[4];           // per input role: its own input interface, empty = the output's
+			};
+			// The route reads open RS_ASIO.ini and the registry: once a second, and right after a change lands.
+			static View view;
+			static ULONGLONG polled = 0;
+			static int lastRouteState = 0, lastInterfaceState = 0;
+			const int state = g_routeState.load();
+			const int interfaceState = g_interfaceState.load();
+			if (state != 1 && interfaceState != 1 && (GetTickCount64() - polled > 1000 || state != lastRouteState || interfaceState != lastInterfaceState)) {
+				View fresh;
+				for (int role = 0; role < 4; ++role) {
+					fresh.viaBridge[role] = Audio::OutputTap::ProxyRoute(role, fresh.host[role], fresh.device[role]);
+					fresh.names[role] = Audio::OutputTap::ProxyRoleChannelNames(role);
+					if (role > 0) fresh.interfaceOf[role] = Audio::OutputTap::ProxyInputTarget(role);
+				}
+				view = std::move(fresh);
+				polled = GetTickCount64();
+			}
+			lastRouteState = state;
+			lastInterfaceState = interfaceState;
+
+			BeginCard("Routing");
+			bool anyNames = !view.names[0].empty();
+			for (int role = 1; role < 4; ++role) anyNames = anyNames || !view.names[role].empty();
+			if (!anyNames) {
+				Caption("Pick each part's interface and channels here once an ASIO interface is open. The bridge is on speaker mode right now.");
+				EndCard();
+				return;
+			}
+			const std::wstring outputInterface = ReadPassthroughOutputName();
+			Caption("Which interface and channel each part uses. Inputs can come from any ASIO interface; one other than the output's is kept in time with it, adding a few milliseconds. Changes apply at once and are remembered.");
+
+			const std::vector<std::wstring> drivers = InstalledAsioDrivers();
+			ImGui::BeginDisabled(state == 1 || interfaceState == 1);
+			if (view.viaBridge[0] && view.names[0].size() >= 2) {
+				std::vector<std::string> labels;
+				std::vector<long> channels;
+				int index = -1;
+				for (long channel = 0; channel + 1 < static_cast<long>(view.names[0].size()); channel += 2) {
+					if (channel == view.device[0]) index = static_cast<int>(labels.size());
+					labels.push_back(view.names[0][channel] + " / " + view.names[0][channel + 1]);
+					channels.push_back(channel);
+				}
+				if (index < 0 && view.device[0] + 1 < static_cast<long>(view.names[0].size())) {   // an odd pair saved earlier
+					index = static_cast<int>(labels.size());
+					labels.push_back(view.names[0][view.device[0]] + " / " + view.names[0][view.device[0] + 1]);
+					channels.push_back(view.device[0]);
+				}
+				// The output pair stands apart from the inputs: its own inset strip with a speaker icon.
+				BeginInset(ImGui::GetFrameHeight(), Glyph::Speaker, Color::AccentHi);
+				if (DropdownRow("Output pair", &index, labels, ("The pair of outputs of " + Utf8(outputInterface) + " the game's sound plays on. The interface itself is picked in Switch output above.").c_str()))
+					ApplyRoute(0, channels[static_cast<size_t>(index)]);
+				EndInset();
+			}
+			// The inputs share one strip of tabs (Player 1 | Player 2 | Mic) and only the selected role's rows show,
+			// without the role name on every label ("Interface", not "Player 1 interface"). Each tab has a muted
+			// monogram badge and an icon; red, amber and green are kept for status, so a tab only shows a coloured
+			// dot when its role has a clock state, and a problem on another tab still shows. The selected role is
+			// kept for the session (Player 1 first); the Mic tab only exists while RS_ASIO.ini sends the mic here.
+			static const char* const roleNames[4] = { "Output", "Player 1", "Player 2", "Mic" };
+			static const char* const roleBadges[4] = { "", "P1", "P2", "MIC" };
+			static const ImU32 roleTints[4] = { Color::AccentHi, Color::TintBlue, Color::TintCyan, Color::TintViolet };
+			static int selectedRole = 1;
+			std::string missing;   // the roles RS_ASIO.ini does not send through the bridge, named in the note below
+			std::vector<int> present;
+			for (int role = 1; role < 4; ++role) {
+				if (view.viaBridge[role]) { present.push_back(role); continue; }
+				const std::string name = role == 3 ? "the mic" : roleNames[role];
+				missing += missing.empty() ? name : " and " + name;
+			}
+			if (!present.empty()) {
+				ImGui::Spacing();
+				SectionLabel("Inputs");
+				std::vector<RoleTab> tabs;
+				std::vector<std::string> hints;
+				hints.reserve(present.size());
+				int tabIndex = 0;
+				for (size_t i = 0; i < present.size(); ++i) {
+					const int role = present[i];
+					if (role == selectedRole) tabIndex = static_cast<int>(i);
+					const ClockView clock = InputClockState(role);
+					hints.push_back(std::string("Where ") + (role == 3 ? "the mic" : roleNames[role]) + "'s input comes from."
+						+ (clock.shown ? std::string(clock.settled ? " In sync. " : " Catching up. ") + clock.detail : std::string()));
+					RoleTab tab;
+					tab.label = roleNames[role];
+					tab.badge = roleBadges[role];
+					tab.tint = roleTints[role];
+					tab.icon = role == 3 ? RoleIcon::Mic : RoleIcon::Guitar;
+					tab.hasStatus = clock.shown;
+					tab.status = clock.settled ? Color::Good : Color::Warn;
+					tabs.push_back(tab);
+				}
+				for (size_t i = 0; i < tabs.size(); ++i) tabs[i].hint = hints[i].c_str();
+				if (std::find(present.begin(), present.end(), selectedRole) == present.end()) tabIndex = 0;
+				RoleTabs("##roles", tabs.data(), static_cast<int>(tabs.size()), &tabIndex);
+				selectedRole = present[static_cast<size_t>(tabIndex)];
+
+				const int role = selectedRole;
+				ImGui::PushID(role);
+				// RS_ASIO.ini gives this role the same Channel as an earlier one, so there is one input for both and it
+				// follows that role. Picking it separately needs its own Channel= in RS_ASIO.ini.
+				int sharesWith = 0;
+				for (int earlier = 1; earlier < role; ++earlier)
+					if (view.viaBridge[earlier] && view.host[earlier] == view.host[role]) { sharesWith = earlier; break; }
+				// Interface: "Same as output" or any ASIO interface.
+				std::vector<std::string> interfaceLabels{ "Same as output" };
+				int interfaceIndex = 0;
+				for (size_t i = 0; i < drivers.size(); ++i) {
+					interfaceLabels.push_back(Utf8(drivers[i]));
+					if (!view.interfaceOf[role].empty() && _wcsicmp(drivers[i].c_str(), view.interfaceOf[role].c_str()) == 0) interfaceIndex = static_cast<int>(i) + 1;
+				}
+				const std::vector<std::string>& inputs = view.names[role];
+				int index = view.device[role] >= 0 && view.device[role] < static_cast<long>(inputs.size()) ? static_cast<int>(view.device[role]) : -1;
+
+				BeginTabBody();
+				ImGui::BeginDisabled(sharesWith != 0);
+				if (DropdownRow("Interface", &interfaceIndex, interfaceLabels, "Where this part's input comes from. Same as output: the interface the sound plays on.") && sharesWith == 0)
+					SwitchInputInterface(role, interfaceIndex == 0 ? std::wstring() : drivers[static_cast<size_t>(interfaceIndex - 1)]);
+				// Channel on that interface.
+				if (DropdownRow("Input channel", &index, inputs, "The input on that interface this part listens to.") && sharesWith == 0)
+					ApplyRoute(role, index);
+				ImGui::EndDisabled();
+				if (sharesWith != 0)
+					Caption((std::string(roleNames[role]) + " follows " + roleNames[sharesWith] + ": it has the same Channel in RS_ASIO.ini. Give it its own Channel there to pick it here.").c_str());
+				InputClockPill(role, "Clock");
+				EndTabBody();
+				ImGui::PopID();
+			}
+			ImGui::EndDisabled();
+			if (!missing.empty()) {
+				missing[0] = static_cast<char>(toupper(static_cast<unsigned char>(missing[0])));
+				Caption((missing + " show" + (missing.find(" and ") == std::string::npos ? "s" : "") + " up here once RS_ASIO.ini sends "
+					+ (missing.find(" and ") == std::string::npos ? "it" : "them") + " to Rocksmith Audio Bridge ASIO too.").c_str());
+			}
+
+			const std::string inputError = Audio::OutputTap::ProxyInputError();
+			if (!inputError.empty()) {
+				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Color::Warn));
+				ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + RowWidth());
+				ImGui::TextUnformatted(inputError.c_str());
+				ImGui::PopTextWrapPos();
+				ImGui::PopStyleColor();
+			}
+			std::string message;
+			ImU32 color = Color::Muted;
+			if (state == 1 || interfaceState == 1) message = "Applying...";
+			else {
+				{
+					std::lock_guard<std::mutex> lock(g_interfaceMessageMutex);
+					message = g_inputSwitchMessage;
+				}
+				if (state == 2) message = "Applied.";
+				else if (state == 3) message = "Saved. It applies when the interface opens.";
+				else if (state == 4) { message = "The interface would not take that channel. Check the Playing to card above."; color = Color::Bad; }
+			}
+			if (!message.empty()) {
+				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(color));
+				ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + RowWidth());
+				ImGui::TextUnformatted(message.c_str());
+				ImGui::PopTextWrapPos();
+				ImGui::PopStyleColor();
+			}
+			EndCard();
+		}
+
 		void OutputPage(const LiveState& live)
 		{
 			PageHeader("Output", "Where the game's sound goes and how loud it can get.");
 			OutputDeviceCard(live);
+			ChannelRoutingCard();
 			OutputBufferCard(live);
 
 			static bool seeded = false;
@@ -3510,20 +4215,37 @@ namespace Overlay
 		// height (plus header), never shorter than the sidebar, capped at 92% of the screen, eased so switching
 		// pages does not jump. Width stays user-resizable (remembered in imgui.ini). If the window would run off
 		// the bottom of the screen it is moved up.
+		// A page that fills the window (g_pageFillsHeight, Tone designer) instead lets the height be dragged too, and
+		// fills whatever it is. Until it is dragged it opens at the page's natural height (g_pageNaturalHeight: the
+		// board, or a long tone list, under the same 92% cap) rather than the cap itself, which left a tall empty
+		// library column; once dragged, that height is remembered for the session and eased to when the page opens.
 		static float pageContentHeight = 0.0f;
+		static float fillContentHeight = 0.0f;
 		static float shownHeight = 0.0f;
+		static float fillHeight = 0.0f;
+		static bool fillDragged = false;   // the fill page's height was set by dragging the edge
+		static bool fillPage = false;   // last frame's page filled the window
 		static ImVec2 lastPosition(-1.0f, -1.0f);
 		const ImGuiIO& io = ImGui::GetIO();
 		const float sidebarMinimum = 520.0f;   // nav items plus the "Press \ to hide" footer
-		const float wanted = std::min(kHeaderHeight + std::max(pageContentHeight, sidebarMinimum), io.DisplaySize.y * 0.92f);
+		const float naturalFill = std::min(kHeaderHeight + std::max(fillContentHeight, sidebarMinimum), io.DisplaySize.y * 0.92f);
+		fillHeight = std::clamp(fillDragged ? fillHeight : naturalFill, kHeaderHeight + sidebarMinimum, io.DisplaySize.y);
+		const float wanted = fillPage ? fillHeight : std::min(kHeaderHeight + std::max(pageContentHeight, sidebarMinimum), io.DisplaySize.y * 0.92f);
 		shownHeight = shownHeight <= 0.0f ? wanted : shownHeight + (wanted - shownHeight) * std::min(1.0f, io.DeltaTime * 14.0f);
+		if (std::fabs(wanted - shownHeight) < 0.5f) shownHeight = wanted;
+		const bool userHeight = fillPage && shownHeight == wanted;   // settled on a fill page: the height is the user's
 		ImGui::SetNextWindowSize(ImVec2(900, shownHeight), ImGuiCond_FirstUseEver);
-		ImGui::SetNextWindowSizeConstraints(ImVec2(700, shownHeight), ImVec2(4000, shownHeight));
+		if (userHeight) ImGui::SetNextWindowSizeConstraints(ImVec2(700, kHeaderHeight + sidebarMinimum), ImVec2(4000, io.DisplaySize.y));
+		else ImGui::SetNextWindowSizeConstraints(ImVec2(700, shownHeight), ImVec2(4000, shownHeight));
 		if (lastPosition.y >= 0.0f && lastPosition.y + shownHeight > io.DisplaySize.y - 8.0f)
 			ImGui::SetNextWindowPos(ImVec2(lastPosition.x, std::max(8.0f, io.DisplaySize.y - shownHeight - 8.0f)));
 		const bool visible = ImGui::Begin("Rocksmith Audio Bridge##overlay", open,
 			ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 		if (visible) {
+			if (userHeight && std::fabs(ImGui::GetWindowHeight() - shownHeight) >= 0.5f) {   // follows a drag of the edge
+				fillDragged = true;
+				fillHeight = shownHeight = ImGui::GetWindowHeight();
+			}
 			const LiveState& live = Poll();
 			Header(live, open);
 
@@ -3539,6 +4261,7 @@ namespace Overlay
 			ImGui::BeginChild("##page", ImVec2(0, 0), false, ImGuiWindowFlags_AlwaysUseWindowPadding);
 			// Left on the Amp sim page when the driver is not loaded (it is hidden from the sidebar then).
 			if (page == Page::AmpSim && !ExternalAmp::GetSnapshot().proxyLoaded) page = Page::NoteByNote;
+			g_pageFillsHeight = false;
 			switch (page) {
 			case Page::NoteByNote: NoteByNotePage(); break;
 			case Page::Mixer: MixerPage(live); break;
@@ -3552,7 +4275,10 @@ namespace Overlay
 			}
 			static const char* const pageNames[] = { "Note by Note", "Mixer", "Input", "Output", "Record", "General", "Debug", "Drop Pedal", "Amp sim" };
 			g_pageName = pageNames[static_cast<int>(page)];
-			pageContentHeight = ImGui::GetCursorPosY() + 20.0f;   // content plus bottom padding, for next frame's height
+			// Content plus bottom padding, for next frame's height; a page that fills the window gets the most allowed.
+			fillPage = g_pageFillsHeight;
+			if (!fillPage) pageContentHeight = ImGui::GetCursorPosY() + 20.0f;
+			else fillContentHeight = g_pageNaturalHeight;
 			ImGui::EndChild();
 			ImGui::PopStyleVar();
 

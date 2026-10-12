@@ -16,6 +16,7 @@
 #include "Mods/RiffRepeater.hpp"
 #include "NoteByNote/Ui/NoteByNoteMenu.hpp"
 #include "NoteByNote/Ui/NoteByNoteHudLabel.hpp"
+#include "ToneDesigner/ToneSwitchPopup.hpp"
 #include "NoteByNote/Host/NoteByNoteMode.hpp"
 #include "Mods/AudioDevices.hpp"
 #include "Mods/BugPrevention.hpp"

@@ -90,6 +90,12 @@ namespace RSMods
 				return;
 			}
 
+			if (RsAsioIniSetup.TryRunRestoreCommand(arguments, out int restoreExitCode))
+			{
+				Environment.ExitCode = restoreExitCode;
+				return;
+			}
+
 			if (NoteByNoteMenuInstaller.TryRun(arguments, out int menuInstallExitCode))
 			{
 				Environment.ExitCode = menuInstallExitCode;

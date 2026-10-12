@@ -386,6 +386,19 @@ namespace Audio::SharedOutput
 			else response.result = Settings::SetNoteByNoteDetectionVisible(enabled != 0) ? S_OK : E_FAIL;
 			return true;
 		}
+		case 30:
+			// Input interface (DLL/AsioProxy/SplitInput.hpp): the guitar from a second ASIO interface, or "" for the output
+			// interface. Saved and applied live by the proxy; NOT_READY when it could not save. Whether the input
+			// interface actually opened is OutputTap::ProxyInputError (the settings app re-reads it after a moment).
+			// Value "<role>|<driver>" (role 1 Player 1, 2 Player 2, 3 Mic, -1 every input); a bare "<driver>" is every input.
+			{
+				std::wstring value = request.value;
+				int role = -1;
+				const size_t bar = value.find(L'|');
+				if (bar != std::wstring::npos) { role = _wtoi(value.substr(0, bar).c_str()); value = value.substr(bar + 1); }
+				response.result = OutputTap::SetProxyInputTarget(role, value) != 0 ? S_OK : HRESULT_FROM_WIN32(ERROR_NOT_READY);
+			}
+			return true;
 		case 28:
 			// Force the game to re-enumerate its song library (pick up newly added psarc/CDLC without a
 			// restart). Same mechanism as the in-game ForceReEnumeration keypress: it flips the Steam DLC

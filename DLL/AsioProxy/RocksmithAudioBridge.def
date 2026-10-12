@@ -26,3 +26,15 @@ EXPORTS
 	RSModsAsio_GetAmpLinkStatus
 	RSModsAsio_SetAmpLinkLatency
 	RSModsAsio_SetAmpLinkPitch
+	RSModsAsio_GetBindError
+	RSModsAsio_GetRoute
+	RSModsAsio_GetChannelCount
+	RSModsAsio_GetChannelName
+	RSModsAsio_SetRoute
+	RSModsAsio_GetRoleInputTarget
+	RSModsAsio_SetRoleInputTarget
+	RSModsAsio_GetInputError
+	RSModsAsio_GetSafeBootNotice
+	RSModsAsio_GetRoleInputClock
+	RSModsAsio_GetRoleChannelCount
+	RSModsAsio_GetRoleChannelName

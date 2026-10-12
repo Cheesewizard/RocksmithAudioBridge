@@ -81,6 +81,7 @@ namespace RSMods
 			page.Controls.Add(setup);
 
 			InitializeRecordingFolderSetup(page);
+			InitializeBugReportSetup(page);
 
 			page.VisibleChanged += (sender, args) => { if (page.Visible) RefreshAudioBridgeSetup(); };
 			// The window can sit open while Rocksmith starts or stops; re-check whenever it comes back to the front.
@@ -266,16 +267,139 @@ namespace RSMods
 
 		// ---- ASIO bridge driver ---------------------------------------------------------------------------------
 		// One-time, game-closed setup of the "Rocksmith Audio Bridge ASIO" proxy: register it with Windows (one admin
-		// prompt) and record which real interface it wraps. RS_ASIO.ini is never written or offered for editing;
-		// RS_ASIO setup is the user's.
+		// prompt) and record which real interface it wraps. Pointing RS_ASIO.ini at it is the Audit tab's "Set up for
+		// me" (RsAsioIniSetup); this row never writes the file.
 
 		private static string ProxyDllPath => Path.Combine(GenUtil.GetRSDirectory(), "RocksmithAudioBridgeAsio.dll");
+
+		private ComboBox asioInterfacePicker;
+		private bool switchingInterface;
 
 		private void InitializeAsioDriverSetup(SetupCard card)
 		{
 			asioDriverDivider = AddSetupDivider(card);
-			asioDriverStatus = new Label { Text = "", Font = StudioTheme.Small, ForeColor = OverlayLook.Muted, AutoSize = true, MaximumSize = new Size(card.LogicalToDeviceUnits(SetupCardWidth - SetupLabelWidth - 40), 0), Margin = new Padding(0, card.LogicalToDeviceUnits(6), 0, 0) };
-			asioDriverRow = AddSetupRow(card, "ASIO bridge driver", "Records and switches output under ASIO.", asioDriverStatus);
+			int width = card.LogicalToDeviceUnits(SetupCardWidth - SetupLabelWidth - 40);
+			var column = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0) };
+			asioInterfacePicker = new ComboBox { Width = width, AccessibleName = "ASIO interface" };
+			StudioTheme.StyleSelector(asioInterfacePicker);
+			asioInterfacePicker.SelectedIndexChanged += async (sender, args) =>
+			{
+				if (syncingAudioSetup || switchingInterface || asioInterfacePicker.SelectedItem == null) return;
+				await SwitchBridgeInterface(asioInterfacePicker.SelectedItem.ToString());
+			};
+			column.Controls.Add(asioInterfacePicker);
+			asioDriverStatus = new Label { Text = "", Font = StudioTheme.Small, ForeColor = OverlayLook.Muted, AutoSize = true, MaximumSize = new Size(width, 0), Margin = new Padding(0, card.LogicalToDeviceUnits(4), 0, 0) };
+			column.Controls.Add(asioDriverStatus);
+			asioDriverRow = AddSetupRow(card, "ASIO interface", "The interface the bridge opens for the guitar and the game's sound. Switches at once while Rocksmith runs.", column);
+
+			var inputColumn = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0, card.LogicalToDeviceUnits(10), 0, 0) };
+			asioInputPicker = new ComboBox { Width = width, AccessibleName = "Input interface" };
+			StudioTheme.StyleSelector(asioInputPicker);
+			asioInputPicker.SelectedIndexChanged += async (sender, args) =>
+			{
+				if (syncingAudioSetup || switchingInterface || asioInputPicker.SelectedIndex < 0) return;
+				await SwitchBridgeInputInterface(asioInputPicker.SelectedIndex == 0 ? "" : asioInputPicker.SelectedItem.ToString());
+			};
+			inputColumn.Controls.Add(asioInputPicker);
+			asioInputStatus = new Label { Text = "", Font = StudioTheme.Small, ForeColor = OverlayLook.Muted, AutoSize = true, MaximumSize = new Size(width, 0), Margin = new Padding(0, card.LogicalToDeviceUnits(4), 0, 0) };
+			inputColumn.Controls.Add(asioInputStatus);
+			asioInputRow = AddSetupRow(card, "Input interface", "Where the guitar comes from. A second interface is kept in time with the first, adding a few milliseconds.", inputColumn);
+		}
+
+		private ComboBox asioInputPicker;
+		private Label asioInputStatus;
+		private Control asioInputRow;
+		private const string SameAsOutput = "Same as output";
+
+		// Saves the input interface (HKCU InputTarget) and, with Rocksmith running, applies it live through engine op 30.
+		// An input interface that will not open costs nothing: the guitar keeps coming from the output interface and
+		// the overlay's Interface card says why.
+		private async System.Threading.Tasks.Task SwitchBridgeInputInterface(string driver)
+		{
+			switchingInterface = true;
+			asioInputPicker.Enabled = false;
+			try
+			{
+				AsioProxySetup.SelectInputTarget(driver);
+				AudioControlClient client = FindGameAudioClient();
+				string name = driver.Length == 0 ? "the output interface" : driver;
+				if (client == null) { asioInputStatus.Text = "Saved. The guitar comes from " + name + " next time Rocksmith starts."; asioInputStatus.ForeColor = OverlayLook.Good; return; }
+				try
+				{
+					await client.SendAsync(30, driver);
+					asioInputStatus.Text = "The guitar now comes from " + name + ". If it could not open, the in-game Output page says why.";
+					asioInputStatus.ForeColor = OverlayLook.Good;
+				}
+				catch (Exception error)
+				{
+					asioInputStatus.Text = "Saved, but Rocksmith did not take it now (" + error.Message.TrimEnd('.') + "). It applies next launch.";
+					asioInputStatus.ForeColor = OverlayLook.Warn;
+				}
+			}
+			finally
+			{
+				switchingInterface = false;
+				asioInputPicker.Enabled = true;
+			}
+		}
+
+		// Saves the bridge's interface (HKCU Target) and, with Rocksmith running, switches it live through the audio
+		// engine's op 25 (the overlay's Interface card does the same). A device that will not open costs nothing: the
+		// previous one is asked for again and stays saved.
+		private async System.Threading.Tasks.Task SwitchBridgeInterface(string driver)
+		{
+			string previous = AsioProxySetup.ReadTarget();
+			if (string.Equals(driver, previous, StringComparison.OrdinalIgnoreCase)) return;
+			switchingInterface = true;
+			asioInterfacePicker.Enabled = false;
+			try
+			{
+				AudioControlClient client = FindGameAudioClient();
+				if (client == null)
+				{
+					AsioProxySetup.SelectTarget(driver);
+					AsioProxySetup.SetPreferRealOutput(true);
+					ShowInterfaceStatus("Saved. Rocksmith opens " + driver + " next time it starts.", OverlayLook.Good);
+					return;
+				}
+				ShowInterfaceStatus("Switching to " + driver + "...", OverlayLook.Muted);
+				try
+				{
+					await client.SendAsync(25, driver);
+					AsioProxySetup.SelectTarget(driver);
+					AsioProxySetup.SetPreferRealOutput(true);
+					ShowInterfaceStatus("Now on " + driver + ". It is remembered for the next launch.", OverlayLook.Good);
+				}
+				catch (Exception error)
+				{
+					bool back = false;
+					if (!string.IsNullOrEmpty(previous))
+						try { await client.SendAsync(25, previous); back = true; } catch { }
+					ShowInterfaceStatus(driver + " would not open (" + error.Message.TrimEnd('.') + ")." + (back ? " Back on " + previous + "." : ""), OverlayLook.Warn);
+					syncingAudioSetup = true;
+					try { asioInterfacePicker.SelectedItem = previous; } finally { syncingAudioSetup = false; }
+				}
+			}
+			finally
+			{
+				switchingInterface = false;
+				asioInterfacePicker.Enabled = true;
+			}
+		}
+
+		private void ShowInterfaceStatus(string text, Color colour)
+		{
+			asioDriverStatus.Text = text;
+			asioDriverStatus.ForeColor = colour;
+		}
+
+		// The running game's audio engine, found by its control pipe (one per Rocksmith process from this game folder).
+		private static AudioControlClient FindGameAudioClient()
+		{
+			foreach (var process in System.Diagnostics.Process.GetProcessesByName("Rocksmith2014"))
+				using (process)
+					if (File.Exists(@"\\.\pipe\RSModsPlus.Audio." + process.Id)) return new AudioControlClient(process.Id);
+			return null;
 		}
 
 		private void RefreshAsioDriverSetup(bool gameRunning, bool asioMode)
@@ -290,6 +414,33 @@ namespace RSMods
 			bool linked = string.Equals(AsioProxySetup.ReadOutputDriver(gameDirectory), AsioProxySetup.ProxyName, StringComparison.OrdinalIgnoreCase);
 
 			asioDriverRow.Visible = asioDriverDivider.Visible = asioMode;
+			if (switchingInterface) return;   // the switch writes its own status line
+
+			// The picker: every 32-bit ASIO driver (what RS_ASIO can open), the bridge's current interface selected.
+			syncingAudioSetup = true;
+			try
+			{
+				var drivers = AsioProxySetup.ListRealDrivers();
+				asioInterfacePicker.BeginUpdate();
+				asioInterfacePicker.Items.Clear();
+				foreach (string driver in drivers) asioInterfacePicker.Items.Add(driver);
+				asioInterfacePicker.EndUpdate();
+				int index = drivers.FindIndex(d => string.Equals(d, target, StringComparison.OrdinalIgnoreCase));
+				asioInterfacePicker.SelectedIndex = index;
+				asioInterfacePicker.Enabled = current && drivers.Count > 0;
+
+				string input = AsioProxySetup.ReadInputTarget();
+				asioInputPicker.BeginUpdate();
+				asioInputPicker.Items.Clear();
+				asioInputPicker.Items.Add(SameAsOutput);
+				foreach (string driver in drivers) asioInputPicker.Items.Add(driver);
+				asioInputPicker.EndUpdate();
+				int inputIndex = string.Equals(input, target, StringComparison.OrdinalIgnoreCase) ? -1 : drivers.FindIndex(d => string.Equals(d, input, StringComparison.OrdinalIgnoreCase));
+				asioInputPicker.SelectedIndex = inputIndex + 1;
+				asioInputPicker.Enabled = current && drivers.Count > 0;
+				asioInputRow.Visible = asioMode;
+			}
+			finally { syncingAudioSetup = false; }
 
 			// One short line, only saying something the user can act on or needs to know.
 			Color colour = OverlayLook.Muted;
@@ -301,17 +452,25 @@ namespace RSMods
 			}
 			else if (string.IsNullOrEmpty(target))
 			{
-				status = "Several ASIO drivers are installed. Set Driver= in RS_ASIO.ini to your interface so the bridge knows which one to use.";
+				status = "Several ASIO drivers are installed and none is chosen. Pick your interface above.";
+				colour = OverlayLook.Warn;
+			}
+			else if (linked && AsioProxySetup.ReadLastBindError(out string failedDriver, out string reason))
+			{
+				// The driver could not open the interface last launch (usually another app holds it), so the game ran
+				// with a silent guitar. Said here because in game it looked like plain "no input".
+				if (failedDriver.Length == 0) failedDriver = target;
+				status = "Last launch: " + failedDriver + " would not open (" + reason.TrimEnd('.') + "). Guitar was silent. Plug it in or close other apps using it (its control app, a DAW, OBS), then pick it again above or on the in-game Output page. No restart needed.";
 				colour = OverlayLook.Warn;
 			}
 			else if (linked)
 			{
-				status = "Installed, wrapping " + target + ".";
+				status = "Ready. The bridge opens this interface when Rocksmith starts.";
 				colour = OverlayLook.Good;
 			}
 			else
 			{
-				status = "Installed. To use it, set Driver=" + AsioProxySetup.ProxyName + " in RS_ASIO.ini.";
+				status = "Installed, but RS_ASIO.ini does not use it yet. Set up for me on the Audit tab points RS_ASIO at it.";
 			}
 			asioDriverStatus.Text = status;
 			asioDriverStatus.ForeColor = colour;

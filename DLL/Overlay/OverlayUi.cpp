@@ -417,6 +417,33 @@ namespace Overlay
 		return changed;
 	}
 
+	bool DropdownRow(const char* label, int* index, const std::vector<std::string>& items, const char* hint)
+	{
+		ImGui::PushID(label);
+		const float width = RowWidth();
+		const float height = ImGui::GetFrameHeight();
+		const ImVec2 start = ImGui::GetCursorScreenPos();
+		const ImVec2 control = BeginLabelledRow(label, width, height);
+		ImGui::SetCursorScreenPos(control);
+		ImGui::SetNextItemWidth(std::max(40.0f, start.x + width - control.x));
+		bool changed = false;
+		const char* preview = *index >= 0 && *index < static_cast<int>(items.size()) ? items[static_cast<size_t>(*index)].c_str() : "";
+		if (ImGui::BeginCombo("##dropdown", preview)) {
+			for (int i = 0; i < static_cast<int>(items.size()); ++i) {
+				ImGui::PushID(i);
+				const bool selected = i == *index;
+				if (ImGui::Selectable(items[static_cast<size_t>(i)].c_str(), selected) && !selected) { *index = i; changed = true; }
+				if (selected) ImGui::SetItemDefaultFocus();
+				ImGui::PopID();
+			}
+			ImGui::EndCombo();
+		}
+		Hint(hint);
+		EndLabelledRow(start, height);
+		ImGui::PopID();
+		return changed;
+	}
+
 	bool ColorSwatch(const char* label, float rgb[3], bool* committed, const char* hint)
 	{
 		ImGui::PushID(label);
@@ -545,21 +572,183 @@ namespace Overlay
 		ImGui::PopID();
 	}
 
+	// Pill size and drawing, shared by StatusPill and PillRow. Call with the caption font pushed.
+	static ImVec2 PillSize(const char* text)
+	{
+		const ImVec2 size = ImGui::CalcTextSize(text);
+		return ImVec2(size.x + 30.0f, size.y + 8.0f);
+	}
+
+	static void DrawPill(ImDrawList* list, ImVec2 start, const char* text, ImU32 color, bool pulse)
+	{
+		const ImVec2 size = PillSize(text);
+		const float dot = 4.0f;
+		list->AddRectFilled(start, ImVec2(start.x + size.x, start.y + size.y), Fade(WithAlpha(color, 0.16f)), size.y * 0.5f);
+		float alpha = 1.0f;
+		if (pulse) alpha = 0.45f + 0.55f * (0.5f + 0.5f * std::sin(static_cast<float>(ImGui::GetTime()) * 5.0f));
+		list->AddCircleFilled(ImVec2(start.x + 12.0f, start.y + size.y * 0.5f), dot, Fade(WithAlpha(color, alpha)), 12);
+		list->AddText(ImVec2(start.x + 22.0f, start.y + 4.0f), Fade(color), text);
+	}
+
 	void StatusPill(const char* text, ImU32 color, bool pulse)
 	{
 		ImGui::PushFont(g_fonts.caption);
-		const ImVec2 size = ImGui::CalcTextSize(text);
-		const ImVec2 start = ImGui::GetCursorScreenPos();
-		const float height = size.y + 8.0f, dot = 4.0f;
-		const float width = size.x + 30.0f;
-		ImDrawList* list = ImGui::GetWindowDrawList();
-		list->AddRectFilled(start, ImVec2(start.x + width, start.y + height), Fade(WithAlpha(color, 0.16f)), height * 0.5f);
-		float alpha = 1.0f;
-		if (pulse) alpha = 0.45f + 0.55f * (0.5f + 0.5f * std::sin(static_cast<float>(ImGui::GetTime()) * 5.0f));
-		list->AddCircleFilled(ImVec2(start.x + 12.0f, start.y + height * 0.5f), dot, Fade(WithAlpha(color, alpha)), 12);
-		list->AddText(ImVec2(start.x + 22.0f, start.y + 4.0f), Fade(color), text);
-		ImGui::Dummy(ImVec2(width, height));
+		DrawPill(ImGui::GetWindowDrawList(), ImGui::GetCursorScreenPos(), text, color, pulse);
+		ImGui::Dummy(PillSize(text));
 		ImGui::PopFont();
+	}
+
+	void PillRow(const char* label, const char* text, ImU32 color, const char* hint)
+	{
+		ImGui::PushID(label);
+		const float width = RowWidth();
+		const float height = ImGui::GetFrameHeight();
+		const ImVec2 start = ImGui::GetCursorScreenPos();
+		const ImVec2 control = BeginLabelledRow(label, width, height);
+		ImGui::PushFont(g_fonts.caption);
+		const ImVec2 size = PillSize(text);
+		ImGui::SetCursorScreenPos(ImVec2(control.x, control.y + (height - size.y) * 0.5f));
+		ImGui::PopFont();
+		StatusPill(text, color);
+		Hint(hint);
+		EndLabelledRow(start, height);
+		ImGui::PopID();
+	}
+
+	namespace
+	{
+		constexpr float kTabBodyIndent = 16.0f, kTabBodyRight = 12.0f;
+		ImVec2 g_tabsStart;
+		float g_tabsWidth = 0.0f, g_tabsHeight = 0.0f;
+		ImVec2 g_insetStart;
+		float g_insetHeight = 0.0f;
+		constexpr float kInsetPadY = 7.0f, kInsetPadRight = 8.0f, kInsetGutter = 38.0f;
+
+		// Small guitar drawn with the draw list (neither Windows icon font has one): a two-lobed body low left,
+		// the neck rising to the upper right, a short headstock. Fits a ~16 px square around `center`.
+		void DrawGuitar(ImDrawList* list, ImVec2 center, ImU32 color)
+		{
+			const ImVec2 lower(center.x - 3.2f, center.y + 3.2f), upper(center.x - 0.6f, center.y + 0.6f);
+			list->AddCircleFilled(lower, 3.9f, color, 16);
+			list->AddCircleFilled(upper, 2.9f, color, 16);
+			list->AddCircleFilled(ImVec2(lower.x + 0.4f, lower.y - 0.4f), 1.1f, Mix(color, Color::Card, 0.75f), 10);   // sound hole
+			list->AddLine(upper, ImVec2(center.x + 5.2f, center.y - 5.2f), color, 1.6f);
+			list->AddLine(ImVec2(center.x + 4.6f, center.y - 6.6f), ImVec2(center.x + 6.6f, center.y - 4.6f), color, 2.4f);
+		}
+	}
+
+	bool RoleTabs(const char* id, const RoleTab* tabs, int count, int* selected)
+	{
+		ImGui::PushID(id);
+		bool changed = false;
+		const float width = RowWidth();
+		const float height = ImGui::GetFrameHeight() + 14.0f;
+		const ImVec2 start = ImGui::GetCursorScreenPos();
+		const ImVec2 end(start.x + width, start.y + height);
+		g_tabsStart = start; g_tabsWidth = width; g_tabsHeight = height;
+		ImDrawList* list = ImGui::GetWindowDrawList();
+		list->AddRectFilled(start, end, Fade(Mix(Color::Card, IM_COL32(4, 8, 16, 255), 0.35f)), 5.0f, ImDrawFlags_RoundCornersTop);
+		list->AddRect(start, end, Fade(Color::CardEdge), 5.0f, ImDrawFlags_RoundCornersTop);
+		if (count <= 0) { ImGui::PopID(); return false; }
+		if (*selected < 0 || *selected >= count) *selected = 0;
+
+		const float segment = width / static_cast<float>(count);
+		const float slide = Animate("underline", static_cast<float>(*selected), 18.0f);
+		for (int i = 0; i < count; ++i) {
+			const RoleTab& tab = tabs[i];
+			ImGui::PushID(i);
+			const ImVec2 min(start.x + segment * i, start.y);
+			ImGui::SetCursorScreenPos(min);
+			if (ImGui::InvisibleButton("##tab", ImVec2(segment, height)) && *selected != i) { *selected = i; changed = true; }
+			const bool hovered = ImGui::IsItemHovered();
+			Hint(tab.hint);
+			const bool isSelected = i == *selected;
+			const float hover = Animate("hover", hovered || isSelected ? 1.0f : 0.0f, 16.0f);
+			if (isSelected) list->AddRectFilled(ImVec2(min.x + 1.0f, min.y + 1.0f), ImVec2(min.x + segment - 1.0f, end.y), Fade(Color::Card), 4.0f, ImDrawFlags_RoundCornersTop);
+			else if (hover > 0.01f) list->AddRectFilled(ImVec2(min.x + 1.0f, min.y + 1.0f), ImVec2(min.x + segment - 1.0f, end.y), Fade(WithAlpha(Color::Hover, hover * 0.6f)), 4.0f, ImDrawFlags_RoundCornersTop);
+			if (i > 0) list->AddLine(ImVec2(min.x, min.y + 8.0f), ImVec2(min.x, end.y - 8.0f), Fade(Color::CardEdge), 1.0f);
+
+			// Content, centred: [badge] [icon] label [status dot]. The icon, then the badge, give way when narrow.
+			ImGui::PushFont(g_fonts.caption);
+			const ImVec2 badgeText = ImGui::CalcTextSize(tab.badge ? tab.badge : "");
+			ImGui::PopFont();
+			const ImVec2 labelSize = ImGui::CalcTextSize(tab.label, LabelEnd(tab.label));
+			const float badgeW = tab.badge && tab.badge[0] ? badgeText.x + 12.0f : 0.0f, iconW = 16.0f, gap = 7.0f, dotW = tab.hasStatus ? 12.0f : 0.0f;
+			bool showIcon = tab.icon != RoleIcon::None, showBadge = badgeW > 0.0f;
+			auto contentW = [&] { return (showBadge ? badgeW + gap : 0.0f) + (showIcon ? iconW + gap : 0.0f) + labelSize.x + dotW; };
+			if (contentW() > segment - 16.0f) showIcon = false;
+			if (contentW() > segment - 16.0f) showBadge = false;
+			float x = std::floor(min.x + (segment - contentW()) * 0.5f);
+			const float cy = start.y + height * 0.5f - 1.0f;
+			const ImU32 ink = isSelected ? Color::Text : Mix(Color::Muted, Color::Text, hover * 0.6f);
+			if (showBadge) {
+				const float bh = badgeText.y + 4.0f;
+				list->AddRectFilled(ImVec2(x, cy - bh * 0.5f), ImVec2(x + badgeW, cy + bh * 0.5f), Fade(WithAlpha(tab.tint, isSelected ? 0.30f : 0.20f)), 4.0f);
+				ImGui::PushFont(g_fonts.caption);
+				list->AddText(ImVec2(x + 6.0f, cy - badgeText.y * 0.5f), Fade(Mix(tab.tint, Color::Text, isSelected ? 0.55f : 0.3f)), tab.badge);
+				ImGui::PopFont();
+				x += badgeW + gap;
+			}
+			if (showIcon) {
+				const ImVec2 center(x + iconW * 0.5f, cy);
+				if (tab.icon == RoleIcon::Guitar) DrawGuitar(list, center, Fade(ink));
+				else if (g_fonts.icons) DrawIcon(list, center, Glyph::Input, ink);
+				x += iconW + gap;
+			}
+			list->AddText(ImVec2(x, cy - labelSize.y * 0.5f), Fade(ink), tab.label, LabelEnd(tab.label));
+			x += labelSize.x;
+			if (tab.hasStatus) list->AddCircleFilled(ImVec2(x + 8.0f, cy), 3.5f, Fade(tab.status), 12);
+			ImGui::PopID();
+		}
+		// Soft blue underline under the selected tab, sliding between tabs.
+		const float ux = start.x + slide * segment;
+		list->AddRectFilled(ImVec2(ux + 10.0f, end.y - 3.0f), ImVec2(ux + segment - 10.0f, end.y - 1.0f), Fade(WithAlpha(Color::AccentHi, 0.75f)), 1.0f);
+
+		ImGui::SetCursorScreenPos(ImVec2(start.x, end.y));
+		ImGui::Dummy(ImVec2(0, 0));
+		ImGui::PopID();
+		return changed;
+	}
+
+	void BeginTabBody()
+	{
+		ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, g_tabsStart.y + g_tabsHeight + 10.0f));
+		ImGui::Indent(kTabBodyIndent);
+		if (g_inCard) g_cardRight -= kTabBodyRight;
+	}
+
+	void EndTabBody()
+	{
+		if (g_inCard) g_cardRight += kTabBodyRight;
+		ImGui::Unindent(kTabBodyIndent);
+		const float top = g_tabsStart.y + g_tabsHeight;
+		const float bottom = std::max(top + 10.0f, ImGui::GetCursorScreenPos().y - ImGui::GetStyle().ItemSpacing.y + 10.0f);
+		ImGui::GetWindowDrawList()->AddRect(ImVec2(g_tabsStart.x, top - 1.0f), ImVec2(g_tabsStart.x + g_tabsWidth, bottom), Fade(Color::CardEdge), 5.0f, ImDrawFlags_RoundCornersBottom);
+		ImGui::SetCursorScreenPos(ImVec2(g_tabsStart.x, bottom));
+		ImGui::Dummy(ImVec2(0, 0));
+	}
+
+	void BeginInset(float contentHeight, unsigned glyph, ImU32 accent)
+	{
+		const float width = RowWidth();
+		g_insetStart = ImGui::GetCursorScreenPos();
+		g_insetHeight = contentHeight + kInsetPadY * 2.0f;
+		const ImVec2 end(g_insetStart.x + width, g_insetStart.y + g_insetHeight);
+		ImDrawList* list = ImGui::GetWindowDrawList();
+		list->AddRectFilled(g_insetStart, end, Fade(Mix(Color::Card, IM_COL32(4, 8, 16, 255), 0.45f)), 5.0f);
+		list->AddRect(g_insetStart, end, Fade(Color::CardEdge), 5.0f);
+		list->AddRectFilled(g_insetStart, ImVec2(g_insetStart.x + 4.0f, end.y), Fade(accent), 5.0f, ImDrawFlags_RoundCornersLeft);
+		if (g_fonts.icons) DrawIcon(list, ImVec2(g_insetStart.x + 22.0f, g_insetStart.y + g_insetHeight * 0.5f), glyph, accent);
+		// Rows inside stop short of the strip's right edge: RowWidth() reads the card's right edge.
+		if (g_inCard) g_cardRight -= kInsetPadRight;
+		ImGui::SetCursorScreenPos(ImVec2(g_insetStart.x + (g_fonts.icons ? kInsetGutter : 14.0f), g_insetStart.y + kInsetPadY));
+	}
+
+	void EndInset()
+	{
+		if (g_inCard) g_cardRight += kInsetPadRight;
+		ImGui::SetCursorScreenPos(ImVec2(g_insetStart.x, g_insetStart.y + g_insetHeight));
+		ImGui::Dummy(ImVec2(0, 0));
 	}
 
 	bool NavItem(unsigned glyph, const char* label, bool selected)

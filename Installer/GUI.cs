@@ -156,8 +156,16 @@ namespace RS2014_Mod_Installer
                     && MessageBox.Show("The Note by Note entry could not be removed from Riff Repeater (" + menuError + "). Without the mod it only shows an inactive row.\n\nContinue the uninstall?",
                         "Uninstall", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
 
-                // 3. Our files.
+                // 3. The player's own RS_ASIO.ini, if "Set up for me" replaced it. Before the files: it needs RSMods.exe
+                // and the registry state RemoveFiles deletes.
+                string restoreError = Uninstaller.RunRsAsioRestore(rsPath);
+
+                // 4. Our files.
                 var failed = Uninstaller.RemoveFiles(rsPath, removeSettings, menuEntryRemoved: menuError == null);
+                if (restoreError != null)
+                    MessageBox.Show("Your original RS_ASIO.ini could not be put back (" + restoreError + "). A copy is in "
+                        + System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "RocksmithAudioBridge", "Backups") + ".",
+                        "Uninstall", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 if (failed.Count == 0)
                     MessageBox.Show("Rocksmith Audio Bridge was uninstalled. Your recordings were kept.", "Uninstall", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 else
