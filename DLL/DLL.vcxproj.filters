@@ -1038,6 +1038,9 @@
     <ClInclude Include="Shared\VstHostControl.hpp">
       <Filter>Shared</Filter>
     </ClInclude>
+    <ClInclude Include="Shared\ShellOpenAsync.hpp">
+      <Filter>Shared</Filter>
+    </ClInclude>
     <ClInclude Include="ToneDesigner\VstHostLink.hpp">
       <Filter>ToneDesigner</Filter>
     </ClInclude>

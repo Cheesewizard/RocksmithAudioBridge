@@ -38,7 +38,7 @@ namespace Audio::SharedOutput
 		uint64_t generation = 0;
 		UINT32 period = 0, minimum = 0, fundamental = 0, maximum = 0;
 		UINT32 padding = 0, queuedFrames = 0;
-		uint64_t expiredFrames = 0, overruns = 0, emptyObservations = 0;
+		uint64_t expiredFrames = 0, overruns = 0, emptyObservations = 0, trims = 0;   // trims: backlogs dropped at once (Pump)
 		uint64_t longestPumpGapMs = 0;
 		double clockPpm = 0, correctionPpm = 0;
 		bool clockMeasured = false;
@@ -292,6 +292,28 @@ namespace Audio::SharedOutput
 			return result;
 		}
 
+		// No saved buffer ("Automatic"): about 3 ms instead of Windows' default ~10 ms period. The default period was
+		// most of the delay cable players heard after each note (a player measured it 2026-10-11), and nearly every
+		// device takes 144 frames. Rounded up to the device's step and never below its minimum or above its default,
+		// so a device without small periods keeps the default. Requires GetSharedModeEnginePeriod's limits.
+		UINT32 AutomaticPeriod(UINT32 normal) const
+		{
+			if (!minimum || !fundamental || !normal) return normal;
+			const UINT32 automatic = FitPeriod(AUTOMATIC_PERIOD_FRAMES, normal);
+			return automatic > normal ? normal : automatic;
+		}
+
+		// The Playback buffer setting is one value for every device, so fit it to this device: up to its step and
+		// minimum, or its default when even that is above its maximum. Without this a size the device does not take
+		// would drop to the converted ~10 ms path (OpenConverted) instead of the nearest small one.
+		UINT32 FitPeriod(UINT32 wanted, UINT32 normal) const
+		{
+			if (!minimum || !fundamental) return wanted;
+			UINT32 fitted = (std::max)(minimum, wanted);
+			fitted = (fitted + fundamental - 1) / fundamental * fundamental;
+			return fitted > maximum ? normal : fitted;
+		}
+
 		HRESULT OpenAttempt(const std::wstring& endpoint, UINT32 desired)
 		{
 			resolvedEndpoint = endpoint;
@@ -302,9 +324,17 @@ namespace Audio::SharedOutput
 			if (SUCCEEDED(result))
 			{
 				HRESULT lowLatency = client->GetSharedModeEnginePeriod(&format, &normal, &fundamental, &minimum, &maximum);
-				period = desired ? desired : normal;
+				if (SUCCEEDED(lowLatency)) period = desired ? FitPeriod(desired, normal) : AutomaticPeriod(normal);
+				else period = desired ? desired : normal;
+				const HRESULT queried = lowLatency;
 				if (SUCCEEDED(lowLatency) && (!minimum || !fundamental || period < minimum || period > maximum || period > 48000 || period % fundamental)) lowLatency = E_INVALIDARG;
 				if (SUCCEEDED(lowLatency)) lowLatency = client->InitializeSharedAudioStream(AUDCLNT_STREAMFLAGS_EVENTCALLBACK, period, &format, nullptr);
+				// What the device allows decides whether the Playback buffer can go below Windows' 10 ms: a driver whose
+				// minimum is its default period (many USB drivers) stays at 10 ms whatever is chosen.
+				LOG_INFO("(AUDIO ROUTING) Playback device periods: default " << normal << ", minimum " << minimum << ", step " << fundamental
+					<< ", maximum " << maximum << " frames (query " << std::hex << queried << std::dec << "); asked "
+					<< (desired ? std::to_string(desired) : std::string("Automatic")) << ", using " << period
+					<< (SUCCEEDED(lowLatency) ? " (small-period stream)" : " -> standard stream instead (Windows' default period)") << std::endl);
 				// The small-period stream only accepts the device's own Windows format. A device set to
 				// 44.1 kHz, or to 5.1 / 7.1, refuses 48 kHz stereo float there, so reopen it as a standard
 				// shared stream and let Windows convert (a 10 ms engine period instead of the small one).
@@ -345,6 +375,18 @@ namespace Audio::SharedOutput
 				if (lastPump) status.longestPumpGapMs = std::max<uint64_t>(status.longestPumpGapMs, now - lastPump);
 				lastPump = now;
 				const UINT32 target = std::min(bufferFrames, period * 2);
+				// A backlog more than a period over the target is dropped at once (oldest first). The rate servo below
+				// only slews a few hundred ppm, so a cold start that queued ~800 frames too many took two minutes to drain
+				// and every note in that time came out 15-20 ms late (cable session 2026-10-12: 1074 FIFO frames falling
+				// to 92 over 120 s). At start that excess is silence; in steady play the servo keeps it from building.
+				if (count && count + padding > target + period)
+				{
+					const UINT32 excess = std::min(count, count + padding - target);
+					head = (head + excess) % CAPACITY;
+					count -= excess;
+					status.expiredFrames += excess;
+					++status.trims;
+				}
 				const UINT32 capacity = std::min(CAPACITY, target > padding ? target - padding : 0);
 				if (count) oldestFrame = ages[head];
 				unsigned consumed = 0;
@@ -532,6 +574,7 @@ namespace Audio::SharedOutput
 		}
 
 		static constexpr UINT32 CAPACITY = 4096;
+		static constexpr UINT32 AUTOMATIC_PERIOD_FRAMES = 144;   // 3 ms at 48 kHz, see AutomaticPeriod
 		EndpointFactory factory;
 		bool watchDevices;
 		Microsoft::WRL::ComPtr<OutputNotifications> notifications;

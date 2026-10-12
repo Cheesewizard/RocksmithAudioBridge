@@ -70,6 +70,10 @@ namespace
 	wchar_t g_loadingNow[128] = {};   // the plugin loading now, for a crash report (plain buffer: read in OnCrash)
 	wchar_t g_openWindowNames[256] = {};   // plugins whose windows are open, for a crash report (OnCrash)
 	ULONGLONG g_lastCommandAt = 0;    // the page's last command (background loading waits for a quiet moment)
+	// Standby: Tone designer is off, but the host stays running with its plugins loaded, so turning it on is instant
+	// and starred plugins keep loading in the background. The audio link is released (the game's amp plays), the
+	// chain processes nothing and the plugin windows are hidden. Started with --standby, or SetStandby from the page.
+	bool g_standby = false;
 	// Spares the player asked for (RefreshKeepSettings): KeepLoadedPlugins ("Always keep loaded"), and this run's
 	// "Load in the background"; PreloadFailed, plugins that went down loading that way.
 	std::vector<std::wstring> g_alwaysLoaded, g_sessionLoaded, g_preloadFailed;
@@ -577,6 +581,7 @@ namespace
 			if (wanted != g_savedWanted) { g_savedWanted = wanted; WriteDword(L"PopoutWanted", wanted ? 1 : 0); }
 			show = wanted && (!overlayReporting || g_control->overlayVisible != 0);
 		}
+		show = show && !g_standby;
 		if (show == g_windowsShown) return;
 		g_windowsShown = show;
 		const bool hadFocus = GetForegroundWindow() && IsOurWindow(GetForegroundWindow());
@@ -700,14 +705,20 @@ namespace
 
 	void MarkModified() { g_toneModified = true; }
 
-	// Spares (Chain.hpp): the page's settings, read every couple of seconds. KeepRecentPlugins: how many plugins
-	// that left the chain stay loaded. KeepLoadedPlugins: plugins marked "Always keep loaded" in the browser, loaded
-	// in the background when they are not (PreloadStep); g_sessionLoaded: "Load in the background", kept until the
-	// host closes.
+	// Spares (Chain.hpp), checked every couple of seconds. How many plugins that left the chain stay loaded is
+	// automatic, not a setting (a menu for it confused players): kKeepRecent, or none while the PC is short of
+	// memory (they are reloaded from scratch then, as without spares). It also caps how many plugins the highlighted
+	// song's tone loads ahead (PrepareTone). KeepLoadedPlugins: plugins marked "Always keep loaded" in the browser,
+	// loaded in the background when they are not (PreloadStep), kept whatever the memory; g_sessionLoaded: "Load in
+	// the background", kept until the host closes.
+	constexpr int kKeepRecent = 4;            // a few amps and pedals to go back and forth between
+	constexpr DWORD kMemoryTightPercent = 85; // system memory in use at which recent spares are let go
+
 	void RefreshKeepSettings()
 	{
-		DWORD recent = 4;
-		ReadDword(L"KeepRecentPlugins", recent);
+		MEMORYSTATUSEX memory = { sizeof(memory) };
+		const bool tight = GlobalMemoryStatusEx(&memory) && memory.dwMemoryLoad >= kMemoryTightPercent;
+		const int recent = tight ? 0 : kKeepRecent;
 		g_alwaysLoaded = ReadList(L"KeepLoadedPlugins");
 		g_preloadFailed = ReadList(L"PreloadFailed");
 		std::vector<std::wstring> keep = g_alwaysLoaded;
@@ -762,6 +773,8 @@ namespace
 			return;
 		}
 	}
+
+	void SetStandby(bool on);
 
 	// One command from the Tone designer page.
 	void RunCommand(VstHostControl::Command op, int arg, int arg2, const std::wstring& text)
@@ -869,8 +882,10 @@ namespace
 			break;
 		}
 		case Command::SetLevels:
+			// Global, not part of the tone: saved for every session and every tone; the tone is not marked changed.
 			g_chain.SetLevels(arg, arg2);
-			MarkModified();
+			WriteDword(L"InputTrimTenths", static_cast<DWORD>(arg));
+			WriteDword(L"OutputTrimTenths", static_cast<DWORD>(arg2));
 			break;
 		case Command::SetMuted:
 			g_chain.SetMuted(arg != 0);
@@ -932,6 +947,9 @@ namespace
 			RefreshKeepSettings();
 			g_chain.DropSpares(text);
 			break;
+		case Command::SetStandby:
+			SetStandby(arg != 0);
+			break;
 		case Command::ClearChain:
 			CloseAllWindows();
 			g_chain.Clear();
@@ -981,12 +999,36 @@ namespace
 		return true;
 	}
 
+	// Off (standby) and back on. Stopping the stream releases the amp link, so the overlay's ExternalAmp brings the
+	// game's amp back exactly as when the host closes; the plugins stay loaded. On reopens the stream (the game may
+	// have changed its buffer size meanwhile); if that fails the host stays in standby and the page shows why.
+	void SetStandby(bool on)
+	{
+		if (on == g_standby) return;
+		if (on)
+		{
+			g_audio.Stop();
+			g_chain.Suspend();
+			g_standby = true;
+			Log("host: standby (off, plugins kept loaded)");
+		}
+		else
+		{
+			g_standby = false;
+			if (!StartAudio(g_main)) { g_audio.Stop(); g_standby = true; SetLoadError("Tone designer could not reconnect to the game's audio, so it stayed off."); }
+			else Log("host: on");
+		}
+		if (g_control) InterlockedExchange(&g_control->standby, g_standby ? 1 : 0);
+		UpdateWindows();
+	}
+
 	// The hidden main window: the timers, the audio link's reset message, and shutdown.
 	LRESULT CALLBACK MainProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
 	{
 		switch (message)
 		{
 		case BridgeAudio::kResetMessage:
+			if (g_standby) return 0;   // turning on opens it fresh
 			Log("audio: the game changed its stream, restarting");
 			StartAudio(window);
 			return 0;
@@ -1018,7 +1060,7 @@ namespace
 				PostMessageW(window, WM_CLOSE, 0, 0);
 				return 0;
 			}
-			if (g_chain.TakeRestartRequest()) StartAudio(window);
+			if (g_chain.TakeRestartRequest() && !g_standby) StartAudio(window);
 			if (g_ticks % 4 == 0) RefreshKeepSettings();
 			PreloadStep();
 			if (g_chain.Dirty() && !g_toneModified) { g_toneModified = true; PublishState(); }
@@ -1105,6 +1147,12 @@ namespace
 			if (!last.empty() && GetFileAttributesW(last.c_str()) != INVALID_FILE_ATTRIBUTES && !g_chain.Add(last, error))
 				Log("restore: %ls did not load (%s)", last.c_str(), error.c_str());
 		}
+		// The player's global input and output trims (0 dB until they set them): a tone's own levels are its author's
+		// job, set inside its plugins, so loading a tone never moves these.
+		DWORD input = 0, output = 0;
+		ReadDword(L"InputTrimTenths", input);
+		ReadDword(L"OutputTrimTenths", output);
+		g_chain.SetLevels(static_cast<int>(input), static_cast<int>(output));
 
 		std::wstring add = extraPlugin;
 		if (add.empty() && g_chain.Count() == 0 && !fromOverlay) add = AskForPlugin();
@@ -1263,11 +1311,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 		for (int i = 1; i < argc; ++i)
 		{
 			if (_wcsicmp(argv[i], L"--overlay") == 0) fromOverlay = true;
+			else if (_wcsicmp(argv[i], L"--standby") == 0) g_standby = true;
 			else plugin = argv[i];
 		}
 		LocalFree(argv);
 	}
-	Log("host: starting%s%s%ls", fromOverlay ? " from the overlay" : "", plugin.empty() ? "" : ", adding ", plugin.c_str());
+	Log("host: starting%s%s%s%ls", fromOverlay ? " from the overlay" : "", g_standby ? " in standby" : "", plugin.empty() ? "" : ", adding ", plugin.c_str());
 
 	g_control = VstHostControl::Open(g_controlMapping);
 	if (g_control)
@@ -1278,6 +1327,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 		InterlockedExchange(&g_control->loading, 1);
 		CopyText(g_control->loadingText, sizeof(g_control->loadingText), "your chain");
 		InterlockedExchange(&g_control->quitRequested, 0);
+		InterlockedExchange(&g_control->standby, g_standby ? 1 : 0);
 		// A command from before this host started was meant for a host that is gone; later ones wait in the queue
 		// until the chain is restored.
 		g_handledCommand = g_control->commandSeq;
@@ -1323,7 +1373,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 	g_font = CreateFontW(-MulDiv(13, static_cast<int>(GetDpiForSystem()), 96), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
 		OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
 
-	if (!StartAudio(g_main))
+	// In standby the stream opens when the player turns Tone designer on.
+	if (!g_standby && !StartAudio(g_main))
 	{
 		if (g_control) { InterlockedExchange(&g_control->hostPid, 0); EndLoading(); }
 		DestroyWindow(g_main);
@@ -1363,6 +1414,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 	if (g_control)
 	{
 		g_control->popoutShown = 0;
+		InterlockedExchange(&g_control->standby, 0);
 		InterlockedExchange(&g_control->loading, 0);
 		InterlockedExchange(&g_control->hostPid, 0);
 	}

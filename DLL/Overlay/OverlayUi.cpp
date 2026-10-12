@@ -189,7 +189,9 @@ namespace Overlay
 
 	// Delayed tooltip: ImGui 1.85 has no hover delay, so track how long the
 	// same item (identified by its top-left corner) has been hovered and only show after half a second.
-	void Hint(const char* text)
+	// `above`, when given, pins the tooltip's bottom-left corner there instead of under the mouse, so it does not
+	// cover what is under the cursor (a slider's readout and the meters below it).
+	static void HintAt(const char* text, const ImVec2* above)
 	{
 		if (!text || !text[0] || !ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) return;
 		static ImVec2 hoveredItem(-1.0f, -1.0f);
@@ -202,6 +204,7 @@ namespace Overlay
 		lastFrame = frame;
 		if (t - hoverStart < 0.5) return;
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10, 8));
+		if (above) ImGui::SetNextWindowPos(*above, ImGuiCond_Always, ImVec2(0.0f, 1.0f));
 		ImGui::BeginTooltip();
 		ImGui::PushFont(g_fonts.caption);
 		ImGui::PushTextWrapPos(ImGui::GetFontSize() * 26.0f);
@@ -211,6 +214,8 @@ namespace Overlay
 		ImGui::EndTooltip();
 		ImGui::PopStyleVar();
 	}
+
+	void Hint(const char* text) { HintAt(text, nullptr); }
 
 	void Caption(const char* text)
 	{
@@ -355,7 +360,9 @@ namespace Overlay
 		ImGui::InvisibleButton("##slider", ImVec2(trackW, height));
 		const bool active = ImGui::IsItemActive(), hovered = ImGui::IsItemHovered();
 		if (committed) *committed = ImGui::IsItemDeactivated();
-		Hint(hint);
+		// Never while dragging (it would sit over the value being set), and above the row rather than under the mouse.
+		const ImVec2 hintAt(start.x, start.y - 4.0f);
+		if (!active) HintAt(hint, &hintAt);
 
 		const float thumb = 8.0f;
 		const float x0 = control.x + thumb, x1 = control.x + trackW - thumb;

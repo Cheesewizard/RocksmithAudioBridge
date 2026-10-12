@@ -15,6 +15,8 @@
 //     restored later;
 //   - sends the Drop Pedal's input shift to the proxy (RSModsAsio_SetAmpLinkPitch), so the amp sim's copy of the
 //     guitar is shifted the same way as the game's (the link taps the DI before the game's shifter);
+//   - silences the guitar in the tuner screens when asked (SilenceGuitarWhileTuning, General page): holds
+//     Mixer_Player1 at 0 the same way and stops mixing in the amp sim's return, so it works in every mode;
 //   - reports link status to the overlay's External amp page.
 // Settings live in HKCU\Software\RSMods\AsioProxy (not RSMods.ini, which the desktop GUI rewrites with only
 // the keys it knows): ExternalAmp (default on), ExternalAmpFallback (default on), ExternalAmpReturn
@@ -34,6 +36,7 @@ namespace ExternalAmp
 		bool proxyLoaded = false;      // the game's audio driver is the Audio Bridge proxy
 		bool guest64Registered = false; // 64-bit amp sims can list the driver
 		bool gameAmpMuted = false;     // Mixer_Player1 is held at 0 by this controller
+		bool silenceWhileTuning = false; // General: no guitar in the tuner screens, whatever plays it
 		int pedalSemitones = 0;        // Drop Pedal shift sent to the amp sim's input
 		AmpLink::Status link{};
 	};
@@ -45,4 +48,5 @@ namespace ExternalAmp
 	void SetFallback(bool fallback);
 	void SetReturnTenths(int tenths, bool persist);
 	void SetSafetyBuffer(bool on);
+	void SetSilenceWhileTuning(bool on);   // also the game's amp, so it lives here, not in Tone designer
 }

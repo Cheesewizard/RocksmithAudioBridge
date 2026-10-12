@@ -155,8 +155,14 @@ namespace AmpLink
 	{
 		if (!m_shared || !infos || frames != m_frames || outputCount <= 0) return;
 		const float gain = m_gain.load(std::memory_order_relaxed);
-		const bool mixOn = m_mixOn.load(std::memory_order_relaxed);
-		if (!mixOn || !GuestConnected(m_seq))
+		// Switching the return on or off (the External amp switch, Compare, the tuner silence) fades over 150 ms
+		// rather than cutting in the middle of a wave. A guest that goes away is gone at once (nothing left to play),
+		// and fades in again when it is back.
+		constexpr float kMixFadeFrames = kSampleRate * 0.15f;
+		const float target = m_mixOn.load(std::memory_order_relaxed) ? 1.0f : 0.0f;
+		const bool guest = GuestConnected(m_seq);
+		if (!guest) m_mixLevel = 0.0f;
+		if (!guest || (target == 0.0f && m_mixLevel == 0.0f))
 		{
 			m_returnPeak.store(DecayedPeak(m_returnPeak.load(std::memory_order_relaxed), 0.0f, frames), std::memory_order_relaxed);
 			return;
@@ -174,6 +180,9 @@ namespace AmpLink
 		}
 
 		float blockPeak = 0.0f;
+		const float startLevel = m_mixLevel;
+		const float step = (target > startLevel ? 1.0f : -1.0f) / kMixFadeFrames;
+		auto advance = [&](float level) { return step > 0.0f ? (std::min)(target, level + step) : (std::max)(target, level + step); };
 		const long targets = (std::min<long>)(outputCount, kChannels);
 		for (long ch = 0; ch < targets; ++ch)
 		{
@@ -183,17 +192,22 @@ namespace AmpLink
 			const int32_t* left = m_shared->output[slot][0];
 			const int32_t* right = m_shared->output[slot][1];
 			int64_t peak = 0;
+			float level = startLevel;   // every channel runs the same ramp
 			for (long f = 0; f < frames; ++f)
 			{
+				level = advance(level);
 				// One output channel gets the mono sum; otherwise left to the first, right to the second.
 				const double source = targets == 1 ? (static_cast<double>(left[f]) + right[f]) * 0.5 : (ch == 0 ? left[f] : right[f]);
-				const int64_t added = static_cast<int64_t>(source * gain);
+				const int64_t added = static_cast<int64_t>(source * gain * level);
 				const int64_t magnitude = added < 0 ? -added : added;
 				if (magnitude > peak) peak = magnitude;
 				destination[f] = Saturate(static_cast<int64_t>(destination[f]) + added);
 			}
 			blockPeak = (std::max)(blockPeak, static_cast<float>(peak / 2147483648.0));
 		}
+		float level = startLevel;
+		for (long f = 0; f < frames && level != target; ++f) level = advance(level);
+		m_mixLevel = level;
 		m_returnPeak.store(DecayedPeak(m_returnPeak.load(std::memory_order_relaxed), blockPeak, frames), std::memory_order_relaxed);
 	}
 

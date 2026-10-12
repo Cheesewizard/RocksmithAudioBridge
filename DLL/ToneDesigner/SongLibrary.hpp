@@ -8,7 +8,7 @@
 // The player's songs (disc and DLC) for the Tone designer's song browser. The game DLL cannot read .psarc files,
 // so RSMods.exe --song-index (GUI/Features/ToneDesigner/ToneDesignerTools.cs) writes an index file, reading only files that are new
 // or changed since its last run; this loads that file. The index from the last session shows at once and is
-// refreshed in the background the first time the browser is opened in a session.
+// refreshed in the background the first time the Tone designer page is shown in a session.
 namespace SongLibrary
 {
 	struct Song

@@ -12,6 +12,7 @@
 #include "ExternalAmp/ExternalAmp.hpp"
 #include "ToneDesigner/VstHostLink.hpp"
 #include "Shared/VstHostControl.hpp"
+#include "Shared/ShellOpenAsync.hpp"
 #include "ToneDesigner/SongLibrary.hpp"
 #include "ToneDesigner/ToneBackup.hpp"
 #include "Core/Extensions.hpp"
@@ -745,9 +746,9 @@ namespace Overlay
 		//   - the tone library on the left (favourites, all tones, song tones);
 		//   - the pedalboard: In jack, cables, one pedal per plugin coloured by kind (LED, knobs, footswitch), Add,
 		//     Out jack. Click selects, double-click opens the plugin's window, the footswitch bypasses, drag
-		//     reorders, right-click a pedal, a tone, the board or the song strip for its actions;
-		//   - a strip with the in / out meters, latency, and the current song's tone;
-		//   - the plugin browser under it.
+		//     reorders, right-click a pedal, a tone or the board for its actions; IN / OUT meters at its ends;
+		//   - under it, one fixed-height pane: Plugins | Songs switches it between the plugin browser and the song
+		//     browser (the song playing now is first there; its tone is changed with a right-click).
 		// View shows or hides the library, the browser and the meters (remembered). Commands are queued to the host;
 		// the page shows its state a few times a second. It shares the amp link with the External app tab, which
 		// carries one app at a time: each page says when the other one has it.
@@ -827,9 +828,9 @@ namespace Overlay
 				std::vector<std::string> selectedTones;
 				std::string toneAnchor;
 				std::vector<std::string> toneOrder, toneOrderNext;
-				// The main area: the pedalboard, or the songs (give songs a tone without playing them).
+				// The bottom pane: the plugin browser, or the songs (give songs a tone without playing them). The
+				// pedalboard stays on top either way; Plugins | Songs in the pane's title row switches it.
 				bool songsMode = false;
-				float browserH = 0.0f;          // the plugin browser's height last frame, so the board can fill the rest
 				float libraryContentH = 0.0f;   // the tone list's full height last frame, for the window's natural height
 				char songSearch[64] = {};
 				int songFilter = 0;
@@ -838,12 +839,18 @@ namespace Overlay
 				std::vector<ToneBackup::Entry> backups;   // File, Backups: listed when the menu opens
 				size_t dialogSongs = 0;         // Delete: songs that use it (read once, when the dialog opens)
 				char name[64] = {};
+				char pickSearch[48] = {};       // "Give it a tone": filters the tone choices (ToneChoices)
+				float paneExtra = 0.0f;         // the divider under the board, dragged: added to the bottom pane's height
 			};
 
 			State& S()
 			{
 				static State state;
-				if (!state.loaded) { state.open = VstHostLink::SectionsOpen(Library | Browser | Meters); state.loaded = true; }
+				if (!state.loaded) {
+					state.open = VstHostLink::SectionsOpen(Library | Browser | Meters);
+					state.paneExtra = static_cast<float>(VstHostLink::BottomPaneExtra());
+					state.loaded = true;
+				}
 				return state;
 			}
 
@@ -900,6 +907,9 @@ namespace Overlay
 				s.open ^= section;
 				VstHostLink::SetSectionsOpen(s.open);
 			}
+
+			// The bottom pane (View > Plugin browser) shows the song browser instead of the plugins.
+			bool SongsShown() { return S().songsMode && IsOpen(Browser); }
 
 			// Dialogs open from inside menus and popups, whose ID stack differs from the page's; the request is kept
 			// here and the modal opened at page level (Dialogs).
@@ -1145,6 +1155,7 @@ namespace Overlay
 					ImGui::EndMenu();
 				}
 				ImGui::Separator();
+				// The power button only turns it off (standby, plugins kept loaded); this closes the program and frees them.
 				if (ImGui::MenuItem("Close Tone designer")) VstHostLink::StopHost();
 				ImGui::EndMenu();
 			}
@@ -1174,31 +1185,9 @@ namespace Overlay
 				if (ImGui::MenuItem("Meters", nullptr, IsOpen(Meters))) Toggle(Meters);
 				ImGui::Separator();
 				if (ImGui::MenuItem("Compare with the game's amp", nullptr, amp.comparing)) ExternalAmp::SetCompare(!amp.comparing);
-				if (ImGui::MenuItem("Mute while tuning", nullptr, vst.muteWhileTuning)) VstHostLink::SetMuteWhileTuning(!vst.muteWhileTuning);
 				if (ImGui::MenuItem("Start with the game", nullptr, vst.autoStart)) VstHostLink::SetAutoStart(!vst.autoStart);
-				ImGui::Separator();
-				// Fast tone changes: plugins kept loaded outside the chain (the host's spares). A tone that uses them
-				// switches in a moment; a heavy amp sim loaded from scratch takes seconds. They cost memory, not CPU.
-				if (ImGui::BeginMenu("Fast tone changes")) {
-					ImGui::TextDisabled("Plugins that leave the chain stay loaded:");
-					static const int counts[] = { 0, 2, 4, 8 };
-					for (int count : counts) {
-						const std::string label = count == 0 ? "No, unload them" : "The last " + std::to_string(count);
-						if (ImGui::MenuItem(label.c_str(), nullptr, vst.keepRecent == count)) VstHostLink::SetKeepRecent(count);
-					}
-					Hint("Switching back to a tone that uses them is then instant. Each one takes memory while loaded.");
-					ImGui::Separator();
-					ImGui::TextDisabled("Right-click a plugin in the browser to load it in the background,");
-					ImGui::TextDisabled("or to always keep it loaded.");
-					for (const std::wstring& failed : vst.preloadFailed) {
-						const size_t slash = failed.find_last_of(L"\\/");
-						const std::string name = Utf8(slash == std::wstring::npos ? failed : failed.substr(slash + 1));
-						ImGui::TextDisabled("Not loaded in the background: %s (it failed doing that)", name.c_str());
-					}
-					ImGui::Separator();
-					ImGui::TextDisabled("The song list's highlighted song gets its tone ready too.");
-					ImGui::EndMenu();
-				}
+				// No "Fast tone changes" menu: the host keeps recent plugins loaded on its own (RefreshKeepSettings);
+				// pinning one is the browser's right-click, and a failed background load shows on its status pill.
 				ImGui::Separator();
 				if (ImGui::MenuItem("Rescan plugins")) VstHostLink::Rescan();
 				if (ImGui::MenuItem("Add plugin folder...")) VstHostLink::AddScanFolder();
@@ -1247,32 +1236,6 @@ namespace Overlay
 					const float button = height - 12.0f;
 					const float y = (height - button) * 0.5f;
 
-					// Pedals | Songs: what the main area shows (the songs give tones to songs without playing them).
-					{
-						ImFont* modeFont = CaptionFont();
-						static const char* const modes[2] = { "Pedals", "Songs" };
-						State& st = S();
-						float mx = menusEnd + 8.0f;
-						const ImVec2 start(origin.x + mx, origin.y + y);
-						for (int i = 0; i < 2; ++i) {
-							const float w = TextWidth(modeFont, modes[i]) + 18.0f;
-							const ImVec2 at(origin.x + mx, origin.y + y);
-							const bool on = st.songsMode == (i == 1);
-							ImGui::SetCursorScreenPos(at);
-							ImGui::PushID(i);
-							if (ImGui::InvisibleButton("##mode", ImVec2(w, button))) st.songsMode = i == 1;
-							ImGui::PopID();
-							const bool hovered = ImGui::IsItemHovered();
-							Hint(i == 1 ? "Your songs in the main area: give them tones of their own without playing them, and see which wait for plugins to load."
-								: "The pedalboard: the chain you hear.");
-							if (on) list->AddRectFilled(at, ImVec2(at.x + w, at.y + button), Ink::Blue, 6.0f, i ? ImDrawFlags_RoundCornersRight : ImDrawFlags_RoundCornersLeft);
-							Text(list, modeFont, ImVec2(at.x + 9.0f, at.y + (button - modeFont->FontSize) * 0.5f), on ? IM_COL32_WHITE : hovered ? Ink::Text : Ink::Muted, modes[i]);
-							mx += w;
-						}
-						list->AddRect(start, ImVec2(origin.x + mx, origin.y + y + button), Ink::FieldEdge, 6.0f);
-						menusEnd = mx + 4.0f;
-					}
-
 					// Right: VST | Game amp, the amp window, power.
 					ImFont* caption = CaptionFont();
 					const char* sides[2] = { "VST", "Game amp" };
@@ -1299,8 +1262,8 @@ namespace Overlay
 						ToggleWindows(vst);
 					x += button + 6.0f;
 					ImGui::SetCursorScreenPos(ImVec2(origin.x + x, origin.y + y));
-					if (IconSquare("##power", Glyph::Power, false, "Close Tone designer (saves the chain). The game's amp comes back.", button))
-						VstHostLink::StopHost();
+					if (IconSquare("##power", Glyph::Power, false, "Turn Tone designer off. The game's amp comes back; your plugins stay loaded, so turning it on again is instant. File > Close Tone designer closes it completely.", button))
+						VstHostLink::TurnOff();
 
 					// Middle: < tone name >, centred in the space between the menus and A/B.
 					const float left = menusEnd + 12.0f, right = ab.x - origin.x - 12.0f;
@@ -1416,8 +1379,8 @@ namespace Overlay
 					else { SelectClick(s.selectedTones, s.toneAnchor, s.toneOrder, tone); s.selectedTone = tone; }
 				}
 				if (hovered && !onStar && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && !current && FileIdle(vst)) RequestLoad(vst, tone);
-				// Drag onto songs (Songs mode) to give them this tone.
-				if (s.songsMode && ImGui::BeginDragDropSource()) {
+				// Drag onto songs (the Songs pane) to give them this tone.
+				if (SongsShown() && ImGui::BeginDragDropSource()) {
 					ImGui::SetDragDropPayload("RAB_TONE", tone.c_str(), tone.size() + 1);
 					ImGui::Text("%s  (drop on songs)", BaseName(tone).c_str());
 					ImGui::EndDragDropSource();
@@ -1453,7 +1416,7 @@ namespace Overlay
 					ImGui::TextDisabled("%s", tone.c_str());
 					ImGui::Separator();
 					if (ImGui::MenuItem("Load", "or double-click it", false, !current && FileIdle(vst))) RequestLoad(vst, tone);
-					if (s.songsMode && !s.selectedSongs.empty()) {
+					if (SongsShown() && !s.selectedSongs.empty()) {
 						const std::string label = "Give to the " + (s.selectedSongs.size() == 1 ? std::string("selected song") : std::to_string(s.selectedSongs.size()) + " selected songs");
 						if (ImGui::MenuItem(label.c_str())) for (const std::string& key : s.selectedSongs) VstHostLink::SetToneForSong(key, tone);
 					}
@@ -1585,8 +1548,12 @@ namespace Overlay
 				ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 6.0f);
 				ImGui::TextUnformatted(songs == 0 ? "None yet" : songs == 1 ? "1 song" : (std::to_string(songs) + " songs").c_str());
 				if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-				if (ImGui::IsItemClicked()) { s.songsMode = true; s.songFilter = songs == 0 ? 0 : 1; }
-				Hint("Songs that load their own tone when they start. Click to see them (Songs, at the top), or give more songs a tone there.");
+				if (ImGui::IsItemClicked()) {
+					s.songsMode = true;
+					s.songFilter = songs == 0 ? 0 : 1;
+					if (!IsOpen(Browser)) Toggle(Browser);
+				}
+				Hint("Songs that load their own tone when they start. Click to see them (Songs, in the pane under the board), or give more songs a tone there.");
 				ImGui::PopStyleColor();
 				s.libraryContentH = ImGui::GetCursorPosY() + 10.0f;   // plus the bottom padding
 
@@ -1692,8 +1659,13 @@ namespace Overlay
 
 				ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14, 14));
 				ImGui::BeginChild("##board", ImVec2(width, height), false, ImGuiWindowFlags_AlwaysUseWindowPadding | ImGuiWindowFlags_NoScrollbar);
-				const float hintH = CaptionFont()->FontSize * 2.0f + 8.0f;
 				const float boardW = ImGui::GetContentRegionAvail().x;
+				// The hint under the rack wraps to as many lines as the board's width needs; its room is measured, not
+				// guessed, so it never runs into the pane below (plus the item spacing above it and a little air).
+				const char* boardHint = count == 0 ? "The chain is empty, so you hear your clean guitar. Click Add for an amp sim, then pedals before it (gate, drive) or after it (delay, reverb)."
+					: vst.chainBypassed ? "The whole chain is bypassed (Edit menu): you hear your clean guitar."
+					: "Right-click a pedal, a tone, or the board. Double-click a pedal to open its window. Click a footswitch to bypass. Drag a pedal or a plugin from the browser between two pedals to put it there; scroll or middle-drag to move along a long chain.";
+				const float hintH = CaptionFont()->CalcTextSizeA(CaptionFont()->FontSize, FLT_MAX, boardW, boardHint).y + ImGui::GetStyle().ItemSpacing.y + 4.0f;
 				const float rackH = std::max(150.0f, ImGui::GetContentRegionAvail().y - hintH);
 				const ImVec2 board = ImGui::GetCursorScreenPos();
 				ImDrawList* outer = ImGui::GetWindowDrawList();
@@ -1928,90 +1900,12 @@ namespace Overlay
 				ImGui::PushFont(caption);
 				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Dim));
 				ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + boardW);
-				ImGui::TextUnformatted(count == 0 ? "The chain is empty, so you hear your clean guitar. Click Add for an amp sim, then pedals before it (gate, drive) or after it (delay, reverb)."
-					: vst.chainBypassed ? "The whole chain is bypassed (Edit menu): you hear your clean guitar."
-					: "Right-click a pedal, a tone, or the board. Double-click a pedal to open its window. Click a footswitch to bypass. Drag a pedal or a plugin from the browser between two pedals to put it there; scroll or middle-drag to move along a long chain.");
+				ImGui::TextUnformatted(boardHint);
 				ImGui::PopTextWrapPos();
 				ImGui::PopStyleColor();
 				ImGui::PopFont();
 				ImGui::EndChild();
 				ImGui::PopStyleVar();
-			}
-
-			// The strip under the board: the current song and its tone.
-			void Strip(const VstHostLink::Snapshot& vst, float width)
-			{
-				ImDrawList* list = ImGui::GetWindowDrawList();
-				ImFont* caption = CaptionFont();
-				const ImVec2 at = ImGui::GetCursorScreenPos();
-				const float pad = 14.0f;
-				// The IN and OUT meters are on the board's ends (MeterColumn); the link's numbers are in the Amp link bar.
-
-				// Song row: the song, its tone, and a button to give it the tone playing now (or forget its own).
-				const ImVec2 song(at.x + pad, at.y + 10.0f);
-				std::string songAction;
-				bool songActionEnabled = true;
-				if (!vst.songKey.empty()) {
-					if (!vst.songTone.empty() && _stricmp(vst.songTone.c_str(), vst.toneName.c_str()) == 0) songAction = "Forget this song's tone";
-					else if (vst.toneName.empty() || vst.toneModified) { songAction = "Save the tone to use it here"; songActionEnabled = false; }
-					else songAction = "Use \"" + BaseName(vst.toneName) + "\" for this song";
-				}
-				const float actionW = songAction.empty() ? 0.0f : ImGui::CalcTextSize(songAction.c_str()).x + 28.0f + pad;
-				ImGui::SetCursorScreenPos(ImVec2(at.x, song.y - 4.0f));
-				ImGui::InvisibleButton("##song", ImVec2(std::max(width - actionW, 10.0f), ImGui::GetFontSize() + 10.0f));
-				DrawIcon(list, ImVec2(song.x + 8.0f, song.y + ImGui::GetFontSize() * 0.5f), Glyph::MusicNote, Ink::Soft);
-				float sx = song.x + 22.0f;
-				if (vst.songKey.empty()) {
-					const std::string note = vst.preloadingName.empty() ? std::string("Start a song to give it its own tone.")
-						: vst.waitingOnBackground ? "Waiting for " + vst.preloadingName + " to finish loading in the background, then your change goes through..."
-						: "Getting " + vst.preloadingName + " ready in the background...";
-					Text(list, caption, ImVec2(sx, song.y + 2.0f), vst.waitingOnBackground ? Ink::Amber : Ink::Dim, note.c_str());
-				}
-				else {
-					list->AddText(ImVec2(sx, song.y), Ink::Soft, vst.songKey.c_str());
-					sx += ImGui::CalcTextSize(vst.songKey.c_str()).x + 10.0f;
-					const std::string tag = !vst.songTone.empty() ? BaseName(vst.songTone)
-						: !vst.defaultTone.empty() ? "default: " + BaseName(vst.defaultTone) : "your usual tone";
-					const float tagW = TextWidth(caption, tag.c_str()) + 16.0f;
-					list->AddRectFilled(ImVec2(sx, song.y - 1.0f), ImVec2(sx + tagW, song.y + ImGui::GetFontSize() + 1.0f), Ink::Tag, 5.0f);
-					Text(list, caption, ImVec2(sx + 8.0f, song.y + (ImGui::GetFontSize() - caption->FontSize) * 0.5f), Ink::TagText, tag.c_str());
-					sx += tagW + 10.0f;
-					Text(list, caption, ImVec2(sx, song.y + 2.0f), Ink::Dim, "right-click to change");
-				}
-				PushPopupPadding();
-				if (ImGui::BeginPopupContextItem("##songMenu")) {
-					ImGui::TextDisabled("%s", vst.songKey.empty() ? "No song playing" : vst.songKey.c_str());
-					ImGui::Separator();
-					const bool canAssign = !vst.songKey.empty() && !vst.toneName.empty() && !vst.toneModified
-						&& _stricmp(vst.songTone.c_str(), vst.toneName.c_str()) != 0;
-					if (ImGui::MenuItem(vst.toneName.empty() || vst.toneModified ? "Use current tone (save it first)" : ("Use \"" + vst.toneName + "\"").c_str(),
-						nullptr, false, canAssign))
-						VstHostLink::SetSongTone(vst.toneName);
-					if (ImGui::BeginMenu("Use a saved tone", !vst.songKey.empty() && !vst.busy)) {
-						for (const std::string& tone : VstHostLink::Tones())
-							if (ImGui::MenuItem(tone.c_str(), nullptr, _stricmp(tone.c_str(), vst.songTone.c_str()) == 0)) {
-								VstHostLink::SetSongTone(tone);
-								if (_stricmp(tone.c_str(), vst.toneName.c_str()) != 0) RequestLoad(vst, tone);
-							}
-						ImGui::EndMenu();
-					}
-					if (ImGui::MenuItem("Forget (use your usual tone)", nullptr, false, !vst.songTone.empty())) VstHostLink::ClearSongTone();
-					ImGui::EndPopup();
-				}
-				ImGui::PopStyleVar();
-				if (!songAction.empty()) {
-					ImGui::SetCursorScreenPos(ImVec2(at.x + width - actionW, song.y - 5.0f));
-					ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10, 3));
-					ImGui::BeginDisabled(!songActionEnabled || vst.busy);
-					if (ImGui::Button(songAction.c_str())) {
-						if (_stricmp(vst.songTone.c_str(), vst.toneName.c_str()) == 0) VstHostLink::ClearSongTone();
-						else VstHostLink::SetSongTone(vst.toneName);
-					}
-					ImGui::EndDisabled();
-					ImGui::PopStyleVar();
-					Hint("A song with its own tone loads it whenever it starts; other songs get the default tone (right-click a tone), or keep the one playing.");
-				}
-				ImGui::SetCursorScreenPos(ImVec2(at.x, song.y + ImGui::GetFontSize() + 10.0f));
 			}
 
 			bool MatchesSearch(const VstHostLink::Plugin& plugin, const char* search)
@@ -2117,11 +2011,29 @@ namespace Overlay
 				return pressed;
 			}
 
-			// Tone choices for a menu: tones outside folders, then a submenu per folder.
+			// Tone choices for a menu: a search box, then tones outside folders and a submenu per folder. While the
+			// search has text, every matching tone is listed flat, folder included ("Tests/Test 1").
 			template <typename Pick> void ToneChoices(Pick pick)
 			{
 				const std::vector<std::string>& tones = VstHostLink::Tones();
-				if (tones.empty()) ImGui::TextDisabled("No saved tones yet");
+				if (tones.empty()) { ImGui::TextDisabled("No saved tones yet"); return; }
+				char* search = S().pickSearch;
+				if (ImGui::IsWindowAppearing()) { search[0] = 0; ImGui::SetKeyboardFocusHere(); }
+				ImGui::SetNextItemWidth(std::max(180.0f, ImGui::GetContentRegionAvail().x));
+				ImGui::InputTextWithHint("##pickSearch", "Search tones", search, sizeof(S().pickSearch));
+				if (search[0]) {
+					const std::string needle = search;
+					bool any = false;
+					for (const std::string& tone : tones) {
+						const bool hit = std::search(tone.begin(), tone.end(), needle.begin(), needle.end(),
+							[](char x, char y) { return tolower(static_cast<unsigned char>(x)) == tolower(static_cast<unsigned char>(y)); }) != tone.end();
+						if (!hit) continue;
+						any = true;
+						if (ImGui::MenuItem(tone.c_str())) pick(tone);
+					}
+					if (!any) ImGui::TextDisabled("No tone matches");
+					return;
+				}
 				for (const std::string& tone : tones) if (FolderOf(tone).empty() && ImGui::MenuItem(tone.c_str())) pick(tone);
 				for (const std::string& folder : ToneFolders(tones))
 					if (ImGui::BeginMenu(folder.c_str())) {
@@ -2130,10 +2042,42 @@ namespace Overlay
 					}
 			}
 
-			// Songs mode: the pedalboard's space shows every song in the library (SongLibrary) with its tone and how long
-			// its tone took to load when it last started (VstHostLink::SongLoads, the audit). Select songs (Ctrl or
-			// Shift for several), then drag a tone from the library onto them, right-click, or use the buttons below.
-			void SongsView(const VstHostLink::Snapshot& vst, float width, float height)
+			// Plugins | Songs: what the pane under the board shows. It is the pane's title, so it sits at the start of
+			// that pane's first row (PluginBrowser, SongsView). The choice is kept for the session (State::songsMode).
+			void PaneToggle()
+			{
+				ImFont* font = CaptionFont();
+				static const char* const modes[2] = { "Plugins", "Songs" };
+				State& s = S();
+				ImDrawList* list = ImGui::GetWindowDrawList();
+				const float height = ImGui::GetFrameHeight();
+				const ImVec2 start = ImGui::GetCursorScreenPos();
+				float x = start.x;
+				for (int i = 0; i < 2; ++i) {
+					const float w = TextWidth(font, modes[i]) + 22.0f;
+					const ImVec2 at(x, start.y);
+					const bool on = s.songsMode == (i == 1);
+					ImGui::SetCursorScreenPos(at);
+					ImGui::PushID(i);
+					if (ImGui::InvisibleButton("##pane", ImVec2(w, height))) s.songsMode = i == 1;
+					ImGui::PopID();
+					const bool hovered = ImGui::IsItemHovered();
+					Hint(i == 1 ? "Your songs: give them tones of their own without playing them, and see which wait for plugins to load. Drag a tone from the left onto them."
+						: "Every plugin found: drag one onto the board to use it.");
+					if (on) list->AddRectFilled(at, ImVec2(at.x + w, at.y + height), Ink::Blue, 6.0f, i ? ImDrawFlags_RoundCornersRight : ImDrawFlags_RoundCornersLeft);
+					Text(list, font, ImVec2(at.x + 11.0f, at.y + (height - font->FontSize) * 0.5f), on ? IM_COL32_WHITE : hovered ? Ink::Text : Ink::Muted, modes[i]);
+					x += w;
+				}
+				list->AddRect(start, ImVec2(x, start.y + height), Ink::FieldEdge, 6.0f);
+				ImGui::SetCursorScreenPos(start);
+				ImGui::Dummy(ImVec2(x - start.x, height));
+			}
+
+			// The Songs pane under the board: every song in the library (SongLibrary) with its tone and how long its
+			// tone took to load when it last started (VstHostLink::SongLoads, the audit). Select songs (Ctrl or Shift
+			// for several), then drag a tone from the library onto them, right-click, or use the buttons below.
+			// Drawn inside BottomPane's fixed-height child, on the same first row as its Plugins | Songs toggle.
+			void SongsView(const VstHostLink::Snapshot& vst)
 			{
 				State& s = S();
 				SongLibrary::Refresh();
@@ -2149,44 +2093,60 @@ namespace Overlay
 					return nullptr;
 				};
 				auto slow = [](const VstHostLink::SongLoad* load) { return load && load->seconds >= 3.0f && !load->plugins.empty(); };
-				auto assignTo = [](const std::vector<std::string>& keys, const std::string& tone) { for (const std::string& key : keys) VstHostLink::SetToneForSong(key, tone); };
+				auto playing = [&](const std::string& key) { return !vst.songKey.empty() && _stricmp(key.c_str(), vst.songKey.c_str()) == 0; };
+				// The song playing now goes through the calls the old song strip under the board used, so it behaves
+				// the same: its tone loads at once (or the one playing stays when it is taken away).
+				auto assignTo = [&](const std::vector<std::string>& keys, const std::string& tone) {
+					for (const std::string& key : keys) {
+						if (!playing(key)) VstHostLink::SetToneForSong(key, tone);
+						else if (tone.empty()) VstHostLink::ClearSongTone();
+						else {
+							VstHostLink::SetSongTone(tone);
+							if (_stricmp(tone.c_str(), vst.toneName.c_str()) != 0) RequestLoad(vst, tone);
+						}
+					}
+				};
 
-				ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12, 10));
-				ImGui::BeginChild("##songsView", ImVec2(width, height), false, ImGuiWindowFlags_AlwaysUseWindowPadding | ImGuiWindowFlags_NoScrollbar);
-				ImGui::PopStyleVar();
 				ImFont* caption = CaptionFont();
-				const float inner = ImGui::GetContentRegionAvail().x;
-				const float left = ImGui::GetCursorPosX();
+				const float left = ImGui::GetCursorStartPos().x;
+				const float inner = ImGui::GetWindowContentRegionMax().x - left;
 
-				// Top line: search, filters, count.
-				ImGui::SetNextItemWidth(std::min(200.0f, inner * 0.3f));
-				ImGui::PushStyleColor(ImGuiCol_FrameBg, ImGui::ColorConvertU32ToFloat4(Ink::Field));
-				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8, 4));
-				ImGui::InputTextWithHint("##songSearch", "Search songs or artists", s.songSearch, sizeof(s.songSearch));
-				ImGui::PopStyleVar();
-				ImGui::PopStyleColor();
-				enum { AllSongs, WithTone, SlowToLoad, SongFilterCount };
-				static const char* const chips[SongFilterCount] = { "All", "With a tone", "Slow to load" };
-				for (int c = 0; c < SongFilterCount; ++c) {
-					ImGui::SameLine(0.0f, c == 0 ? 10.0f : 6.0f);
-					if (Chip(chips[c], s.songFilter == c)) s.songFilter = c;
-					if (c == SlowToLoad) Hint("Songs whose tone waited 3 s or more for plugins to load when they last started. Always keep loaded (right-click the plugin in the plugin browser) makes them instant; songs you rarely play can stay as they are.");
-				}
+				// Title row (after the toggle), laid out like the plugin browser's: the count, search on the right.
+				// While a tone's plugins load in the background (what the old song strip under the board said), that
+				// shows in place of the count; amber while a change waits for it.
 				const SongLibrary::State state = SongLibrary::GetState();
-				const std::string count = state == SongLibrary::State::Reading && library->songs.empty() ? std::string("reading your songs...")
+				const std::string count = !vst.preloadingName.empty()
+					? (vst.waitingOnBackground ? "Waiting for " + vst.preloadingName + " to finish loading, then your change goes through..."
+						: "Getting " + vst.preloadingName + " ready in the background...")
+					: state == SongLibrary::State::Reading && library->songs.empty() ? std::string("reading your songs...")
 					: std::to_string(library->songs.size()) + " songs, " + std::to_string(songTones.size()) + " with a tone";
-				const float countW = TextWidth(caption, count.c_str());
-				ImGui::SameLine(0.0f, 10.0f);
-				if (ImGui::GetCursorPosX() + countW < left + inner) {
-					ImGui::SetCursorPosX(left + inner - countW);
+				const float searchW = std::min(240.0f, inner * 0.4f);
+				ImGui::SameLine(0.0f, 12.0f);
+				if (ImGui::GetCursorPosX() + TextWidth(caption, count.c_str()) + 12.0f < left + inner - searchW) {
 					ImGui::PushFont(caption);
-					ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Dim));
+					ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(vst.waitingOnBackground && !vst.preloadingName.empty() ? Ink::Amber : Ink::Dim));
 					ImGui::AlignTextToFramePadding();
 					ImGui::TextUnformatted(count.c_str());
 					ImGui::PopStyleColor();
 					ImGui::PopFont();
 				}
-				else ImGui::NewLine();
+				ImGui::SameLine(left + inner - searchW);
+				ImGui::SetNextItemWidth(searchW);
+				ImGui::PushStyleColor(ImGuiCol_FrameBg, ImGui::ColorConvertU32ToFloat4(Ink::Field));
+				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8, 4));
+				ImGui::InputTextWithHint("##songSearch", "Search songs or artists", s.songSearch, sizeof(s.songSearch));
+				ImGui::PopStyleVar();
+				ImGui::PopStyleColor();
+
+				// Filter chips.
+				enum { AllSongs, WithTone, SlowToLoad, SongFilterCount };
+				static const char* const chips[SongFilterCount] = { "All", "With a tone", "Slow to load" };
+				ImGui::SetCursorPosX(left);
+				for (int c = 0; c < SongFilterCount; ++c) {
+					if (c > 0) ImGui::SameLine(0.0f, 6.0f);
+					if (Chip(chips[c], s.songFilter == c)) s.songFilter = c;
+					if (c == SlowToLoad) Hint("Songs whose tone waited 3 s or more for plugins to load when they last started. Always keep loaded (right-click the plugin in the plugin browser) makes them instant; songs you rarely play can stay as they are.");
+				}
 
 				// Rows: the library's songs, and song keys with a tone or a load record the library does not have.
 				struct Row { std::string key, title, artist; const SongLibrary::Song* song; };
@@ -2215,12 +2175,23 @@ namespace Overlay
 				for (const auto& entry : loads) addOrphan(entry.first);
 				if (s.songFilter == SlowToLoad)
 					std::sort(rows.begin(), rows.end(), [&](const Row& x, const Row& y) { return loadOf(x.key)->seconds > loadOf(y.key)->seconds; });
+				// The song playing now goes first, with a green dot: its tone is changed here (right-click it), now
+				// that the strip under the board is gone.
+				std::stable_partition(rows.begin(), rows.end(), [&](const Row& r) { return playing(r.key); });
 				std::vector<std::string> order;
 				order.reserve(rows.size());
 				for (const Row& row : rows) order.push_back(row.key);
 
-				// Column heads.
-				const float titleX = 8.0f, artistX = inner * 0.40f, toneX = inner * 0.66f;
+				// Column widths: the Tone column fits the longest tone name (capped), the slow-load seconds keep their
+				// own narrow column at the end, and Song and Artist share the rest, Song the larger part.
+				float toneColW = TextWidth(caption, "Tone") + 16.0f;
+				for (const auto& entry : songTones) toneColW = std::max(toneColW, TextWidth(caption, BaseName(entry.second).c_str()) + 24.0f);
+				toneColW = std::min(toneColW, inner * 0.28f);
+				bool anySlow = false;
+				for (const Row& row : rows) anySlow = anySlow || slow(loadOf(row.key));
+				const float lastColW = anySlow ? TextWidth(caption, "99 s") + 18.0f : 0.0f;
+				const float titleX = 8.0f, toneX = std::floor(inner - 8.0f - lastColW - toneColW);
+				const float artistX = std::floor(titleX + (toneX - titleX) * 0.58f);
 				ImDrawList* list = ImGui::GetWindowDrawList();
 				{
 					const ImVec2 at = ImGui::GetCursorScreenPos();
@@ -2231,11 +2202,13 @@ namespace Overlay
 					list->AddLine(ImVec2(at.x, at.y + caption->FontSize + 4.0f), ImVec2(at.x + inner, at.y + caption->FontSize + 4.0f), Ink::Edge);
 				}
 
-				const bool canUseCurrent = !vst.toneName.empty() && !vst.toneModified;
-				const std::string useCurrent = "Use \"" + (vst.toneName.empty() ? std::string("current tone") : BaseName(vst.toneName)) + "\"";
-				const float footH = ImGui::GetFontSize() + 12.0f;
+				// The foot row holds Buttons (FramePadding 7 each side, see Button): its full height, the gap above it
+				// and the item spacing on both sides, so nothing is cut off at the pane's edge (the 14 inset is the
+				// child's window padding, outside the content region).
+				const float itemGap = ImGui::GetStyle().ItemSpacing.y;
+				const float footH = ImGui::GetFontSize() + 14.0f + 4.0f + 2.0f * itemGap;
 				const float listH = std::max(ImGui::GetContentRegionAvail().y - footH, 40.0f);
-				const float rowH = ImGui::GetFontSize() + 8.0f;
+				const float rowH = ImGui::GetFontSize() + 10.0f;   // the plugin browser's row height
 				if (rows.empty()) {
 					ImGui::PushFont(caption);
 					ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Muted));
@@ -2288,6 +2261,7 @@ namespace Overlay
 									about += std::string("\nLast start: \"") + load->tone + "\" ready in " + seconds + " s"
 										+ (load->plugins.empty() ? std::string(", every plugin already loaded.") : ", loading " + load->plugins + " from scratch.");
 								}
+								if (playing(row.key)) about = "Playing now.\n" + about;
 								about += "\n\nDrag a tone from the left onto it, or right-click.";
 								Hint(about.c_str());
 							}
@@ -2297,7 +2271,6 @@ namespace Overlay
 								const std::vector<std::string> keys = s.selectedSongs;
 								ImGui::TextDisabled("%s", keys.size() == 1 ? row.title.c_str() : (std::to_string(keys.size()) + " songs").c_str());
 								ImGui::Separator();
-								if (ImGui::MenuItem(useCurrent.c_str(), nullptr, false, canUseCurrent)) assignTo(keys, vst.toneName);
 								if (ImGui::BeginMenu("Give it a tone")) { ToneChoices([&](const std::string& t) { assignTo(keys, t); }); ImGui::EndMenu(); }
 								bool anyTone = false;
 								for (const std::string& key : keys) anyTone = anyTone || !toneOf(key).empty();
@@ -2311,8 +2284,13 @@ namespace Overlay
 							else if (hovered) rowsList->AddRectFilled(at, end, Ink::RowHover, 5.0f);
 							const float textY = at.y + (rowH - ImGui::GetFontSize()) * 0.5f;
 							const float captionY = at.y + (rowH - caption->FontSize) * 0.5f;
+							float nameX = titleX;
+							if (playing(row.key)) {
+								rowsList->AddCircleFilled(ImVec2(at.x + titleX + 4.0f, at.y + rowH * 0.5f), 3.5f, Ink::Good, 12);
+								nameX += 14.0f;
+							}
 							rowsList->PushClipRect(ImVec2(at.x + titleX, at.y), ImVec2(at.x + artistX - 8.0f, end.y), true);
-							rowsList->AddText(ImVec2(at.x + titleX, textY), IM_COL32_WHITE, row.title.c_str());
+							rowsList->AddText(ImVec2(at.x + nameX, textY), IM_COL32_WHITE, row.title.c_str());
 							rowsList->PopClipRect();
 							rowsList->PushClipRect(ImVec2(at.x + artistX, at.y), ImVec2(at.x + toneX - 8.0f, end.y), true);
 							Text(rowsList, caption, ImVec2(at.x + artistX, captionY), Ink::Muted, row.artist.c_str());
@@ -2329,6 +2307,7 @@ namespace Overlay
 								Text(rowsList, caption, ImVec2(at.x + toneX + 8.0f, captionY), Ink::TagText, tag.c_str());
 								rowsList->PopClipRect();
 							}
+							else Text(rowsList, caption, ImVec2(at.x + toneX + 8.0f, captionY), Ink::Dim, "-");   // no tone of its own
 							ImGui::PopID();
 						}
 					}
@@ -2348,11 +2327,7 @@ namespace Overlay
 					ImGui::PopStyleColor();
 					ImGui::PopFont();
 					ImGui::SameLine();
-					ImGui::BeginDisabled(!canUseCurrent);
-					if (Button(useCurrent.c_str(), true)) assignTo(keys, vst.toneName);
-					ImGui::EndDisabled();
-					ImGui::SameLine();
-					if (Button("Give it a tone...")) ImGui::OpenPopup("##songTonePick");
+					if (Button("Give it a tone...", true)) ImGui::OpenPopup("##songTonePick");
 					bool anyTone = false;
 					for (const std::string& key : keys) anyTone = anyTone || !toneOf(key).empty();
 					if (anyTone) {
@@ -2371,28 +2346,21 @@ namespace Overlay
 					ImGui::PopStyleColor();
 					ImGui::PopFont();
 				}
-				ImGui::EndChild();
 			}
 
 			// Under the board: every plugin found, with search, filters, type and status.
-			void PluginBrowser(const VstHostLink::Snapshot& vst, float width)
+			// Drawn inside BottomPane's fixed-height child, on the same first row as its Plugins | Songs toggle.
+			void PluginBrowser(const VstHostLink::Snapshot& vst)
 			{
 				State& s = S();
 				const std::vector<VstHostLink::Plugin>& plugins = VstHostLink::Plugins();
 				const bool canAdd = !vst.busy && vst.slots.size() < static_cast<size_t>(VstHostControl::kMaxSlots);
 				const bool canReplace = !vst.busy && s.selected >= 0 && s.selected < static_cast<int>(vst.slots.size());
 				ImFont* caption = CaptionFont();
-				const float pad = 14.0f;
-				const float left = ImGui::GetCursorPosX() + pad;
-				const float inner = width - 2.0f * pad;
-				ImGui::Dummy(ImVec2(0, 4));
+				const float left = ImGui::GetCursorStartPos().x;
+				const float inner = ImGui::GetWindowContentRegionMax().x - left;
 
-				// Title, count and search on one line.
-				ImGui::SetCursorPosX(left);
-				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(IM_COL32_WHITE));
-				ImGui::AlignTextToFramePadding();
-				ImGui::TextUnformatted("Plugin browser");
-				ImGui::PopStyleColor();
+				// Title row (after the toggle): count and search.
 				// Two summary chips: what was found and how much of it is in the chain, then how many plugins are
 				// loaded outside the chain (the host's spares), so the speed of a tone change is not a mystery.
 				const float chipH = ImGui::GetFrameHeight();
@@ -2409,12 +2377,11 @@ namespace Overlay
 					+ std::to_string(vst.slots.size()) + " in chain";
 				const std::string foundHint = "Found in " + std::to_string(folders) + (folders == 1 ? " folder" : " folders") + ". View > Add plugin folder for more; Rescan after installing.";
 				summaryChip("##foundChip", found, Ink::Good, foundHint.c_str());
-				int loadedOutside = 0;
-				for (const std::wstring& spare : vst.spares) if (!InChain(vst, spare)) ++loadedOutside;
-				if (loadedOutside > 0 || !vst.preloadingName.empty()) {
-					const std::string kept = !vst.preloadingName.empty() ? "Loading " + vst.preloadingName + " in the background..."
-						: std::to_string(loadedOutside) + (loadedOutside == 1 ? " plugin" : " plugins") + " loaded for fast tone changes";
-					summaryChip("##keptChip", kept, Ink::Blue, "Plugins kept loaded outside the chain: a tone that uses them switches at once instead of waiting seconds for each one to start. Right-click a plugin to load it in the background, always keep it loaded, or unload it. View > Fast tone changes sets how many recent ones stay.");
+				// The plugins kept loaded outside the chain work behind the scenes (no count shown); only a background
+				// load shows, since tone file actions wait for it.
+				if (!vst.preloadingName.empty()) {
+					const std::string loading = "Loading " + vst.preloadingName + " in the background...";
+					summaryChip("##keptChip", loading, Ink::Blue, "Getting it ready so a tone that uses it switches at once. Saving or opening a tone waits until it has loaded.");
 				}
 				const float searchW = std::min(240.0f, inner * 0.4f);
 				ImGui::SameLine(left + inner - searchW);
@@ -2465,23 +2432,38 @@ namespace Overlay
 					list->AddLine(ImVec2(at.x, at.y + caption->FontSize + 4.0f), ImVec2(at.x + inner, at.y + caption->FontSize + 4.0f), Ink::Edge);
 				}
 				const float rowH = ImGui::GetFontSize() + 10.0f;
+				// The list fills the pane down to the foot (buttons, then the selected plugin's line and any warning),
+				// so the pane keeps one height whatever is listed or selected; the list is what gives way.
+				const VstHostLink::Plugin* picked = FindPlugin(s.selectedPlugin);
+				static const char* const instrumentWarning = "This is an instrument: it makes its own sound from MIDI notes and does nothing with a guitar.";
+				const std::string selectedLine = !picked ? std::string() : picked->name + (picked->vendor.empty() ? "" : ", " + picked->vendor)
+					+ (picked->version.empty() ? "" : " " + picked->version) + ":  " + Utf8(picked->path);
+				const float itemGap = ImGui::GetStyle().ItemSpacing.y;
+				float footH = 2.0f + 2.0f * itemGap + ImGui::GetFontSize() + 14.0f;   // Dummy(2), Button's 7 + 7 padding
+				if (picked) footH += itemGap + caption->CalcTextSizeA(caption->FontSize, FLT_MAX, inner, selectedLine.c_str()).y;
+				if (picked && picked->kind == VstHostLink::Kind::Instrument)
+					footH += itemGap + ImGui::GetFont()->CalcTextSizeA(ImGui::GetFontSize(), FLT_MAX, inner, instrumentWarning).y;
+				const float listH = std::max(rowH * 2.0f, ImGui::GetContentRegionAvail().y - footH);
 				if (rows.empty()) {
 					ImGui::SetCursorPosX(left);
+					ImGui::BeginChild("##plugins", ImVec2(inner, listH), false);
 					ImGui::PushFont(caption);
 					ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Muted));
+					ImGui::PushTextWrapPos(0.0f);
 					ImGui::TextUnformatted(plugins.empty() ? "No 64-bit VST3 plugins found. Install some, or View, Add plugin folder if they are somewhere else."
 						: s.filter == Favourites ? "No favourites yet: click the star next to a plugin."
 						: s.filter == Recent ? "Plugins you add show here."
 						: "Nothing matches.");
+					ImGui::PopTextWrapPos();
 					ImGui::PopStyleColor();
 					ImGui::PopFont();
+					ImGui::EndChild();
 				}
 				else {
-					const int shownRows = std::min(static_cast<int>(rows.size()), 7);
 					ImGui::SetCursorPosX(left);
 					ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
 					ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, 6.0f);
-					ImGui::BeginChild("##plugins", ImVec2(inner, shownRows * rowH), false);
+					ImGui::BeginChild("##plugins", ImVec2(inner, listH), false);
 					ImDrawList* rowsList = ImGui::GetWindowDrawList();
 					const float rowW = ImGui::GetContentRegionAvail().x;
 					for (size_t r = 0; r < rows.size(); ++r) {
@@ -2569,7 +2551,7 @@ namespace Overlay
 				}
 
 				// The selected plugin, and what can be done with it.
-				const VstHostLink::Plugin* selected = FindPlugin(s.selectedPlugin);
+				const VstHostLink::Plugin* selected = picked;
 				ImGui::Dummy(ImVec2(0, 2));
 				ImGui::SetCursorPosX(left);
 				ImGui::BeginDisabled(!selected || !canAdd);
@@ -2586,34 +2568,32 @@ namespace Overlay
 					VstHostLink::AddScanFolder();
 				if (selected) {
 					ImGui::SetCursorPosX(left);
-					std::string line = selected->name + (selected->vendor.empty() ? "" : ", " + selected->vendor) + (selected->version.empty() ? "" : " " + selected->version)
-						+ ":  " + Utf8(selected->path);
 					ImGui::PushFont(caption);
 					ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Dim));
 					ImGui::PushTextWrapPos(left + inner);
-					ImGui::TextUnformatted(line.c_str());
+					ImGui::TextUnformatted(selectedLine.c_str());
 					ImGui::PopTextWrapPos();
 					ImGui::PopStyleColor();
 					ImGui::PopFont();
 					if (selected->kind == VstHostLink::Kind::Instrument) {
 						ImGui::SetCursorPosX(left);
-						WarnCaption("This is an instrument: it makes its own sound from MIDI notes and does nothing with a guitar.");
+						WarnCaption(instrumentWarning);
 					}
 				}
-				ImGui::Dummy(ImVec2(0, 6));
 			}
 
 			void LevelsDialogBody(const VstHostLink::Snapshot& vst)
 			{
-				// Trims around the chain. Dragging sends the new level as it moves (the overlay coalesces them).
+				// Trims around the chain: the player's own, the same for every tone (a tone's levels are its author's job, set in
+				// its plugins; loading one never moves these). Dragging sends the new level as it moves (the overlay coalesces them).
 				static float inputDb = 0.0f, outputDb = 0.0f;
 				static bool dragging = false;
 				if (!dragging) { inputDb = vst.inputTenths / 10.0f; outputDb = vst.outputTenths / 10.0f; }
 				bool inputDone = false, outputDone = false;
 				const bool inputMoved = SliderRow("Into the chain", &inputDb, -24.0f, 24.0f, "%+.1f dB", &inputDone,
-					"Level of your guitar going into the first plugin. Amp sims expect a real guitar's level; raise it if they sound thin.");
+					"Level of your guitar going into the first plugin, the same for every tone. Amp sims expect a real guitar's level; raise it if tones sound thin or quiet.");
 				const bool outputMoved = SliderRow("Out of the chain", &outputDb, -24.0f, 24.0f, "%+.1f dB", &outputDone,
-					"Level of the whole chain going to the game.");
+					"Level of the whole chain going to the game, the same for every tone.");
 				if (inputMoved || outputMoved) {
 					dragging = true;
 					VstHostLink::SetLevels(static_cast<int>(std::lround(inputDb * 10.0f)), static_cast<int>(std::lround(outputDb * 10.0f)));
@@ -2649,9 +2629,13 @@ namespace Overlay
 				const char* id = "##toneDialog";
 				if (s.openDialog) { ImGui::OpenPopup(id); s.openDialog = false; }
 				ImGui::SetNextWindowSize(ImVec2(s.dialog == Dialog::Levels ? 520.0f : 440.0f, 0.0f), ImGuiCond_Always);
-				ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+				// Opens over the middle of the overlay window (wherever it has been dragged), not the screen, and can then be dragged
+				// by its background like any other window.
+				const ImGuiWindow* overlay = ImGui::GetCurrentWindow()->RootWindow;
+				ImGui::SetNextWindowPos(ImVec2(overlay->Pos.x + overlay->Size.x * 0.5f, overlay->Pos.y + overlay->Size.y * 0.5f),
+					ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
 				ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(22, 18));
-				if (ImGui::BeginPopupModal(id, nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize)) {
+				if (ImGui::BeginPopupModal(id, nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize)) {
 					auto heading = [](const std::string& text) {
 						ImGui::PushFont(GetFonts().title ? GetFonts().title : ImGui::GetFont());
 						ImGui::TextUnformatted(text.c_str());
@@ -2773,27 +2757,67 @@ namespace Overlay
 				ImGui::PopStyleVar();
 			}
 
-			// The framed panel: bar, library + board, strip, browser. Backgrounds are drawn on the page's draw list
-			// first; the parts are child windows on top.
+			// The pane under the board has one fixed height, worked out from the fonts alone (title row, chips, column
+			// heads, seven list rows, the foot), never from what either pane drew last: switching Plugins | Songs, picking
+			// a plugin or filtering moves nothing, and the page and the overlay window keep their size. Inside, each
+			// pane's list takes what its foot leaves (PluginBrowser, SongsView).
+			float BottomPaneHeight()
+			{
+				const ImGuiStyle& style = ImGui::GetStyle();
+				const float pad = 14.0f, gap = style.ItemSpacing.y;
+				const float frame = ImGui::GetFrameHeight();
+				const float rowH = ImGui::GetFontSize() + 10.0f;
+				const float buttonH = ImGui::GetFontSize() + 14.0f;
+				const float caption = CaptionFont()->FontSize;
+				return std::floor(pad + frame + gap + frame + gap + caption + 2.0f + gap + 7.0f * rowH
+					+ gap + 2.0f + gap + buttonH + gap + caption * 2.0f + pad);
+			}
+
+			// The bottom pane: one child of that fixed height with the same insets for both panes; the Plugins | Songs
+			// toggle is drawn here, first on the title row, so it is at the same place whichever pane is showing.
+			void BottomPane(const VstHostLink::Snapshot& vst, float width, float height)
+			{
+				ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14, 14));
+				ImGui::BeginChild("##bottomPane", ImVec2(width, height), false,
+					ImGuiWindowFlags_AlwaysUseWindowPadding | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+				ImGui::PopStyleVar();
+				PaneToggle();
+				if (SongsShown()) SongsView(vst);
+				else PluginBrowser(vst);
+				ImGui::EndChild();
+			}
+
+			// The framed panel: bar, library + board, then the bottom pane. Backgrounds are drawn on the page's draw
+			// list first; the parts are child windows on top.
 			void Panel(const VstHostLink::Snapshot& vst, const ExternalAmp::Snapshot& amp)
 			{
 				const float width = ImGui::GetContentRegionAvail().x;
 				const float barH = ImGui::GetFontSize() + 20.0f;
-				const float stripH = ImGui::GetFontSize() + 20.0f;   // the song row; the meters are on the board
-				// The board (or songs view) takes whatever height the page has left, never less than 250. The
-				// browser's height is only known after it is drawn, so last frame's is used; a frame late on a resize.
-				const float browserH = IsOpen(Browser) ? S().browserH : 0.0f;
+				// The board takes whatever height the page has left, never less than kMinBoardH. The bottom pane's height
+				// is BottomPaneHeight (from the fonts) plus what the divider between them was dragged by (paneExtra,
+				// remembered), so nothing here depends on the last frame. The divider trades height between the two:
+				// the page's natural height uses the undragged pane, so dragging never grows or shrinks the window.
+				constexpr float kMinBoardH = 160.0f;
+				// The divider has its own strip between the board and the pane: over either of them, those child windows
+				// would take the mouse and it could never be grabbed.
+				constexpr float kDividerH = 8.0f;
+				State& s = S();
+				const float basePaneH = BottomPaneHeight();
+				const float rowH = ImGui::GetFontSize() + 10.0f;
+				const float minPaneH = basePaneH - 4.0f * rowH;   // three list rows left
+				const float dividerH = IsOpen(Browser) ? kDividerH : 0.0f;
+				const float maxPaneH = std::max(minPaneH, std::floor(ImGui::GetContentRegionAvail().y - barH - dividerH - 12.0f - kMinBoardH));
+				const float paneH = IsOpen(Browser) ? std::clamp(std::floor(basePaneH + s.paneExtra), minPaneH, maxPaneH) : 0.0f;
 				g_pageFillsHeight = true;
 				// The height the page would like until the window is dragged: the board's own, or the tone list's when
 				// that is taller, so a short library does not open as an empty column (the shell caps it to the screen).
-				const float naturalMainH = std::max(300.0f, IsOpen(Library) ? S().libraryContentH : 0.0f);
-				g_pageNaturalHeight = ImGui::GetCursorPosY() + barH + naturalMainH + stripH + browserH + 12.0f + 20.0f;
-				const float mainH =std::max(250.0f, std::floor(ImGui::GetContentRegionAvail().y - barH - stripH - browserH - 12.0f));
+				const float naturalMainH = std::max(300.0f, IsOpen(Library) ? s.libraryContentH : 0.0f);
+				g_pageNaturalHeight = ImGui::GetCursorPosY() + barH + naturalMainH + (IsOpen(Browser) ? basePaneH : 0.0f) + dividerH + 12.0f + 20.0f;
+				const float mainH = std::max(kMinBoardH, std::floor(ImGui::GetContentRegionAvail().y - barH - dividerH - paneH - 12.0f));
 				const float libraryW = IsOpen(Library) ? std::min(240.0f, width * 0.32f) : 0.0f;
 				const ImVec2 at = ImGui::GetCursorScreenPos();
 				ImDrawList* list = ImGui::GetWindowDrawList();
-				// The browser's height is only known after it is drawn: split the draw list so the panel's background
-				// (channel 0) goes under everything drawn after it (channel 1).
+				// Split the draw list so the panel's background (channel 0) goes under everything drawn after it (channel 1).
 				list->ChannelsSplit(2);
 				list->ChannelsSetCurrent(1);
 
@@ -2803,14 +2827,27 @@ namespace Overlay
 					LibraryColumn(vst, libraryW, mainH);
 					ImGui::SameLine(0.0f, 0.0f);
 				}
-				if (S().songsMode) SongsView(vst, width - libraryW, mainH);
-				else Board(vst, width - libraryW, mainH);
-				ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + barH + mainH));
-				Strip(vst, width);
-				const float browserTop = ImGui::GetCursorScreenPos().y;
-				if (IsOpen(Browser)) PluginBrowser(vst, width);
-				const float bottom = std::max(ImGui::GetCursorScreenPos().y, browserTop);
-				S().browserH = bottom - browserTop;
+				Board(vst, width - libraryW, mainH);
+				const float dividerTop = at.y + barH + mainH;
+				const float browserTop = dividerTop + dividerH;
+				ImGui::SetCursorScreenPos(ImVec2(at.x, browserTop));
+				if (IsOpen(Browser)) BottomPane(vst, width, paneH);
+				const float bottom = browserTop + paneH;
+				// The divider: drag the line between the board and the pane under it; double-click puts it back.
+				bool dividerHot = false;
+				if (IsOpen(Browser)) {
+					ImGui::SetCursorScreenPos(ImVec2(at.x + 12.0f, dividerTop));
+					ImGui::InvisibleButton("##paneDivider", ImVec2(width - 24.0f, dividerH));
+					dividerHot = ImGui::IsItemHovered() || ImGui::IsItemActive();
+					if (dividerHot) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+					if (ImGui::IsItemActive() && ImGui::GetIO().MouseDelta.y != 0.0f)
+						s.paneExtra = std::clamp(paneH - ImGui::GetIO().MouseDelta.y, minPaneH, maxPaneH) - basePaneH;
+					if (ImGui::IsItemDeactivated()) VstHostLink::SetBottomPaneExtra(static_cast<int>(s.paneExtra));
+					if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+						s.paneExtra = 0.0f;
+						VstHostLink::SetBottomPaneExtra(0);
+					}
+				}
 
 				list->ChannelsSetCurrent(0);
 				const ImVec2 end(at.x + width, bottom);
@@ -2818,15 +2855,16 @@ namespace Overlay
 				list->AddRectFilled(at, ImVec2(end.x, at.y + barH), Ink::Bar, 12.0f, ImDrawFlags_RoundCornersTop);
 				list->AddLine(ImVec2(at.x, at.y + barH), ImVec2(end.x, at.y + barH), Ink::Edge);
 				if (libraryW > 0.0f) {
-					list->AddRectFilled(ImVec2(at.x, at.y + barH + 1.0f), ImVec2(at.x + libraryW, at.y + barH + mainH), Ink::Library);
+					list->AddRectFilled(ImVec2(at.x, at.y + barH + 1.0f), ImVec2(at.x + libraryW, at.y + barH + mainH), Ink::Library,
+						IsOpen(Browser) ? 0.0f : 12.0f, IsOpen(Browser) ? 0 : ImDrawFlags_RoundCornersBottomLeft);
 					list->AddLine(ImVec2(at.x + libraryW, at.y + barH), ImVec2(at.x + libraryW, at.y + barH + mainH), Ink::Edge);
 				}
-				if (stripH > 0.0f) {
-					list->AddRectFilled(ImVec2(at.x, at.y + barH + mainH), ImVec2(end.x, at.y + barH + mainH + stripH), Ink::Bar,
-						IsOpen(Browser) ? 0.0f : 12.0f, IsOpen(Browser) ? 0 : ImDrawFlags_RoundCornersBottom);
-					list->AddLine(ImVec2(at.x, at.y + barH + mainH), ImVec2(end.x, at.y + barH + mainH), Ink::Edge);
+				if (IsOpen(Browser)) {
+					const float lineY = dividerTop + dividerH * 0.5f;
+					list->AddLine(ImVec2(at.x, lineY), ImVec2(end.x, lineY), dividerHot ? Ink::Blue : Ink::Edge, dividerHot ? 2.0f : 1.0f);
+					const float mid = at.x + width * 0.5f;   // a grip in the middle says it moves
+					list->AddRectFilled(ImVec2(mid - 18.0f, lineY - 2.0f), ImVec2(mid + 18.0f, lineY + 2.0f), dividerHot ? Ink::Blue : Ink::FieldEdge, 2.0f);
 				}
-				if (IsOpen(Browser)) list->AddLine(ImVec2(at.x, browserTop), ImVec2(end.x, browserTop), Ink::Edge);
 				list->AddRect(at, end, Ink::Edge, 12.0f);
 				list->ChannelsMerge();
 				ImGui::SetCursorScreenPos(ImVec2(at.x, bottom + 6.0f));
@@ -2837,6 +2875,9 @@ namespace Overlay
 		void ToneDesignerTab()
 		{
 			using namespace ToneDesigner;
+			// Start reading the song library as soon as the page is shown, so the Songs pane is ready when it is
+			// opened. Refresh() runs on its own thread and only starts once a session (later calls return at once).
+			SongLibrary::Refresh();
 			const ExternalAmp::Snapshot amp = ExternalAmp::GetSnapshot();
 			const VstHostLink::Snapshot vst = VstHostLink::GetSnapshot();
 
@@ -2875,14 +2916,26 @@ namespace Overlay
 				EndCard();
 				return;
 			}
-			if (!vst.hostRunning) {
+			// Off: either closed, or in standby (the power button), where the host keeps its plugins loaded and goes on
+			// loading the always-loaded ones, so turning it on is instant.
+			if (!vst.hostRunning || vst.standby) {
 				BeginCard();
-				Caption("Tone designer is off. Starting it brings back the chain you had last.");
+				if (!vst.standby) Caption("Tone designer is off. Starting it brings back the chain you had last.");
+				else if (vst.loading || !vst.preloadingName.empty())
+					Caption(("Tone designer is off; the game's amp is playing. Getting " + (vst.loading ? std::string("your chain") : vst.preloadingName) + " ready in the background.").c_str());
+				else Caption("Tone designer is off; the game's amp is playing. Your plugins are still loaded, so it turns on at once.");
 				if (otherApp) WarnCaption(otherAppText.c_str());
-				if (Button("Start Tone designer", true, "Starts the VST host in its own 64-bit program; your guitar plays through it once it connects."))
+				if (!vst.loadError.empty() && vst.standby) WarnCaption(vst.loadError.c_str());
+				if (Button(vst.standby ? "Turn on" : "Start Tone designer", true, vst.standby ? "Your guitar plays through the chain again."
+					: "Starts the VST host in its own 64-bit program; your guitar plays through it once it connects."))
 					VstHostLink::StartHost();
+				if (vst.standby) {
+					ImGui::SameLine();
+					if (Button("Close completely", false, "Closes the VST host and unloads every plugin, freeing their memory. Always-loaded plugins load again next time the game starts."))
+						VstHostLink::StopHost();
+				}
 				bool autoStart = vst.autoStart;
-				if (ToggleRow("Start with the game", "Starts Tone designer with your last chain when Rocksmith starts.", &autoStart))
+				if (ToggleRow("Start with the game", "Starts Tone designer with your last chain when Rocksmith starts. Off, but with plugins marked Always keep loaded, it starts switched off and loads those in the background.", &autoStart))
 					VstHostLink::SetAutoStart(autoStart);
 				EndCard();
 				return;
@@ -3760,11 +3813,15 @@ namespace Overlay
 					labels.push_back(view.names[0][view.device[0]] + " / " + view.names[0][view.device[0] + 1]);
 					channels.push_back(view.device[0]);
 				}
-				// The output pair stands apart from the inputs: its own inset strip with a speaker icon.
-				BeginInset(ImGui::GetFrameHeight(), Glyph::Speaker, Color::AccentHi);
-				if (DropdownRow("Output pair", &index, labels, ("The pair of outputs of " + Utf8(outputInterface) + " the game's sound plays on. The interface itself is picked in Switch output above.").c_str()))
-					ApplyRoute(0, channels[static_cast<size_t>(index)]);
-				EndInset();
+				// The output pair stands apart from the inputs: its own inset strip with a speaker icon. Most interfaces
+				// have one stereo pair, where a dropdown that can't change anything only confuses, so it only shows when
+				// there is a real choice (4+ outputs, or an odd pair saved earlier to move off).
+				if (labels.size() > 1) {
+					BeginInset(ImGui::GetFrameHeight(), Glyph::Speaker, Color::AccentHi);
+					if (DropdownRow("Output pair", &index, labels, ("The pair of outputs of " + Utf8(outputInterface) + " the game's sound plays on. The interface itself is picked in Switch output above.").c_str()))
+						ApplyRoute(0, channels[static_cast<size_t>(index)]);
+					EndInset();
+				}
 			}
 			// The inputs share one strip of tabs (Player 1 | Player 2 | Mic) and only the selected role's rows show,
 			// without the role name on every label ("Interface", not "Player 1 interface"). Each tab has a muted
@@ -4013,7 +4070,7 @@ namespace Overlay
 				std::error_code ec;
 				const bool hasSession = std::filesystem::is_directory(session, ec);
 				if (!hasSession) std::filesystem::create_directories(folder, ec);
-				ShellExecuteW(nullptr, L"open", (hasSession ? session : folder).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+				ShellOpenAsync::Open(hasSession ? session : folder);   // off the render thread (a 103 ms frame here)
 			}
 			RecordHotkeyPicker();
 			Caption("Each game launch saves into its own dated folder. The hotkey uses the format chosen above. Change the folder in RSMods, Rocksmith Audio Bridge page.");
@@ -4026,6 +4083,13 @@ namespace Overlay
 			static bool seeded = false;
 			static bool p2Cable = false;
 			if (!seeded) { p2Cable = Settings::ReturnSettingValue("CableForPlayerTwo") == "on"; seeded = true; }
+
+			// Here rather than under Amp sim: it silences the game's amp, Tone designer and an external app alike.
+			BeginCard("Tuner");
+			bool silenceTuning = ExternalAmp::GetSnapshot().silenceWhileTuning;
+			if (ToggleRow("Silence guitar while tuning", "No guitar sound in the tuner screens, whichever amp plays it. The tuner still hears you.", &silenceTuning))
+				ExternalAmp::SetSilenceWhileTuning(silenceTuning);
+			EndCard();
 
 			BeginCard("Display");
 			bool diagnostics = Audio::CableInput::IsOverlayEnabled();

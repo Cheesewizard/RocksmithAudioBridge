@@ -274,6 +274,17 @@ HRESULT APIENTRY D3DHooks::Hook_EndScene(IDirect3DDevice9* pDevice) {
 	(void)inputCaptureInstalled;
 	Menu::RenderImGuiMenu();
 	OverlayInputCapture::SetMouseCapture((Menu::menuEnabled || Menu::audioBridgeMenuEnabled) && ImGui::GetIO().WantCaptureMouse);
+	// Keyboard: only while a text field is being typed into, not whenever a panel has focus, so gameplay keys keep
+	// working with the overlay open. The capture holds until every key is released, so the Enter / Escape that
+	// closes the field does not leak its key-up into the game.
+	{
+		static bool keyboardCaptured = false;
+		const ImGuiIO& io = ImGui::GetIO();
+		bool anyKeyDown = false;
+		for (bool down : io.KeysDown) anyKeyDown |= down;
+		keyboardCaptured = ((Menu::menuEnabled || Menu::audioBridgeMenuEnabled) && io.WantTextInput) || (keyboardCaptured && anyKeyDown);
+		OverlayInputCapture::SetKeyboardCapture(keyboardCaptured);
+	}
 	Menu::UpdateStringTextures(pDevice);
 	UpdateGameWindowStacking();
 	GameOverlay::RenderOverlay(pDevice);

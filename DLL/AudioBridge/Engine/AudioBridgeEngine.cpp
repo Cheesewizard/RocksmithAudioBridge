@@ -14,6 +14,7 @@
 #include "Mods/VolumeControl.hpp"
 #include "AudioBridge/Input/RocksmithGate.hpp"
 #include "Mods/Enumeration.hpp"
+#include <iomanip>
 #include <vector>
 #include <avrt.h>
 #include <cmath>
@@ -97,7 +98,10 @@ namespace Audio::SharedOutput
 		wchar_t executable[MAX_PATH]{};
 		GetModuleFileNameW(nullptr, executable, MAX_PATH);
 		const auto path = std::filesystem::path(executable).parent_path() / L"RSMods.ini";
-		return GetPrivateProfileIntW((L"Audio Bridge Output Buffer " + endpointId).c_str(), L"PeriodFrames", 0, path.c_str());
+		// A per-device buffer (the old routing window, or a hand edit) wins; otherwise the one Playback buffer setting
+		// on the Audio Bridge tab, [Audio Bridge] OutputPeriodFrames. 0 = Automatic (OutputBackend::AutomaticPeriod).
+		const UINT32 perDevice = GetPrivateProfileIntW((L"Audio Bridge Output Buffer " + endpointId).c_str(), L"PeriodFrames", 0, path.c_str());
+		return perDevice ? perDevice : GetPrivateProfileIntW(L"Audio Bridge", L"OutputPeriodFrames", 0, path.c_str());
 	}
 
 	bool IsEnginePeriod(UINT32 value, UINT32 minimum, UINT32 fundamental, UINT32 maximum)
@@ -906,15 +910,57 @@ namespace Audio::SharedOutput
 			clockSequence.fetch_add(1);
 		}
 
+		// Cable-mode output delay, logged every 30 s (2026-10-12): the game-facing side (blocks the game writes, how many
+		// wait in the queue) and the Windows side (its period, what it still holds, the backend FIFO), so a fix for
+		// the delay players hear after each note is sized from measurements, not guesses.
+		void SampleLatency()
+		{
+			const ULONGLONG now = GetTickCount64();
+			if (!latencySince) { latencySince = now; latencyBackendAt = now; }
+			latencyQueueSum += queue.Count();
+			++latencyQueueSamples;
+			if (now - latencyBackendAt >= 1000)
+			{
+				latencyBackendAt = now;
+				const auto status = physical->GetStatus();
+				latencyPaddingSum += status.padding;
+				latencyFifoSum += status.queuedFrames;
+				latencyPeriod = status.period;
+				latencyTrims = status.trims;
+				++latencyBackendSamples;
+			}
+			if (now - latencySince < 30000 || !latencyQueueSamples || !latencyBackendSamples || !latencyPackets) return;
+			const double queueBlocks = static_cast<double>(latencyQueueSum) / latencyQueueSamples;
+			const double blockFrames = static_cast<double>(latencyPacketFrames) / latencyPackets;
+			const double padding = static_cast<double>(latencyPaddingSum) / latencyBackendSamples;
+			const double fifo = static_cast<double>(latencyFifoSum) / latencyBackendSamples;
+			const double gameMs = queueBlocks * blockFrames / 48.0, windowsMs = (padding + fifo) / 48.0;
+			LOG_INFO("(CABLE LATENCY) game blocks " << latencyMinPacket << ".." << latencyMaxPacket << " frames (avg " << static_cast<int>(blockFrames)
+				<< "), game queue avg " << std::fixed << std::setprecision(2) << queueBlocks << " blocks = " << std::setprecision(1) << gameMs
+				<< " ms; Windows period " << latencyPeriod << " frames, device holds " << static_cast<int>(padding) << " + backend FIFO "
+				<< static_cast<int>(fifo) << " frames = " << windowsMs << " ms; output delay about " << gameMs + windowsMs << " ms; backlog trims so far "
+				<< latencyTrims << std::endl);
+			latencySince = now;
+			latencyQueueSum = latencyQueueSamples = latencyPaddingSum = latencyFifoSum = latencyBackendSamples = 0;
+			latencyPackets = latencyPacketFrames = 0;
+			latencyMinPacket = UINT32_MAX;
+			latencyMaxPacket = 0;
+		}
+
 		HRESULT Pump()
 		{
 			UpdateClock();
+			SampleLatency();
 			for (unsigned budget = 0; budget < 2; ++budget)
 			{
 				uint32_t bytes = 0;
 				const auto* packet = queue.BeginRead(bytes);
 				if (!packet) break;
 				const UINT32 packetFrames = bytes / gameFormat.nBlockAlign;
+				++latencyPackets;
+				latencyPacketFrames += packetFrames;
+				latencyMinPacket = (std::min)(latencyMinPacket, packetFrames);
+				latencyMaxPacket = (std::max)(latencyMaxPacket, packetFrames);
 				const size_t samples = packetFrames * 2;
 				if (gameFormat.wBitsPerSample == 32) std::memcpy(converted.data(), packet, samples * sizeof(float));
 				else
@@ -992,6 +1038,11 @@ namespace Audio::SharedOutput
 		uint64_t recordingStarted = 0;
 		uint32_t peak = 0;
 		uint64_t submittedFrames = 0;
+		ULONGLONG latencySince = 0, latencyBackendAt = 0;   // SampleLatency (worker thread only)
+		uint64_t latencyQueueSum = 0, latencyQueueSamples = 0, latencyPaddingSum = 0, latencyFifoSum = 0, latencyBackendSamples = 0;
+		uint64_t latencyPackets = 0, latencyPacketFrames = 0;
+		UINT32 latencyMinPacket = UINT32_MAX, latencyMaxPacket = 0, latencyPeriod = 0;
+		uint64_t latencyTrims = 0;
 		std::array<BYTE, 1024> diagnosticBlock{}, previousBlock{};
 		UINT32 diagnosticBytes = 0;
 		bool havePreviousBlock = false;
@@ -1369,6 +1420,21 @@ namespace Audio::SharedOutput
 		return S_OK;
 	}
 
+	// Op 6 in passthrough: reopen the route's playback stream with a new buffer ("<frames>\n<endpoint>", 0 =
+	// Automatic). Returns false when nothing is routed, so the caller reports not-ready and the saved setting
+	// applies next time a route starts. The endpoint part is not checked: the route has only one device.
+	bool RouteSetPeriod(const wchar_t* value, HRESULT& result)
+	{
+		wchar_t* end = nullptr;
+		const unsigned long period = wcstoul(value, &end, 10);
+		std::lock_guard<std::mutex> guard(g_routeMutex);
+		if (!g_routeBackend || g_routeEndpoint.empty()) return false;
+		if (end == value || period > 48000) { result = E_INVALIDARG; return true; }
+		g_routeBackend->Request(g_routeEndpoint, static_cast<UINT32>(period));
+		result = S_OK;
+		return true;
+	}
+
 	// Tear the route down: unmute the forward (the ASIO device plays again), drop the sink, stop the
 	// backend. Safe to call when no route is active. The backend is shut down outside the lock so the
 	// audio-thread sink never blocks on a driver stop.
@@ -1496,6 +1562,10 @@ namespace Audio::SharedOutput
 		{
 			response.result = OutputTap::StopRecording(stoppedPath, stoppedFrames, stoppedStarted);
 			didStop = true;
+		}
+		else if (request.operation == 6 && RouteSetPeriod(request.value, response.result))
+		{
+			// handled: the Playback buffer, reapplied live to the alternate-device route
 		}
 		else if (request.operation == 4 || request.operation == 6)
 		{

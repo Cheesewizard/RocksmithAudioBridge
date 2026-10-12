@@ -49,6 +49,7 @@ namespace AmpLink
 		LONG m_seq = 0;                       // audio thread: the block being published
 		long m_frames = 0;
 		std::atomic<bool> m_mixOn{ false };
+		float m_mixLevel = 0.0f;              // audio thread: 0..1, follows m_mixOn over kMixFadeFrames so switching never clicks
 		std::atomic<float> m_gain{ 1.0f };
 		std::atomic<int> m_latencyBlocks{ 1 };
 		std::atomic<int> m_pitchSemitones{ 0 };

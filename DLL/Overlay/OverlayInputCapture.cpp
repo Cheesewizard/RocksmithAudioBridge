@@ -6,7 +6,9 @@
 
 // Rocksmith reads the mouse ONLY through DirectInput 8 (no raw input, GetCursorPos or GetAsyncKeyState), so
 // swallowing WM_ mouse messages in the WndProc is not enough: while the overlay has the mouse, the game's
-// DirectInput mouse reads must come back empty too.
+// DirectInput mouse reads must come back empty too. The keyboard is the same: typing into an overlay text field
+// (tone names, search boxes) drove the song list behind it, so while a text field is active the game's DirectInput
+// keyboard reads come back empty as well.
 //
 // The game creates its DirectInput interface before Install() runs, so hooking DirectInput8Create is too late.
 // Install() instead makes a throwaway mouse device of its own and patches GetDeviceState / GetDeviceData in
@@ -43,10 +45,12 @@ namespace OverlayInputCapture
 		int patchedCount = 0;
 
 		std::atomic<bool> mouseCaptured{ false };
+		std::atomic<bool> keyboardCaptured{ false };
 		std::atomic<bool> installed{ false };
 		std::atomic<bool> loggedStateRead{ false };
 		std::atomic<bool> loggedDataRead{ false };
 		std::atomic<bool> loggedCaptureEnabled{ false };
+		std::atomic<bool> loggedKeyboardRead{ false };
 
 		const PatchedVtable* Find(IUnknown* self)
 		{
@@ -56,18 +60,27 @@ namespace OverlayInputCapture
 			return nullptr;
 		}
 
-		// The shared vtable also serves the keyboard and any joystick, so only mouse devices are filtered.
-		// The answer is cached per device object (the game keeps a handful for its whole life).
-		bool IsMouse(IUnknown* self, const PatchedVtable& table)
+		// The shared vtable also serves joysticks, so only mouse and keyboard devices are filtered.
+		// The device type is cached per device object (the game keeps a handful for its whole life).
+		BYTE DeviceType(IUnknown* self, const PatchedVtable& table)
 		{
-			thread_local struct { IUnknown* device; bool mouse; } cache[8] = {};
+			thread_local struct { IUnknown* device; BYTE type; } cache[8] = {};
 			thread_local unsigned next = 0;
-			for (const auto& entry : cache) if (entry.device == self) return entry.mouse;
+			for (const auto& entry : cache) if (entry.device == self) return entry.type;
 			DIDEVCAPS caps{};
 			caps.dwSize = sizeof(caps);
-			const bool mouse = SUCCEEDED(table.getCapabilities(self, &caps)) && GET_DIDEVICE_TYPE(caps.dwDevType) == DI8DEVTYPE_MOUSE;
-			cache[next++ % 8] = { self, mouse };
-			return mouse;
+			const BYTE type = SUCCEEDED(table.getCapabilities(self, &caps)) ? static_cast<BYTE>(GET_DIDEVICE_TYPE(caps.dwDevType)) : 0;
+			cache[next++ % 8] = { self, type };
+			return type;
+		}
+
+		bool IsMouse(IUnknown* self, const PatchedVtable& table) { return DeviceType(self, table) == DI8DEVTYPE_MOUSE; }
+		bool IsKeyboard(IUnknown* self, const PatchedVtable& table) { return DeviceType(self, table) == DI8DEVTYPE_KEYBOARD; }
+
+		void LogKeyboardBlocked()
+		{
+			if (!loggedKeyboardRead.exchange(true, std::memory_order_relaxed))
+				LOG_INFO("[OverlayInputCapture] Blocking Rocksmith's DirectInput keyboard while an overlay text field is active." << std::endl);
 		}
 
 		HRESULT STDMETHODCALLTYPE HookGetDeviceState(IUnknown* self, DWORD size, LPVOID data)
@@ -75,7 +88,15 @@ namespace OverlayInputCapture
 			const PatchedVtable* table = Find(self);
 			if (table == nullptr) return DIERR_GENERIC;   // cannot happen: only patched vtables point here
 			const HRESULT result = table->getDeviceState(self, size, data);
-			if (FAILED(result) || data == nullptr || !mouseCaptured.load(std::memory_order_relaxed)) return result;
+			if (FAILED(result) || data == nullptr) return result;
+			if (keyboardCaptured.load(std::memory_order_relaxed) && size == 256 && IsKeyboard(self, *table))
+			{
+				// Every key reads as up.
+				LogKeyboardBlocked();
+				std::memset(data, 0, size);
+				return result;
+			}
+			if (!mouseCaptured.load(std::memory_order_relaxed)) return result;
 			if (size != sizeof(DIMOUSESTATE) && size != sizeof(DIMOUSESTATE2)) return result;   // not a mouse format
 			if (!IsMouse(self, *table)) return result;
 			if (!loggedStateRead.exchange(true, std::memory_order_relaxed))
@@ -92,8 +113,14 @@ namespace OverlayInputCapture
 			const PatchedVtable* table = Find(self);
 			if (table == nullptr) return DIERR_GENERIC;
 			const HRESULT result = table->getDeviceData(self, size, data, itemCount, flags);
-			if (FAILED(result) || data == nullptr || itemCount == nullptr || !mouseCaptured.load(std::memory_order_relaxed))
+			if (FAILED(result) || data == nullptr || itemCount == nullptr) return result;
+			if (keyboardCaptured.load(std::memory_order_relaxed) && IsKeyboard(self, *table))
+			{
+				LogKeyboardBlocked();
+				*itemCount = 0;
 				return result;
+			}
+			if (!mouseCaptured.load(std::memory_order_relaxed)) return result;
 			if (!IsMouse(self, *table)) return result;
 			if (!loggedDataRead.exchange(true, std::memory_order_relaxed))
 				LOG_INFO("[OverlayInputCapture] Blocking Rocksmith's buffered DirectInput mouse events under the overlay." << std::endl);
@@ -174,9 +201,15 @@ namespace OverlayInputCapture
 			LOG_INFO("[OverlayInputCapture] ImGui requested DirectInput mouse capture." << std::endl);
 	}
 
+	void SetKeyboardCapture(bool shouldCapture)
+	{
+		keyboardCaptured.store(shouldCapture, std::memory_order_relaxed);
+	}
+
 	void Shutdown()
 	{
 		mouseCaptured.store(false, std::memory_order_relaxed);
+		keyboardCaptured.store(false, std::memory_order_relaxed);
 		// Put the original methods back; the table entries stay so a call already inside a hook still resolves.
 		for (int i = 0; i < patchedCount; ++i)
 		{
