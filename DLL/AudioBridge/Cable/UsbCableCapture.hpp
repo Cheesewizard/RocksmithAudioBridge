@@ -1,0 +1,68 @@
+#pragma once
+
+#include <windows.h>
+#include <atomic>
+#include <functional>
+#include <string>
+#include <thread>
+#include <vector>
+
+// The Real Tone Cable read directly over USB, for players who moved the cable's audio function to Microsoft's in-box
+// WinUSB driver (the opt-in; binding it is an installer step).
+//
+// Why: Windows' audio engine hands the cable's input over in 10 ms packets (480 frames, its minimum for this device,
+// and the cable has no exclusive mode), while the cable itself sends 1 ms isochronous packets. Read here, the guitar
+// arrives every 1 ms: the Tone designer's amp link (CableAmpLink::FeedInput) gets it about 10 ms sooner.
+//
+// What it does not change: the game's own input contract. CaptureSession still hands the game the 480-frame packets it
+// asked for; this is only another physical producer feeding CaptureSession::Publish, in place of the WASAPI capture.
+//
+// There is no fallback between the two: with the audio function on WinUSB, Windows has no cable microphone to fall
+// back to, and with it on the USB Audio driver this class finds no cable. Whichever driver the cable is on decides.
+//
+// Contract with the device (verified on the cable 2026-10-12 with a standalone capture test): VID 12BA PID 00FF,
+// full speed, audio streaming interface 1 alternate setting 1, isochronous IN endpoint 0x82, at most 100 bytes per
+// 1 ms frame, 16-bit mono PCM, sample rate set with UAC 1 SET_CUR on the endpoint. Anything else is refused.
+namespace Audio::PersistentInput
+{
+	class UsbCableCapture
+	{
+	public:
+		// Mono float samples at 48 kHz, the QPC time (100 ns units) of the first sample, and whether samples were lost
+		// before this packet. Called on the capture thread every millisecond; must not block.
+		using Sink = std::function<void(const float* samples, UINT32 frames, UINT64 timestamp, bool discontinuity)>;
+
+		// Device paths of cables whose audio function is on WinUSB with this project's interface GUID, sorted (the same
+		// player-to-cable rule as the WASAPI cables: Player 1 the first, Player 2 the second).
+		static std::vector<std::wstring> FindCables();
+
+		UsbCableCapture() = default;
+		~UsbCableCapture();
+		UsbCableCapture(const UsbCableCapture&) = delete;
+		UsbCableCapture& operator=(const UsbCableCapture&) = delete;
+
+		// Opens and validates the cable and starts streaming into `sink`. On failure nothing is left open.
+		HRESULT Start(const std::wstring& path, Sink sink);
+		void Stop();
+		// The stream ended by itself (cable unplugged, transfers stalled or failed): Stop, then Start again later.
+		bool Failed() const { return failed.load(std::memory_order_acquire); }
+		const std::wstring& Path() const { return path; }
+
+	private:
+		struct Slot;
+		HRESULT Open();
+		void Close();
+		void Run();
+
+		std::wstring path;
+		Sink sink;
+		HANDLE device = INVALID_HANDLE_VALUE;
+		void* root = nullptr;        // WINUSB_INTERFACE_HANDLE of interface 0 (audio control)
+		void* streaming = nullptr;   // WINUSB_INTERFACE_HANDLE of interface 1 (audio streaming)
+		bool alternateSelected = false;
+		std::vector<Slot*> slots;
+		HANDLE quit = nullptr;
+		std::thread worker;
+		std::atomic<bool> failed{ false };
+	};
+}

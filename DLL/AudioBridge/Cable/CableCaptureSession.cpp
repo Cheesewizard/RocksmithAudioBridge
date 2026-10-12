@@ -415,7 +415,31 @@ namespace Audio::PersistentInput
 		if (SUCCEEDED(result)) result = backend->Start();
 		if (FAILED(result)) { CloseDevice(); return result; }
 		Disconnect();
+		// Only when the other source actually opens, not when one closes: the game stops and restarts its capture
+		// between screens, and each switch makes the VST host reset its stream.
+		if (!gatedByPlayerTwoToggle) CableAmpLink::SetDirectUsb(false);
 		LOG_INFO("(PERSISTENT INPUT) Physical capture opened; game client retained" << std::endl);
+		return S_OK;
+	}
+
+	// The cable read directly over USB, when its audio function is on WinUSB (the player's opt-in; see
+	// UsbCableCapture.hpp). S_FALSE: no cable is on WinUSB, so the Windows microphone path (OpenDevice) applies.
+	// The game-facing side is unchanged: Publish gets 1 ms packets instead of 10 ms ones, the game still takes
+	// periodFrames at a time, and Player 1's raw guitar reaches the Tone designer's link 1 ms at a time.
+	HRESULT CaptureSession::OpenUsb()
+	{
+		const std::vector<std::wstring> cables = UsbCableCapture::FindCables();
+		if (cables.empty()) return S_FALSE;
+		// Same player-to-cable rule as OpenDevice: Player 1 the first, the Player 2 cable the second.
+		const size_t pick = cables.size() > 1 && gatedByPlayerTwoToggle ? 1 : 0;
+		Disconnect();
+		const HRESULT result = usb.Start(cables[pick], [this](const float* samples, UINT32 frames, UINT64 timestamp, bool discontinuity)
+			{ Publish(samples, frames, timestamp, discontinuity); });
+		if (FAILED(result)) return result;
+		usbOpen = true;
+		if (!gatedByPlayerTwoToggle) CableAmpLink::SetDirectUsb(true);   // Automatic block size follows the source
+		LOG_INFO("(PERSISTENT INPUT) Real Tone Cable opened directly over USB (1 ms packets) for "
+			<< (gatedByPlayerTwoToggle ? "Player 2" : "Player 1") << "; game client retained" << std::endl);
 		return S_OK;
 	}
 
@@ -444,6 +468,7 @@ namespace Audio::PersistentInput
 	{
 		if (backend) backend->Stop();
 		capture.Reset(); backend.Reset(); activeEndpoint.clear();
+		if (usbOpen) { usb.Stop(); usbOpen = false; }
 		Disconnect();
 	}
 
@@ -471,7 +496,7 @@ namespace Audio::PersistentInput
 				const DWORD wake = WaitForMultipleObjects(3, events, FALSE, 1000);
 				if (wake == WAIT_OBJECT_0 || wake == WAIT_FAILED) break;
 				if (deviceResetRequested.exchange(false)) CloseDevice();
-				if (!running && backend) CloseDevice();
+				if (!running && (backend || usbOpen)) CloseDevice();
 				if (wake == WAIT_OBJECT_0 + 1)
 				{
 					nextOpen = 0;
@@ -484,12 +509,23 @@ namespace Audio::PersistentInput
 					}
 				}
 				const UINT64 now = CaptureTime();
-				if (running && enumerator && !backend && now >= nextOpen)
+				if (usbOpen && usb.Failed())
 				{
-					result = OpenDevice(enumerator.Get());
+					// Unplugged or stalled (the reader logged why): the game keeps its silent stream; reopen when it is back.
+					CloseDevice();
+					nextOpen = now + 10000000;
+				}
+				if (running && enumerator && !backend && !usbOpen && now >= nextOpen)
+				{
+					result = OpenUsb();
+					const bool onUsb = result != S_FALSE;
+					if (!onUsb) result = OpenDevice(enumerator.Get());
 					nextOpen = now + 10000000;
 					if (FAILED(result) && result != lastOpenResult)
-						LOG_WARNING("(PERSISTENT INPUT) Waiting for selected cable, HRESULT " << std::hex << result << std::dec << std::endl);
+					{
+						if (onUsb) LOG_WARNING("(PERSISTENT INPUT) The Real Tone Cable is on WinUSB but could not be opened, HRESULT " << std::hex << result << std::dec << "; retrying" << std::endl);
+						else LOG_WARNING("(PERSISTENT INPUT) Waiting for selected cable, HRESULT " << std::hex << result << std::dec << std::endl);
+					}
 					lastOpenResult = result;
 				}
 				if (running && capture)

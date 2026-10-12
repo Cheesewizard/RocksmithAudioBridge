@@ -18,7 +18,7 @@
 // The cable and the output device run on different clocks, so the return FIFO between them is kept near a small
 // target by dropping or repeating single frames (a few hundred ppm at most, inaudible on a guitar signal).
 //
-// A future direct-USB capture (atlas design cable-direct-usb-input.md) feeds FeedInput the same way, in 1 ms packets.
+// The direct-USB capture (AudioBridge/Cable/UsbCableCapture) feeds FeedInput the same way, in 1 ms packets.
 namespace CableAmpLink
 {
 	// Cable mode's bridge output exists (OutputSession initialised): create the link. Idempotent.

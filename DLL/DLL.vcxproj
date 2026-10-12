@@ -918,9 +918,11 @@ if exist "$(OutDir)$(TargetName).map" copy /Y "$(OutDir)$(TargetName).map" "$(Bu
   <ItemGroup><ClInclude Include="AudioBridge\Diagnostics\AudioLifecycleTrace.hpp" /></ItemGroup>
   <ItemGroup>
     <ClCompile Include="AudioBridge\Cable\CableCaptureSession.cpp" />
+    <ClCompile Include="AudioBridge\Cable\UsbCableCapture.cpp" />
     <ClCompile Include="AudioBridge\Devices\DeviceEnumeratorHook.cpp" />
     <ClInclude Include="AudioBridge\Devices\DeviceEnumeratorHook.hpp" />
     <ClInclude Include="AudioBridge\Cable\CableCaptureSession.hpp" />
+    <ClInclude Include="AudioBridge\Cable\UsbCableCapture.hpp" />
     <ClInclude Include="AudioBridge\Cable\CableEndpointVolume.hpp" />
     <ClInclude Include="AudioBridge\Engine\OutputBackend.hpp" />
     <ClInclude Include="AudioBridge\Engine\OutputRateMatcher.hpp" />

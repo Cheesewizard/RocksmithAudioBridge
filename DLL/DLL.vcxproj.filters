@@ -931,6 +931,9 @@
     <ClCompile Include="AudioBridge\Cable\CableCaptureSession.cpp">
       <Filter>AudioBridge\Cable</Filter>
     </ClCompile>
+    <ClCompile Include="AudioBridge\Cable\UsbCableCapture.cpp">
+      <Filter>AudioBridge\Cable</Filter>
+    </ClCompile>
     <ClCompile Include="AudioBridge\Devices\DeviceEnumeratorHook.cpp">
       <Filter>AudioBridge\Devices</Filter>
     </ClCompile>
@@ -1015,6 +1018,9 @@
       <Filter>AudioBridge\Engine</Filter>
     </ClInclude>
     <ClInclude Include="AudioBridge\Cable\CableCaptureSession.hpp">
+      <Filter>AudioBridge\Cable</Filter>
+    </ClInclude>
+    <ClInclude Include="AudioBridge\Cable\UsbCableCapture.hpp">
       <Filter>AudioBridge\Cable</Filter>
     </ClInclude>
     <ClInclude Include="AudioBridge\Devices\DeviceEnumeratorHook.hpp">

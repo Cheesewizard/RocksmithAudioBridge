@@ -2,6 +2,7 @@
 
 #include "AudioBridge/Devices/DeviceEnumeratorHook.hpp"
 #include "CableEndpointVolume.hpp"
+#include "UsbCableCapture.hpp"
 #include <wrl.h>
 #include <array>
 #include <atomic>
@@ -46,6 +47,7 @@ namespace Audio::PersistentInput
 		void Run();
 		void RunClock();
 		HRESULT OpenDevice(IMMDeviceEnumerator* enumerator);
+		HRESULT OpenUsb();
 		HRESULT DrainDevice();
 		void CloseDevice();
 		void ClearPackets();
@@ -95,5 +97,8 @@ namespace Audio::PersistentInput
 		Microsoft::WRL::ComPtr<IAudioCaptureClient> capture;
 		std::wstring activeEndpoint;
 		HRESULT lastOpenResult = S_OK;
+		// The cable read directly over USB (its audio function on WinUSB) instead of `backend`; one or the other.
+		UsbCableCapture usb;
+		bool usbOpen = false;
 	};
 }
