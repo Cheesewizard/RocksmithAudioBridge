@@ -12,6 +12,7 @@
 #include "ExternalAmp/ExternalAmp.hpp"
 #include "ToneDesigner/VstHostLink.hpp"
 #include "Shared/VstHostControl.hpp"
+#include "Shared/ShellOpenAsync.hpp"
 #include "ToneDesigner/SongLibrary.hpp"
 #include "ToneDesigner/ToneBackup.hpp"
 #include "Core/Extensions.hpp"
@@ -4069,7 +4070,7 @@ namespace Overlay
 				std::error_code ec;
 				const bool hasSession = std::filesystem::is_directory(session, ec);
 				if (!hasSession) std::filesystem::create_directories(folder, ec);
-				ShellExecuteW(nullptr, L"open", (hasSession ? session : folder).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+				ShellOpenAsync::Open(hasSession ? session : folder);   // off the render thread (a 103 ms frame here)
 			}
 			RecordHotkeyPicker();
 			Caption("Each game launch saves into its own dated folder. The hotkey uses the format chosen above. Change the folder in RSMods, Rocksmith Audio Bridge page.");

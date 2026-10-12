@@ -2,6 +2,7 @@
 #include "ToneBackup.hpp"
 #include "Core/RsModsHelper.hpp"
 #include "VstHostLink.hpp"
+#include "Shared/ShellOpenAsync.hpp"
 
 #include <ShlObj.h>
 #include <shellapi.h>
@@ -112,7 +113,7 @@ namespace ToneBackup
 	void OpenFolder()
 	{
 		SHCreateDirectoryExW(nullptr, Folder().c_str(), nullptr);
-		ShellExecuteW(nullptr, L"open", Folder().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+		ShellOpenAsync::Open(Folder());
 	}
 
 	void OnFrame(bool gameLoaded)

@@ -312,6 +312,7 @@
     <ClInclude Include="ToneDesigner\SongLibrary.hpp" />
     <ClInclude Include="ToneDesigner\ToneBackup.hpp" />
     <ClInclude Include="Shared\VstHostControl.hpp" />
+    <ClInclude Include="Shared\ShellOpenAsync.hpp" />
     <ClInclude Include="Recorder\GameAudioRecorder.hpp" />
     <ClInclude Include="Recorder\DrySignalRecording.hpp" />
     <ClInclude Include="AudioBridge\Input\HumRemover.hpp" />

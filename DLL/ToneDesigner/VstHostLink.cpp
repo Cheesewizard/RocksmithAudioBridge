@@ -2,6 +2,7 @@
 #include "VstHostLink.hpp"
 #include "ToneSwitchPopup.hpp"
 #include "Shared/VstHostControl.hpp"
+#include "Shared/ShellOpenAsync.hpp"
 #include "ExternalAmp/ExternalAmp.hpp"
 #include "SongLibrary.hpp"
 #include "GameState.hpp"
@@ -189,7 +190,7 @@ namespace VstHostLink
 		{
 			if (VstHostControl::Shared* shared = Shared()) InterlockedExchange(&shared->quitRequested, 0);
 			const std::wstring args = L"--overlay" + std::wstring(standby ? L" --standby" : L"") + (plugin.empty() ? std::wstring() : L" \"" + plugin + L"\"");
-			ShellExecuteW(nullptr, L"open", HostPath().c_str(), args.c_str(), nullptr, SW_SHOWNORMAL);
+			ShellOpenAsync::Open(HostPath(), args);   // never on the render thread: it took 401 ms there
 		}
 
 		void Queue(Command op, LONG arg = 0, LONG arg2 = 0, std::wstring text = {})
@@ -1022,7 +1023,7 @@ namespace VstHostLink
 
 	void ShowPluginFile(const std::wstring& path)
 	{
-		ShellExecuteW(nullptr, L"open", L"explorer.exe", (L"/select,\"" + path + L"\"").c_str(), nullptr, SW_SHOWNORMAL);
+		ShellOpenAsync::Open(L"explorer.exe", L"/select,\"" + path + L"\"");
 	}
 
 	// The browser asks for every row every frame, so both lists are read from the registry once and kept.
@@ -1166,7 +1167,7 @@ namespace VstHostLink
 	{
 		const std::wstring folder = TonesFolder();
 		SHCreateDirectoryExW(nullptr, folder.c_str(), nullptr);
-		ShellExecuteW(nullptr, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+		ShellOpenAsync::Open(folder);
 	}
 
 	// A host in standby turns on at once; otherwise a new one starts (on, or in standby).

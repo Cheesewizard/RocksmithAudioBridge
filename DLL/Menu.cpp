@@ -37,6 +37,38 @@ namespace Menu {
 	/// Renders the ImGui frame, including the main mod menu.
 	/// </summary>
 	void RenderImGuiMenu() {
+		// Frame pacing, game frame to game frame (this runs once per frame). A player can see a stutter while the
+		// FPS counter reads hundreds (2026-10-12, Tone designer on the cable): the average hides single long frames.
+		// Every 30 s that had any, one line says how many frames took over 25 / 50 ms and the worst, so a stutter can
+		// be placed in time and against the other log lines.
+		{
+			static LARGE_INTEGER pacingFrequency{}, previousFrame{};
+			static double windowMs = 0.0, worstMs = 0.0;
+			static unsigned frames = 0, over25 = 0, over50 = 0;
+			LARGE_INTEGER now{};
+			if (!pacingFrequency.QuadPart) QueryPerformanceFrequency(&pacingFrequency);
+			QueryPerformanceCounter(&now);
+			if (previousFrame.QuadPart)
+			{
+				const double frameMs = (now.QuadPart - previousFrame.QuadPart) * 1000.0 / pacingFrequency.QuadPart;
+				windowMs += frameMs;
+				++frames;
+				if (frameMs > 25.0) ++over25;
+				if (frameMs > 50.0) ++over50;
+				if (frameMs > worstMs) worstMs = frameMs;
+				if (windowMs >= 30000.0)
+				{
+					if (over25)
+						LOG_WARNING("(FRAME PACING) last " << static_cast<int>(windowMs / 1000.0 + 0.5) << " s: " << frames << " frames (avg "
+							<< static_cast<int>(frames * 1000.0 / windowMs + 0.5) << " fps), " << over25 << " over 25 ms, " << over50
+							<< " over 50 ms, worst " << worstMs << " ms" << std::endl);
+					windowMs = worstMs = 0.0;
+					frames = over25 = over50 = 0;
+				}
+			}
+			previousFrame = now;
+		}
+
 		// Rocksmith hides the OS cursor in-song, so draw a software cursor while a panel is open (only then,
 		// so gameplay is untouched otherwise). This is what makes the overlay clickable over the game.
 		ImGui::GetIO().MouseDrawCursor = Menu::menuEnabled || Menu::audioBridgeMenuEnabled;
