@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "CableCaptureSession.hpp"
+#include "ExternalAmp/CableAmpLink.hpp"
 #include "CableInput.hpp"
 #include <avrt.h>
 #include <functiondiscoverykeys_devpkey.h>
@@ -188,6 +189,8 @@ namespace Audio::PersistentInput
 	void CaptureSession::Publish(const float* samples, UINT32 frames, UINT64 timestamp, bool discontinuity, bool timestampError)
 	{
 		if (!samples || !frames || frames > RING_FRAMES) return;
+		// Player 1's raw cable guitar also feeds the Tone designer's amp link (cable mode has no ASIO driver to host it).
+		if (!gatedByPlayerTwoToggle) CableAmpLink::FeedInput(samples, frames);
 		std::unique_lock<std::mutex> guard(packetMutex);
 		if (!running || deviceResetRequested) return;
 		if (availableFrames + frames > RING_FRAMES || discontinuity)

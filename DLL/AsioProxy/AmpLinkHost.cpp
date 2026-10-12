@@ -145,6 +145,7 @@ namespace AmpLink
 		Store(&m_shared->pitchSemitones, m_pitchSemitones.load(std::memory_order_relaxed));
 		Store(&m_shared->inputSlotSeq[slot], seq);
 		Store(&m_shared->inputSeq, seq);
+		m_publishedSeq.store(seq, std::memory_order_release);
 		SetEvent(m_event);
 		const float peak = sources[0] ? PeakOf(sources[0], frames) : 0.0f;
 		m_inputPeak.store(DecayedPeak(m_inputPeak.load(std::memory_order_relaxed), peak, frames), std::memory_order_relaxed);
@@ -209,6 +210,38 @@ namespace AmpLink
 		for (long f = 0; f < frames && level != target; ++f) level = advance(level);
 		m_mixLevel = level;
 		m_returnPeak.store(DecayedPeak(m_returnPeak.load(std::memory_order_relaxed), blockPeak, frames), std::memory_order_relaxed);
+	}
+	Host::Return Host::ReadReturn(LONG seq, float* left, float* right, long frames) noexcept
+	{
+		if (!m_shared || !left || !right || frames != m_frames) return Return::NoGuest;
+		// Connected is judged against the newest published block, not `seq`: the guest is normally already past the block
+		// being read back, which GuestConnected(seq) would take for a guest that went away (2026-10-12: every block then
+		// counted late and the Tone designer went silent for good).
+		if (!GuestConnected(m_publishedSeq.load(std::memory_order_acquire))) { m_mixLevel = 0.0f; return Return::NoGuest; }
+		const LONG slot = SlotOf(seq);
+		// The slot's tag says which block it holds: an older one = ours is not written yet, a newer one = ours was
+		// overwritten before anyone read it.
+		const LONG held = Load(&m_shared->outputSlotSeq[slot]);
+		if (held != seq) return held - seq > 0 ? Return::Lost : Return::NotYet;
+		constexpr float kMixFadeFrames = kSampleRate * 0.15f;   // as MixReturn: switching on or off never clicks
+		const float target = m_mixOn.load(std::memory_order_relaxed) ? 1.0f : 0.0f;
+		const float gain = m_gain.load(std::memory_order_relaxed) / 2147483648.0f;
+		const float step = (target > m_mixLevel ? 1.0f : -1.0f) / kMixFadeFrames;
+		const int32_t* sourceLeft = m_shared->output[slot][0];
+		const int32_t* sourceRight = m_shared->output[slot][1];
+		float level = m_mixLevel, peak = 0.0f;
+		for (long f = 0; f < frames; ++f)
+		{
+			level = step > 0.0f ? (std::min)(target, level + step) : (std::max)(target, level + step);
+			left[f] = static_cast<float>(sourceLeft[f]) * gain * level;
+			right[f] = static_cast<float>(sourceRight[f]) * gain * level;
+			peak = (std::max)(peak, (std::max)(std::fabs(left[f]), std::fabs(right[f])));
+		}
+		m_mixLevel = level;
+		// The slot must still hold this block after the copy (a guest writing kSlots blocks ahead would reuse it).
+		if (Load(&m_shared->outputSlotSeq[slot]) != seq) return Return::Lost;
+		m_returnPeak.store(DecayedPeak(m_returnPeak.load(std::memory_order_relaxed), peak, frames), std::memory_order_relaxed);
+		return Return::Ready;
 	}
 
 	Status Host::GetStatus() const

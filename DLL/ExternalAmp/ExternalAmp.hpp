@@ -20,7 +20,7 @@
 //   - reports link status to the overlay's External amp page.
 // Settings live in HKCU\Software\RSMods\AsioProxy (not RSMods.ini, which the desktop GUI rewrites with only
 // the keys it knows): ExternalAmp (default on), ExternalAmpFallback (default on), ExternalAmpReturn
-// (tenths of a dB, default 0), ExternalAmpSafety (default off). On + fallback means the switch is effectively
+// (tenths of a dB, default 0), ExternalAmpSafety (default off), CableBlockFrames (0 = Automatic, the cable's link block). On + fallback means the switch is effectively
 // automatic: the game's amp plays until an amp sim connects, then the amp sim takes over.
 namespace ExternalAmp
 {
@@ -33,11 +33,14 @@ namespace ExternalAmp
 		bool fallback = true;
 		int returnTenths = 0;          // amp return level, tenths of a dB
 		bool safetyBuffer = false;     // one more buffer of link latency, fewer clicks on a busy PC
-		bool proxyLoaded = false;      // the game's audio driver is the Audio Bridge proxy
+		bool proxyLoaded = false;      // an amp link host exists: the Audio Bridge ASIO driver, or (Real Tone Cable) CableAmpLink
 		bool guest64Registered = false; // 64-bit amp sims can list the driver
 		bool gameAmpMuted = false;     // Mixer_Player1 is held at 0 by this controller
 		bool silenceWhileTuning = false; // General: no guitar in the tuner screens, whatever plays it
 		int pedalSemitones = 0;        // Drop Pedal shift sent to the amp sim's input
+		bool cableHost = false;        // the Real Tone Cable hosts the link (no ASIO driver): the block size is ours to pick
+		bool cableDirectUsb = false;   // ...and the cable is read directly over USB
+		int cableBlockSetting = 0;     // cable block size: 0 = Automatic, else 64 / 128 / 256 frames
 		AmpLink::Status link{};
 	};
 
@@ -49,4 +52,5 @@ namespace ExternalAmp
 	void SetReturnTenths(int tenths, bool persist);
 	void SetSafetyBuffer(bool on);
 	void SetSilenceWhileTuning(bool on);   // also the game's amp, so it lives here, not in Tone designer
+	void SetCableBlock(int frames);        // 0 = Automatic, 64 / 128 / 256 (CableBlockFrames); cable players only
 }

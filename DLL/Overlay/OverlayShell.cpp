@@ -2998,6 +2998,18 @@ namespace Overlay
 			char safetyCaption[96];
 			sprintf_s(safetyCaption, "Adds one more buffer (+%.1f ms) so a busy PC clicks less.", (link.frames > 0 ? link.frames : 128) * 1000.0 / AmpLink::kSampleRate);
 			if (ToggleRow("Extra safety buffer", safetyCaption, &safety)) ExternalAmp::SetSafetyBuffer(safety);
+			// Real Tone Cable players have no ASIO buffer to set, so the link's block size is picked here
+			// (CableAmpLink). With an ASIO interface it is the interface's own buffer size and this row is not shown.
+			if (amp.cableHost) {
+				static const char* const blocks[] = { "Automatic", "64", "128", "256" };
+				static const int frames[] = { 0, 64, 128, 256 };
+				int index = 0;
+				for (int i = 0; i < 4; ++i) if (frames[i] == amp.cableBlockSetting) index = i;
+				if (SegmentedRow("Block size", &index, blocks, 4, "Samples the amp sim works on at a time. Smaller is less delay but more work for the PC; heavy plugins may then show late buffers. Automatic is 64 when the cable is read directly over USB, 128 otherwise. Changing it restarts Tone designer's audio for a moment."))
+					ExternalAmp::SetCableBlock(frames[index]);
+				if (!amp.cableDirectUsb && amp.cableBlockSetting == 64)
+					Caption("64 needs the cable read directly over USB; using 128. Windows hands over the cable's input 480 samples at a time.");
+			}
 			bool compare = amp.comparing;
 			if (ToggleRow("Compare with the game's amp", "A/B: hear Rocksmith's own amp instead for now. Not saved.", &compare))
 				ExternalAmp::SetCompare(compare);

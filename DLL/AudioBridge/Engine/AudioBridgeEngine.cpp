@@ -481,6 +481,7 @@ namespace Audio::SharedOutput
 				initialized.store(true, std::memory_order_release);
 				ConfigureSavedOutputGuard();
 				const HRESULT result = ConnectOutput(activeEndpoint, ReadSavedPeriod(activeEndpoint));
+				CableAmpLink::Open();   // cable mode: the game DLL hosts the Tone designer's amp link (no ASIO driver here)
 
 				LOG_INFO("(AUDIO ROUTING) Permanent game output initialized: 48 kHz stereo, 480-frame capacity; physical output HRESULT "
 					<< std::hex << result << std::dec << std::endl);

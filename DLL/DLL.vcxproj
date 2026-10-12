@@ -34,6 +34,8 @@
     <ClCompile Include="ExternalAmp\ExternalAmp.cpp" />
     <ClCompile Include="ToneDesigner\VstHostLink.cpp" />
     <ClCompile Include="ToneDesigner\ToneSwitchPopup.cpp" />
+    <ClCompile Include="ExternalAmp\CableAmpLink.cpp" />
+    <ClCompile Include="AsioProxy\AmpLinkHost.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="Core\RsModsHelper.cpp" />
     <ClCompile Include="ToneDesigner\SongLibrary.cpp" />
     <ClCompile Include="ToneDesigner\ToneBackup.cpp" />
@@ -308,6 +310,7 @@
     <ClInclude Include="ExternalAmp\ExternalAmp.hpp" />
     <ClInclude Include="ToneDesigner\VstHostLink.hpp" />
     <ClInclude Include="ToneDesigner\ToneSwitchPopup.hpp" />
+    <ClInclude Include="ExternalAmp\CableAmpLink.hpp" />
     <ClInclude Include="Core\RsModsHelper.hpp" />
     <ClInclude Include="ToneDesigner\SongLibrary.hpp" />
     <ClInclude Include="ToneDesigner\ToneBackup.hpp" />

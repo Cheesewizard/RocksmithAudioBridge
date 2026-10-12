@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "ExternalAmp.hpp"
+#include "CableAmpLink.hpp"
 #include "Mods/VolumeControl.hpp"
 #include "DropPedal/DropPedal.hpp"
 #include "GameState.hpp"
@@ -22,6 +23,7 @@ namespace ExternalAmp
 		std::atomic<bool> g_fallback{ true };
 		std::atomic<int> g_returnTenths{ 0 };
 		std::atomic<bool> g_safety{ false };
+		std::atomic<int> g_cableBlock{ 0 };
 		std::atomic<bool> g_silenceTuning{ false };
 
 		std::mutex g_snapshotMutex;
@@ -56,10 +58,17 @@ namespace ExternalAmp
 
 		HMODULE Proxy() { return GetModuleHandleW(L"RocksmithAudioBridgeAsio.dll"); }
 
+		// The link's host: the ASIO driver when it is the game's driver, else (Real Tone Cable) the game DLL's own
+		// CableAmpLink. The rest of this file does not care which.
 		bool ReadLinkStatus(AmpLink::Status& status)
 		{
 			HMODULE proxy = Proxy();
-			if (!proxy) return false;
+			if (!proxy)
+			{
+				if (!CableAmpLink::IsOpen()) return false;
+				status = CableAmpLink::GetStatus();
+				return true;
+			}
 			using StatusFn = int(__cdecl*)(AmpLink::Status*, int);
 			auto fn = reinterpret_cast<StatusFn>(GetProcAddress(proxy, "RSModsAsio_GetAmpLinkStatus"));
 			return fn && fn(&status, static_cast<int>(sizeof(status))) == 1;
@@ -68,7 +77,12 @@ namespace ExternalAmp
 		void ConfigureProxy(bool mixOn, float gain, bool safety)
 		{
 			HMODULE proxy = Proxy();
-			if (!proxy) return;
+			if (!proxy)
+			{
+				CableAmpLink::Configure(mixOn, gain);
+				CableAmpLink::SetLatencyBlocks(safety ? 2 : 1);
+				return;
+			}
 			using ConfigureFn = void(__cdecl*)(int, float);
 			using LatencyFn = void(__cdecl*)(int);
 			if (auto fn = reinterpret_cast<ConfigureFn>(GetProcAddress(proxy, "RSModsAsio_ConfigureAmpLink"))) fn(mixOn ? 1 : 0, gain);
@@ -80,7 +94,7 @@ namespace ExternalAmp
 		void SendPedalShift(int semitones)
 		{
 			HMODULE proxy = Proxy();
-			if (!proxy) return;
+			if (!proxy) { CableAmpLink::SetPitchSemitones(semitones); return; }
 			using PitchFn = void(__cdecl*)(int);
 			if (auto fn = reinterpret_cast<PitchFn>(GetProcAddress(proxy, "RSModsAsio_SetAmpLinkPitch"))) fn(semitones);
 		}
@@ -219,7 +233,8 @@ namespace ExternalAmp
 				if (proxyLoaded != lastProxyLoaded)
 				{
 					lastProxyLoaded = proxyLoaded;
-					LOG_INFO("(EXTERNAL AMP) Audio Bridge driver " << (proxyLoaded ? "present: external amp available" : "not loaded: external amp unavailable") << std::endl);
+					LOG_INFO("(EXTERNAL AMP) " << (!proxyLoaded ? "No amp link host (no Audio Bridge driver, no cable link): external amp unavailable"
+						: Proxy() ? "Audio Bridge driver present: external amp available" : "Real Tone Cable hosts the amp link: external amp available") << std::endl);
 				}
 				// In the tuner, with Silence guitar while tuning on: the amp sim's return is not mixed in and the game's
 				// amp is held at 0 below, so nothing plays the guitar whichever way it is heard.
@@ -260,6 +275,8 @@ namespace ExternalAmp
 					g_snapshot.gameAmpMuted = mute.Muted();
 					g_snapshot.pedalSemitones = pedalSemitones;
 					g_snapshot.link = link;
+					g_snapshot.cableHost = proxyLoaded && !Proxy();
+					g_snapshot.cableDirectUsb = CableAmpLink::IsDirectUsb();
 				}
 				Sleep(100);
 			}
@@ -273,6 +290,8 @@ namespace ExternalAmp
 		const int tenths = static_cast<int>(static_cast<int32_t>(ReadDword(L"ExternalAmpReturn", 0)));
 		g_returnTenths.store(std::clamp(tenths, kMinReturnTenths, kMaxReturnTenths));
 		g_safety.store(ReadDword(L"ExternalAmpSafety", 0) != 0);
+		g_cableBlock.store(static_cast<int>(ReadDword(L"CableBlockFrames", 0)));
+		CableAmpLink::SetBlockSetting(g_cableBlock.load());   // before the cable opens the link, so it opens at that size
 		g_silenceTuning.store(ReadDword(L"SilenceGuitarWhileTuning", ReadDword(L"MuteWhileTuning", 0, kVstHostKey)) != 0);
 		std::thread(Run).detach();
 	}
@@ -287,6 +306,7 @@ namespace ExternalAmp
 		snapshot.fallback = g_fallback.load();
 		snapshot.returnTenths = g_returnTenths.load();
 		snapshot.safetyBuffer = g_safety.load();
+		snapshot.cableBlockSetting = g_cableBlock.load();
 		snapshot.silenceWhileTuning = g_silenceTuning.load();
 		return snapshot;
 	}
@@ -294,6 +314,14 @@ namespace ExternalAmp
 	void SetEnabled(bool enabled) { g_enabled.store(enabled); WriteDword(L"ExternalAmp", enabled ? 1 : 0); }
 	void SetCompare(bool gameAmp) { g_compare.store(gameAmp); }
 	void SetSafetyBuffer(bool on) { g_safety.store(on); WriteDword(L"ExternalAmpSafety", on ? 1 : 0); }
+	void SetCableBlock(int frames)
+	{
+		frames = frames == 64 || frames == 128 || frames == 256 ? frames : 0;
+		g_cableBlock.store(frames);
+		WriteDword(L"CableBlockFrames", static_cast<DWORD>(frames));
+		// Reopening the link waits for the audio threads and writes the registry: not on the render thread.
+		std::thread([frames] { CableAmpLink::SetBlockSetting(frames); }).detach();
+	}
 	void SetSilenceWhileTuning(bool on)
 	{
 		g_silenceTuning.store(on);

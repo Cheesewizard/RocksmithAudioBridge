@@ -6,6 +6,7 @@
 #include <thread>
 #include <wrl.h>
 #include "AsioProxy/OutputGuardDsp.h"
+#include "ExternalAmp/CableAmpLink.hpp"
 #include "OutputRateMatcher.hpp"
 
 namespace Audio::SharedOutput
@@ -407,6 +408,7 @@ namespace Audio::SharedOutput
 				}
 				if (current)
 				{
+					CableAmpLink::Render(staging.data(), frames);   // the Tone designer's return on the cable (no-op otherwise)
 					ApplyOutputGuard(frames);
 					std::memcpy(destination, staging.data(), frames * 2 * sizeof(float));
 				}
