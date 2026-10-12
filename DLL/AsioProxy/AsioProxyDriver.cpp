@@ -1422,6 +1422,9 @@ private:
 		const std::wstring driver = m_bindTarget.empty() ? ReadTargetDriverName() : m_bindTarget;
 		const std::string reason = m_bindFailure.empty() ? std::string("it would not start") : m_bindFailure;
 		m_bindFailure.clear();
+		// It refused without taking the game down: not a crash, so the next launch must not hold this setup back
+		// (2026-10-11: a refusal 7 s before the game was closed left Pending set, and the next boot opened nothing).
+		FinishSetupAttempt(false);
 		if (driver.empty()) return;   // no Target set: the settings app already reports "not set up"
 		ProxyLog("ERROR: guitar input and output are silent because '%ls' would not open: %s", driver.c_str(), reason.c_str());
 		const std::wstring wideReason = Widen(reason);
@@ -2187,8 +2190,40 @@ private:
 		{
 			const AsioProxyDriver* active = s_active;
 			if (!active || active->m_mode.load(std::memory_order_acquire) != OutputMode::Real) return 0;
+			// kAsioResetRequest: the interface changed under us (ASIO4ALL after a device is switched on or off in its
+			// panel, a buffer size changed in a control panel). RS_ASIO does not reopen anything for it, so the bridge
+			// kept playing into the old channel list ("Not Connected 1 / 2", silence; 2026-10-11). The bridge reopens
+			// the same interface itself, the live switch path, off this driver thread.
+			if (selector == 3) { ScheduleResetRebind(); return 1; }
 		}
 		return host(selector, value, message, opt);
+	}
+	static void ScheduleResetRebind()
+	{
+		static std::atomic<bool> pending{ false };
+		if (pending.exchange(true)) return;
+		HMODULE self = nullptr;   // the thread may outlive a host release: never let this module unload under it
+		GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN, reinterpret_cast<LPCWSTR>(&ScheduleResetRebind), &self);
+		std::thread([] {
+			std::this_thread::sleep_for(std::chrono::milliseconds(300));   // drivers often send several in a row
+			pending.store(false);
+			AsioProxyDriver* active = s_active;
+			if (!active || !active->IsReal()) return;
+			active->AddRef();
+			const std::wstring target = active->BoundTarget();
+			ProxyLog("Reset request from '%ls': reopening it with its new settings", target.c_str());
+			// A driver is often still resetting when asked to open again (2026-10-11: the M-Track refused to start
+			// 0.7 s after its own reset request): try again after 1 s and 3 s before leaving it to the player.
+			bool reopened = !target.empty() && active->TryRebind(target.c_str()) != 0;
+			for (int wait : { 1000, 3000 })
+			{
+				if (reopened || target.empty()) break;
+				std::this_thread::sleep_for(std::chrono::milliseconds(wait));
+				ProxyLog("Reset request: '%ls' would not open yet; trying again", target.c_str());
+				reopened = active->TryRebind(target.c_str()) != 0;
+			}
+			active->Release();
+		}).detach();
 	}
 	static void Trampoline_SampleRateDidChange(ASIOSampleRate rate)
 	{
