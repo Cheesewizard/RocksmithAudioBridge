@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "VstHostLink.hpp"
+#include "ToneSwitchPopup.hpp"
 #include "Shared/VstHostControl.hpp"
 #include "ExternalAmp/ExternalAmp.hpp"
 #include "SongLibrary.hpp"
@@ -62,6 +63,9 @@ namespace VstHostLink
 		ULONGLONG g_songPolledAt = 0;
 		std::string g_songKey;           // the song being played, empty outside songs
 		std::string g_appliedSong;       // the song whose tone was last applied
+		std::string g_songTarget;        // the tone the current song plays (its own or the default); empty: none set
+		std::string g_switchTarget;      // released and loading: the readout names it until it is the loaded tone
+		ULONGLONG g_switchAt = 0;
 		std::string g_highlighted;       // the song list's highlighted song (its preview plays), and since when
 		ULONGLONG g_highlightedAt = 0;
 		std::string g_preparedSong;      // the last one whose tone's plugins the host was asked to get ready
@@ -77,8 +81,6 @@ namespace VstHostLink
 			std::vector<std::string> plugins;
 			ULONGLONG queuedAt = 0, startedAt = 0;
 		} g_watch;
-		std::string g_doneLine;          // "... ready (took 14 s)", shown until g_doneUntil
-		ULONGLONG g_doneUntil = 0;
 
 		VstHostControl::Shared* Shared()
 		{
@@ -595,11 +597,6 @@ namespace VstHostLink
 			WritePrivateProfileStringW(L"Loads", Wide(g_watch.song).c_str(), Wide(record).c_str(), SongLoadsFile().c_str());
 			LOG_INFO("(VST HOST) song " << g_watch.song << ": tone '" << g_watch.tone << "' ready in " << value << " s"
 				<< (plugins.empty() ? std::string(", every plugin was already loaded") : ", loaded from scratch: " + plugins) << std::endl);
-			if (seconds >= 1.5f)
-			{
-				g_doneLine = "Tone designer: \"" + g_watch.tone + "\" ready (took " + std::to_string(static_cast<int>(seconds + 0.5f)) + " s)";
-				g_doneUntil = now + 5000;
-			}
 			g_watch.active = false;
 			KickSlow();
 		}
@@ -623,6 +620,30 @@ namespace VstHostLink
 
 		// Song tones: entering a song with an assigned tone loads it; entering one without, after a song tone was
 		// loaded, goes back to the tone the player had before.
+		// A song's tone switches as soon as the song starts (its plugins were loaded at the tuner, so it is quick); the
+		// game's tone readout follows the switch (PublishPopupName), it never holds the switch back.
+		std::string g_startTone;         // the song's switch, waiting for the song to be playing; empty: none
+		bool g_startWatch = false;
+		ULONGLONG g_startAt = 0;
+
+		// Entering a song: the switch waits for the song to be playing (the highway moving), the moment the game's own
+		// tone readout can show, instead of the game's "in song" flag, which comes while the song is still loading
+		// (2026-10-12: the tone changed at load and the readout came seconds later).
+		void SwitchAtSongStart(const std::string& tone, bool watch)
+		{
+			g_startTone = tone;
+			g_startWatch = watch;
+			g_startAt = GetTickCount64();
+		}
+
+		void SwitchSongTone(const std::string& tone, bool watch)
+		{
+			Queue(Command::LoadTone, 0, 0, Wide(tone));
+			if (watch) WatchSongLoad(g_songKey, tone);
+			g_switchTarget = tone;
+			g_switchAt = GetTickCount64();
+		}
+
 		void FollowSong(VstHostControl::Shared* shared, bool hostRunning)
 		{
 			const ULONGLONG now = GetTickCount64();
@@ -645,6 +666,12 @@ namespace VstHostLink
 			if (songKey != g_songKey)
 			{
 				g_songKey = songKey;
+				g_switchTarget.clear();
+				g_startTone.clear();
+				// The tone this song will play (its own, else the default; empty: whatever is loaded stays), named by the
+				// game's own tone readout (ToneSwitchPopup). Read once per song.
+				g_songTarget = songKey.empty() ? std::string() : SongTone(songKey);
+				if (g_songTarget.empty() && !songKey.empty()) g_songTarget = ReadSlow([](SlowState& slow) { return slow.defaultTone; });
 				ReadSlow([&](SlowState& slow) { slow.songKey = songKey; slow.songTone.clear(); return 0; });
 				KickSlow();
 			}
@@ -652,6 +679,19 @@ namespace VstHostLink
 			// this, a tone assigned during a song never loaded when that song was played again.)
 			if (g_songKey.empty()) { g_appliedSong.clear(); return; }
 			if (g_songKey == g_appliedSong || !hostRunning) return;
+			if (!inSong)
+			{
+				// Tuner and calibration: only get the tone's plugins ready. The chain switches when the song starts, so
+				// the sound and the game's "TONE SWITCH" readout change together (with the plugins loaded the switch
+				// takes about 0.3 s).
+				if (!g_songTarget.empty() && g_preparedSong != g_songKey)
+				{
+					g_preparedSong = g_songKey;
+					LOG_INFO("(VST HOST) song " << g_songKey << " chosen: getting its tone '" << g_songTarget << "' ready for the start" << std::endl);
+					Queue(Command::PrepareTone, 0, 0, Wide(g_songTarget));
+				}
+				return;
+			}
 			// Entering a song is rare: this one read stays here, so the song's tone loads without waiting a pass.
 			g_appliedSong = g_songKey;
 			const std::string tone = SongTone(g_songKey);
@@ -663,8 +703,7 @@ namespace VstHostLink
 				if (_stricmp(tone.c_str(), current) == 0) return;
 				if (g_toneBeforeSong.empty()) g_toneBeforeSong = current;
 				LOG_INFO("(VST HOST) song " << g_songKey << ": loading its tone '" << tone << "'" << std::endl);
-				Queue(Command::LoadTone, 0, 0, Wide(tone));
-				WatchSongLoad(g_songKey, tone);
+				SwitchAtSongStart(tone, true);
 			}
 			else if (const std::string fallback = ReadSlow([](SlowState& slow) { return slow.defaultTone; }); !fallback.empty())
 			{
@@ -672,15 +711,60 @@ namespace VstHostLink
 				g_toneBeforeSong.clear();
 				if (_stricmp(fallback.c_str(), current) == 0) return;
 				LOG_INFO("(VST HOST) song " << g_songKey << " has no tone of its own: loading the default tone '" << fallback << "'" << std::endl);
-				Queue(Command::LoadTone, 0, 0, Wide(fallback));
-				WatchSongLoad(g_songKey, fallback);
+				SwitchAtSongStart(fallback, true);
 			}
 			else if (!g_toneBeforeSong.empty())
 			{
 				LOG_INFO("(VST HOST) song " << g_songKey << " has no tone of its own: back to '" << g_toneBeforeSong << "'" << std::endl);
-				Queue(Command::LoadTone, 0, 0, Wide(g_toneBeforeSong));
+				SwitchAtSongStart(g_toneBeforeSong, false);
 				g_toneBeforeSong.clear();
 			}
+		}
+
+		// The name the game's tone readout shows while the Tone designer is what the player hears: the current song's
+		// tone, else the chain loaded now. Empty (the game's own text) when the host is off or Game amp is chosen.
+		void PublishPopupName(VstHostControl::Shared* shared, bool hostRunning)
+		{
+			const auto shortName = [](std::string name)
+			{
+				const size_t slash = name.find_last_of("/\\");   // "Tests/Test 1" reads as "Test 1"
+				return slash == std::string::npos ? name : name.substr(slash + 1);
+			};
+			char loaded[VstHostControl::kNameChars + 1]{};
+			if (shared) memcpy(loaded, shared->toneName, VstHostControl::kNameChars);
+			const ULONGLONG now = GetTickCount64();
+			if (!g_switchTarget.empty() && (_stricmp(g_switchTarget.c_str(), loaded) == 0 || now - g_switchAt > 10000)) g_switchTarget.clear();
+			std::string name;
+			if (shared && hostRunning && !ExternalAmp::GetSnapshot().comparing)
+			{
+				// The tone switching in now, else the chain loaded now.
+				name = shortName(!g_switchTarget.empty() ? g_switchTarget : (loaded[0] ? std::string(loaded) : std::string("Unsaved tone")));
+			}
+			ToneSwitchPopup::SetToneName(name);
+
+			// The game never shows its tone readout for our chain (it does only when its own tone slot changes), so it
+			// is asked to (ToneSwitchPopup::ShowNow) as an event of each tone switch during a song: once the tone has
+			// loaded and the song is playing (shown while the song is still loading, the game clears it at once). Checked
+			// every 250 ms, up to 60 s per tone.
+			static std::string announced, pending;
+			static ULONGLONG checkedAt = 0, pendingSince = 0;
+			if (now - checkedAt < 250) return;
+			checkedAt = now;
+			if (name.empty() || !GameState::IsInSong()) { announced.clear(); pending.clear(); return; }
+			if (!g_startTone.empty())
+			{
+				// Song start: the switch goes once the song is playing (or after 30 s regardless); the readout then
+				// follows the load below like any other switch.
+				if (!ToneSwitchPopup::SongPlaying() && now - g_startAt < 30000) return;
+				LOG_INFO("(VST HOST) song " << g_songKey << " is playing: switching to '" << g_startTone << "'" << std::endl);
+				SwitchSongTone(g_startTone, g_startWatch);
+				g_startTone.clear();
+				return;
+			}
+			const bool idle = shared->loading == 0 && g_commands.empty() && shared->commandDone == shared->commandSeq;
+			if (!idle || !loaded[0] || _stricmp(announced.c_str(), loaded) == 0) return;
+			if (pending != loaded) { pending = loaded; pendingSince = now; }
+			if (ToneSwitchPopup::ShowNow() || now - pendingSince > 60000) announced = loaded;
 		}
 
 		// A plugin that crashes takes the host with it. The host leaves a note as it goes (LastCrash = the module,
@@ -840,6 +924,7 @@ namespace VstHostLink
 		AutoStart(hostRunning);
 		FollowCrashes(hostRunning);
 		FollowSong(shared, hostRunning);
+		PublishPopupName(shared, hostRunning);
 		FollowTuner(hostRunning);
 		PumpCommands(shared, hostRunning);
 	}
@@ -972,26 +1057,6 @@ namespace VstHostLink
 		g_snapshotAt = 0;
 	}
 
-	std::string HudLine()
-	{
-		if (g_overlayVisible) return {};
-		VstHostControl::Shared* shared = Shared();
-		if (shared && shared->loading != 0)
-		{
-			char name[VstHostControl::kNameChars + 1]{};
-			memcpy(name, shared->loadingText, VstHostControl::kNameChars);
-			std::string line = "Tone designer: loading";
-			if (g_watch.active) {
-				const SongLibrary::Song* song = SongLibrary::Get()->Find(g_watch.song);
-				line += " \"" + g_watch.tone + "\" for " + (song ? song->title : g_watch.song);
-			}
-			if (name[0]) line += std::string(" | ") + name + (shared->loadingTotal > 1 ? " (" + std::to_string(shared->loadingStep) + " of " + std::to_string(shared->loadingTotal) + ")" : std::string());
-			if (g_watch.active && g_watch.seenLoading) line += " | " + std::to_string((GetTickCount64() - g_watch.startedAt) / 1000) + " s";
-			return line;
-		}
-		if (GetTickCount64() < g_doneUntil) return g_doneLine;
-		return {};
-	}
 
 	bool IsFavouriteTone(const std::string& tone)
 	{

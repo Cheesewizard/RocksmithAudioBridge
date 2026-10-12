@@ -268,7 +268,6 @@ void GameOverlay::DisplayNoteByNoteStatus()
 	// they never read as a game or Note by Note state.
 	{
 		std::vector<std::string> lines;
-		if (std::string tone = VstHostLink::HudLine(); !tone.empty()) lines.push_back(std::move(tone));   // a tone loading, overlay closed
 		Extensions::CollectHudLines(lines);
 		int top = static_cast<int>(WindowSize.height / 6.5f);
 		const int lineHeight = static_cast<int>(WindowSize.height / 36.0f);

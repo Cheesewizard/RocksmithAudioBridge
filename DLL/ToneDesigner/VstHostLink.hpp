@@ -153,8 +153,6 @@ namespace VstHostLink
 	};
 	std::vector<std::pair<std::string, SongLoad>> SongLoads();
 
-	// The status line on the game screen while a tone loads with the overlay closed (and a moment after).
-	std::string HudLine();
 
 	bool HostProcessRunning();           // thread safe
 	void ReloadSettings();               // after a restore: favourites, lists and tones read again

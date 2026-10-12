@@ -330,6 +330,9 @@ unsigned WINAPI MainThread() {
 		NoteByNoteHudLabel::Initialize();
 	}
 
+	// The game's own tone readout names the Tone designer's tone while it plays (no-op until a name is set).
+	ToneSwitchPopup::Initialize();
+
 	// The FretNet ML string/fret companion (bound to this game's lifetime) is what Note-by-Note reads for
 	// its ML "stuck hold" rescue. It is a separate process with the model loaded, so it starts only the first
 	// time Note by Note is on or the Riff Repeater menus are open (so it is warm before the first note),
