@@ -22,24 +22,25 @@ namespace ExternalAmp
 		std::atomic<bool> g_fallback{ true };
 		std::atomic<int> g_returnTenths{ 0 };
 		std::atomic<bool> g_safety{ false };
+		std::atomic<bool> g_silenceTuning{ false };
 
 		std::mutex g_snapshotMutex;
 		Snapshot g_snapshot;
 
-		DWORD ReadDword(const wchar_t* name, DWORD fallback)
+		DWORD ReadDword(const wchar_t* name, DWORD fallback, const wchar_t* keyPath = kKey)
 		{
 			HKEY key = nullptr;
 			DWORD value = fallback, size = sizeof(value), type = 0;
-			if (RegOpenKeyExW(HKEY_CURRENT_USER, kKey, 0, KEY_READ, &key) != ERROR_SUCCESS) return fallback;
+			if (RegOpenKeyExW(HKEY_CURRENT_USER, keyPath, 0, KEY_READ, &key) != ERROR_SUCCESS) return fallback;
 			if (RegQueryValueExW(key, name, nullptr, &type, reinterpret_cast<BYTE*>(&value), &size) != ERROR_SUCCESS || type != REG_DWORD) value = fallback;
 			RegCloseKey(key);
 			return value;
 		}
 
-		void WriteDword(const wchar_t* name, DWORD value)
+		void WriteDword(const wchar_t* name, DWORD value, const wchar_t* keyPath = kKey)
 		{
 			HKEY key = nullptr;
-			if (RegCreateKeyExW(HKEY_CURRENT_USER, kKey, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) return;
+			if (RegCreateKeyExW(HKEY_CURRENT_USER, keyPath, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) return;
 			RegSetValueExW(key, name, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value));
 			RegCloseKey(key);
 		}
@@ -102,6 +103,17 @@ namespace ExternalAmp
 			return true;
 		}
 
+		// Silence the guitar in the tuner screens: one General setting for every way the guitar is heard. It used to
+		// be Tone designer's "Mute while tuning" (VstHost\MuteWhileTuning), which is kept in step so the VST host still
+		// mutes its chain there, and is this setting's starting value.
+		constexpr wchar_t kVstHostKey[] = L"Software\\RSMods\\VstHost";
+
+		// The tuner screens, read here rather than from GameState::currentMenu, which other threads write.
+		bool InTuner()
+		{
+			return GameState::GameLoaded && Contains(GameState::GetCurrentMenu(), GameState::tuningMenus);
+		}
+
 		// Holds Mixer_Player1 at 0 while asked, remembering the player's level to put back.
 		class GameAmpMute
 		{
@@ -118,7 +130,7 @@ namespace ExternalAmp
 			// that starts while our restore fade is still running keeps the level we were restoring.
 			static constexpr ULONGLONG kSettleMs = 500;
 
-			void Hold()
+			void Hold(const char* why)
 			{
 				const ULONGLONG now = GetTickCount64();
 				const bool settling = now - m_changedAt < kSettleMs;
@@ -136,7 +148,7 @@ namespace ExternalAmp
 					{
 						m_muted = true;
 						m_changedAt = now;
-						LOG_INFO("(EXTERNAL AMP) amp sim connected: game guitar muted (level " << m_restore
+						LOG_INFO("(EXTERNAL AMP) " << why << ": game guitar muted (level " << m_restore
 							<< (m_restoreKnown ? "" : ", not trusted yet") << " kept to restore)" << std::endl);
 					}
 					return;
@@ -148,7 +160,7 @@ namespace ExternalAmp
 					m_restoreKnown = true;
 					VolumeControl::SetPlaybackVolume(kPlayer1Channel, 0.0f);
 					LOG_INFO("(EXTERNAL AMP) Player 1 raised to " << current << (source == RTPCValue_Global ? " (global)" : "")
-						<< " while the amp sim plays; held at 0, will restore " << current << std::endl);
+						<< " while muted (" << why << "); held at 0, will restore " << current << std::endl);
 				}
 			}
 
@@ -188,6 +200,7 @@ namespace ExternalAmp
 			bool lastProxyLoaded = false;
 			ULONGLONG nextRegistryCheck = 0;
 			bool guest64 = false;
+			bool wasTuning = false;
 
 			while (!GameState::GameClosing)
 			{
@@ -208,7 +221,10 @@ namespace ExternalAmp
 					lastProxyLoaded = proxyLoaded;
 					LOG_INFO("(EXTERNAL AMP) Audio Bridge driver " << (proxyLoaded ? "present: external amp available" : "not loaded: external amp unavailable") << std::endl);
 				}
-				ConfigureProxy(enabled, gain, g_safety.load());
+				// In the tuner, with Silence guitar while tuning on: the amp sim's return is not mixed in and the game's
+				// amp is held at 0 below, so nothing plays the guitar whichever way it is heard.
+				const bool tuning = g_silenceTuning.load() && InTuner();
+				ConfigureProxy(enabled && !tuning, gain, g_safety.load());
 				const int pedalSemitones = DropPedal::GetAppliedInputShiftSemitones();
 				SendPedalShift(pedalSemitones);
 
@@ -220,12 +236,15 @@ namespace ExternalAmp
 
 				// Fallback off: the game's amp stays muted while the switch is on and the link exists, even with
 				// nothing connected. Never muted without the proxy: there would be no way to hear the guitar.
-				const bool wantMute = enabled && proxyLoaded && link.linkOpen && (fallback ? useAmpSim : true);
+				const bool ampSimMute = enabled && proxyLoaded && link.linkOpen && (fallback ? useAmpSim : true);
 				if (Wwise::SoundEngine::IsInitialized())
 				{
-					if (wantMute) mute.Hold();
-					else mute.Release(!enabled ? "external amp switched off" : "amp sim disconnected");   // the switch is ignored for Tone designer
+					if (ampSimMute) mute.Hold("amp sim connected");
+					else if (tuning) mute.Hold("tuner, silence guitar while tuning");
+					else mute.Release(wasTuning ? "left the tuner" : !enabled ? "external amp switched off" : "amp sim disconnected");   // the switch is ignored for Tone designer
 				}
+
+				wasTuning = tuning;
 
 				const ULONGLONG now = GetTickCount64();
 				if (now >= nextRegistryCheck) { guest64 = Guest64Registered(); nextRegistryCheck = now + 5000; }
@@ -254,6 +273,7 @@ namespace ExternalAmp
 		const int tenths = static_cast<int>(static_cast<int32_t>(ReadDword(L"ExternalAmpReturn", 0)));
 		g_returnTenths.store(std::clamp(tenths, kMinReturnTenths, kMaxReturnTenths));
 		g_safety.store(ReadDword(L"ExternalAmpSafety", 0) != 0);
+		g_silenceTuning.store(ReadDword(L"SilenceGuitarWhileTuning", ReadDword(L"MuteWhileTuning", 0, kVstHostKey)) != 0);
 		std::thread(Run).detach();
 	}
 
@@ -267,12 +287,19 @@ namespace ExternalAmp
 		snapshot.fallback = g_fallback.load();
 		snapshot.returnTenths = g_returnTenths.load();
 		snapshot.safetyBuffer = g_safety.load();
+		snapshot.silenceWhileTuning = g_silenceTuning.load();
 		return snapshot;
 	}
 
 	void SetEnabled(bool enabled) { g_enabled.store(enabled); WriteDword(L"ExternalAmp", enabled ? 1 : 0); }
 	void SetCompare(bool gameAmp) { g_compare.store(gameAmp); }
 	void SetSafetyBuffer(bool on) { g_safety.store(on); WriteDword(L"ExternalAmpSafety", on ? 1 : 0); }
+	void SetSilenceWhileTuning(bool on)
+	{
+		g_silenceTuning.store(on);
+		WriteDword(L"SilenceGuitarWhileTuning", on ? 1 : 0);
+		WriteDword(L"MuteWhileTuning", on ? 1 : 0, kVstHostKey);   // Tone designer reads it for its own chain
+	}
 	void SetFallback(bool fallback) { g_fallback.store(fallback); WriteDword(L"ExternalAmpFallback", fallback ? 1 : 0); }
 	void SetReturnTenths(int tenths, bool persist)
 	{

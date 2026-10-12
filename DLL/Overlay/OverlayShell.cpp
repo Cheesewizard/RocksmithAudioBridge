@@ -4031,6 +4031,13 @@ namespace Overlay
 			static bool p2Cable = false;
 			if (!seeded) { p2Cable = Settings::ReturnSettingValue("CableForPlayerTwo") == "on"; seeded = true; }
 
+			// Here rather than under Amp sim: it silences the game's amp, Tone designer and an external app alike.
+			BeginCard("Tuner");
+			bool silenceTuning = ExternalAmp::GetSnapshot().silenceWhileTuning;
+			if (ToggleRow("Silence guitar while tuning", "No guitar sound in the tuner screens, whichever amp plays it. The tuner still hears you.", &silenceTuning))
+				ExternalAmp::SetSilenceWhileTuning(silenceTuning);
+			EndCard();
+
 			BeginCard("Display");
 			bool diagnostics = Audio::CableInput::IsOverlayEnabled();
 			if (ToggleRow("Audio diagnostics HUD", "Signal level, packet rate and route state in the top right corner.", &diagnostics))
