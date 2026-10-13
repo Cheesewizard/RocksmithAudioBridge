@@ -296,6 +296,15 @@ namespace CableAmpLink
 			if (lastPeriod) g_margin = 0;
 			lastPeriod = periodFrames;
 		}
+		// The Extra safety buffer moves the margin by its block at once, both ways (it only raised the floor before, so a
+		// margin already above it did not change and the switch seemed to do nothing, 2026-10-13).
+		static bool lastSafety = false;
+		const bool safety = g_safety.load(std::memory_order_relaxed);
+		if (safety != lastSafety)
+		{
+			if (g_margin) g_margin = safety ? g_margin + static_cast<uint32_t>(block) : (g_margin > static_cast<uint32_t>(block) ? g_margin - static_cast<uint32_t>(block) : 0);
+			lastSafety = safety;
+		}
 		if (g_margin < base) g_margin = base + CABLEAMPLINK_START;   // a sensible start; it adapts from here
 		auto underflow = [&]()
 		{

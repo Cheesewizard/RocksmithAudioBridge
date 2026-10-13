@@ -937,6 +937,9 @@
     <ClCompile Include="AudioBridge\Engine\AsioOutputDevice.cpp">
       <Filter>AudioBridge\Engine</Filter>
     </ClCompile>
+    <ClCompile Include="AudioBridge\Engine\AppAudioMix.cpp">
+      <Filter>AudioBridge\Engine</Filter>
+    </ClCompile>
     <ClCompile Include="AudioBridge\Engine\GameToneLatency.cpp">
       <Filter>AudioBridge\Engine</Filter>
     </ClCompile>
@@ -1039,6 +1042,9 @@
       <Filter>AudioBridge\Cable</Filter>
     </ClInclude>
     <ClInclude Include="AudioBridge\Engine\AsioOutputDevice.hpp">
+      <Filter>AudioBridge\Engine</Filter>
+    </ClInclude>
+    <ClInclude Include="AudioBridge\Engine\AppAudioMix.hpp">
       <Filter>AudioBridge\Engine</Filter>
     </ClInclude>
     <ClInclude Include="AudioBridge\Engine\GameToneLatency.hpp">

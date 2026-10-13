@@ -49,6 +49,7 @@ namespace Audio::SharedOutput
 		void Close();
 
 		uint32_t BufferFrames() const { return m_chunkFrames; }   // what each fill call asks for
+		uint32_t DeviceBufferFrames() const { return m_bufferFrames; }
 		bool Polling() const { return m_polling; }
 		uint32_t OutputLatencyFrames() const { return m_latencyFrames; }
 		ULONGLONG LastCallbackTick() const { return m_lastCallback.load(std::memory_order_acquire); }

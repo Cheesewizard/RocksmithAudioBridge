@@ -6,4 +6,6 @@ namespace Overlay
 {
 	void DrawShell(bool* open);
 	const char* CurrentPageName();   // the page last drawn, for the slow-frame log (Menu.cpp)
+	bool IsLatencyReadoutEnabled();
+	bool SetLatencyReadoutEnabled(bool enabled);
 }

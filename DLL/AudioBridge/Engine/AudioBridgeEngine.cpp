@@ -46,9 +46,12 @@ namespace Audio::SharedOutput
 
 		// NotifyCableInputBlock -> OutputSession: game blocks of cable input not yet answered with an output wake, when
 		// the last one came, and an event to wake the session's worker (auto-reset, made once for the process).
-		std::atomic<uint32_t> g_inputBlocks{ 0 };
-		std::atomic<uint32_t> g_inputBlockLimit{ 2 };      // ~100 ms of blocks, set by OutputSession::Initialize
-		std::atomic<uint64_t> g_inputBlocksDropped{ 0 };  // over the limit: the game stays that many blocks behind
+		// Counted in frames, not blocks: after a live game block change (ResetGameOutput) the game's output block may
+		// differ from its input block (the input stream is not reopened), and one wake per input block would then pace
+		// the output at the wrong rate.
+		std::atomic<uint32_t> g_inputBlocks{ 0 };          // frames of cable input not yet answered with an output wake
+		constexpr uint32_t kInputFrameLimit = 4800;        // ~100 ms
+		std::atomic<uint64_t> g_inputBlocksDropped{ 0 };  // times input arrived over the limit (the game fell behind)
 		std::atomic<ULONGLONG> g_lastInputBlock{ 0 };
 		HANDLE InputBlockEvent()
 		{
@@ -490,7 +493,6 @@ namespace Audio::SharedOutput
 			{
 				gameFormat = *format;
 				periodFrames = CableGamePeriod::Frames();   // what the game requested is ignored, as RS_ASIO does
-				g_inputBlockLimit.store((std::max)(2u, 4800u / periodFrames));
 				physical->SetGamePacketFrames(periodFrames);
 				gamePacketFrames.store(periodFrames);
 				queue.Initialize(periodFrames * gameFormat.nBlockAlign, 2);
@@ -527,11 +529,14 @@ namespace Audio::SharedOutput
 				{
 					auto session = std::make_shared<RecordingSession>();
 					const std::filesystem::path directory(request.value);
-					response.result = directory.is_absolute() ? session->Start(directory, periodFrames) : E_INVALIDARG;
+					// The game track is taken as the output device is filled (OutputBackend::SetRecorder): blocks of up to
+					// its buffer, 4096 frames covers every device.
+					response.result = directory.is_absolute() ? session->Start(directory, 4096) : E_INVALIDARG;
 					if (SUCCEEDED(response.result)) response.result = Invoke([&]()
 					{
 						lastRecordingPath = session->GetWetPath();
 						recorder = session;
+						physical->SetRecorder(session);
 						recordedFrames = 0; recordingStarted = 0; recordingError = S_OK;
 						return S_OK;
 					});
@@ -550,6 +555,7 @@ namespace Audio::SharedOutput
 				{
 					if (recorder) { recordedFrames = recorder->GetFrames(); recordingStarted = recorder->GetStarted(); }
 					finished.swap(recorder);
+					physical->SetRecorder(nullptr);
 					return S_OK;
 				});
 				if (finished)
@@ -613,6 +619,9 @@ namespace Audio::SharedOutput
 				response.proxyInputMode = static_cast<uint32_t>(OutputTap::ProxyInputMode());
 				response.peak = peak;
 				if (request.operation == 1) peak = 0;
+				const std::wstring outputTelemetry = L"outputMode=" + std::to_wstring(backendStatus.outputMode)
+					+ L" outputBufferFrames=" + std::to_wstring(backendStatus.outputBufferFrames)
+					+ L" outputPeriodFrames=" + std::to_wstring(backendStatus.period);
 				wcsncpy_s(response.file, recorder ? recorder->GetWetPath().c_str() : lastRecordingPath.c_str(), _TRUNCATE);
 				wcsncpy_s(response.endpoint, (SUCCEEDED(backendStatus.error) ? backendStatus.activeEndpoint : activeEndpoint).c_str(), _TRUNCATE);
 				if (request.operation == 18) WriteLatencyResult(response);   // overwrites file with the latency result
@@ -651,7 +660,7 @@ namespace Audio::SharedOutput
 					const auto inputFormat = AsioBufferState::Read();
 					const std::wstring input = L" asioInputFrames=" + std::to_wstring(uint32_t(inputFormat))
 						+ L" asioInputRate=" + std::to_wstring(uint32_t(inputFormat >> 32));
-					wcsncpy_s(response.file, (input + trace + tuning + recovery).c_str(), _TRUNCATE);
+					wcsncpy_s(response.file, (outputTelemetry + L" " + input + trace + tuning + recovery).c_str(), _TRUNCATE);
 				}
 				return S_OK;
 			});
@@ -902,9 +911,11 @@ namespace Audio::SharedOutput
 			// the output backend already matches that to the device's.
 			if (GetTickCount64() - g_lastInputBlock.load() < 50)
 			{
+				// A whole output block of input owed: take it and wake the game once.
+				const uint32_t block = periodFrames ? periodFrames : 1;
 				uint32_t blocks = g_inputBlocks.load();
-				while (blocks && !g_inputBlocks.compare_exchange_weak(blocks, blocks - 1)) {}
-				if (!blocks)
+				while (blocks >= block && !g_inputBlocks.compare_exchange_weak(blocks, blocks - block)) {}
+				if (blocks < block)
 				{
 					gameWakeOutstanding.store(false);
 					return;
@@ -966,6 +977,7 @@ namespace Audio::SharedOutput
 				latencyTrims = status.trims;
 				latencyEmpty = status.emptyObservations;
 				latencyExpired = status.expiredFrames;
+				latencyCushion = status.cushionFrames;
 				// The output's buffer, for the next start's Automatic game block size (CableGamePeriod.hpp).
 				if (status.state == BackendState::Running)
 					CableGamePeriod::Remember(status.period, AsioOutputDevice::IsAsioEndpoint(status.activeEndpoint));
@@ -981,7 +993,7 @@ namespace Audio::SharedOutput
 				<< "), game queue avg " << std::fixed << std::setprecision(2) << queueBlocks << " blocks = " << std::setprecision(1) << gameMs
 				<< " ms; Windows period " << latencyPeriod << " frames, device holds " << static_cast<int>(padding) << " + backend FIFO "
 				<< static_cast<int>(fifo) << " frames = " << windowsMs << " ms; output delay about " << gameMs + windowsMs << " ms; backlog trims so far "
-				<< latencyTrims << ", device found empty " << latencyEmpty << ", frames expired " << latencyExpired
+				<< latencyTrims << ", device found empty " << latencyEmpty << ", frames expired " << latencyExpired << ", extra cushion " << latencyCushion << " frames"
 				<< (GetTickCount64() - g_lastInputBlock.load() < 50 ? "; game clocked by the cable, waiting wakes " + std::to_string(g_inputBlocks.load())
 					+ ", dropped " + std::to_string(g_inputBlocksDropped.load()) : std::string("; game clocked by a timer")) << std::endl);
 			latencySince = now;
@@ -1028,7 +1040,6 @@ namespace Audio::SharedOutput
 					const float sample = converted[index];
 					if (std::isfinite(sample)) peak = std::max(peak, static_cast<uint32_t>(std::min(1.0f, std::abs(sample)) * 1000));
 				}
-					if (recorder) recorder->SubmitWet(converted.data(), packetFrames);
 				++packetReadIndex;
 				queue.CommitRead();
 			}
@@ -1058,6 +1069,7 @@ namespace Audio::SharedOutput
 			}
 			if (recorder)
 			{
+				physical->SetRecorder(nullptr);
 				std::wstring ignoredPath;
 				uint64_t ignoredFrames = 0, ignoredStarted = 0;
 				recorder->Stop(ignoredPath, ignoredFrames, ignoredStarted);
@@ -1093,6 +1105,7 @@ namespace Audio::SharedOutput
 		uint64_t latencyPackets = 0, latencyPacketFrames = 0;
 		UINT32 latencyMinPacket = UINT32_MAX, latencyMaxPacket = 0, latencyPeriod = 0;
 		uint64_t latencyTrims = 0, latencyEmpty = 0, latencyExpired = 0;
+		UINT32 latencyCushion = 0;
 		std::array<BYTE, 1024> diagnosticBlock{}, previousBlock{};
 		UINT32 diagnosticBytes = 0;
 		bool havePreviousBlock = false;
@@ -1705,7 +1718,17 @@ namespace Audio::SharedOutput
 		}
 	}
 
-	void NotifyCableInputBlock()
+	UINT32 GameOutputBlockFrames()
+	{
+		std::shared_ptr<OutputSession> session;
+		{
+			std::lock_guard<std::mutex> guard(g_sessionMutex);
+			session = g_activeSession.lock();
+		}
+		return session && session->initialized.load() ? session->periodFrames : 0;
+	}
+
+	void NotifyCableInputFrames(uint32_t frames)
 	{
 		g_lastInputBlock.store(GetTickCount64());
 		// Every block of input owes the game one output wake, kept until it is given: the game reads its input as it
@@ -1713,10 +1736,9 @@ namespace Audio::SharedOutput
 		// The first version kept two; each game audio stall longer than that (frame hitches of 40-220 ms in the log)
 		// added a block, and the game's amp drifted from ~20 to ~46 ms behind the guitar in 20 s, heard as an echo
 		// against the strings (recording 2026-10-13). Past ~100 ms behind, the rest is dropped and counted.
-		uint32_t blocks = g_inputBlocks.load();
-		const uint32_t limit = g_inputBlockLimit.load();
-		while (blocks < limit && !g_inputBlocks.compare_exchange_weak(blocks, blocks + 1)) {}
-		if (blocks >= limit) g_inputBlocksDropped.fetch_add(1);
+		uint32_t owed = g_inputBlocks.load();
+		while (!g_inputBlocks.compare_exchange_weak(owed, (std::min)(kInputFrameLimit, owed + frames))) {}
+		if (owed + frames > kInputFrameLimit) g_inputBlocksDropped.fetch_add(1);
 		if (HANDLE event = InputBlockEvent()) SetEvent(event);
 	}
 

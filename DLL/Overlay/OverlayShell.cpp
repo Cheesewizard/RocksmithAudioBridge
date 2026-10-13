@@ -16,7 +16,9 @@
 #include "AudioBridge/Engine/AsioOutputDevice.hpp"
 #include "AudioBridge/Engine/ExclusiveOutputDevice.hpp"
 #include "AudioBridge/Engine/DeviceVolume.hpp"
+#include "AudioBridge/Engine/AppAudioMix.hpp"
 #include "AudioBridge/Engine/GameToneLatency.hpp"
+#include "AudioBridge/Devices/DeviceEnumeratorHook.hpp"
 #include "AudioBridge/Engine/CableGamePeriod.hpp"
 #include "ToneDesigner/SongLibrary.hpp"
 #include "ToneDesigner/ToneBackup.hpp"
@@ -34,11 +36,29 @@
 #include <mutex>
 #include <thread>
 #include <optional>
+#include <atomic>
 
 namespace Overlay
 {
 	namespace
 	{
+		std::atomic_bool& LatencyReadoutSetting()
+		{
+			static std::atomic_bool enabled{ []()
+			{
+				DWORD value = 0;
+				DWORD size = sizeof(value);
+				const LSTATUS result = RegGetValueW(HKEY_CURRENT_USER, L"Software\\RSMods\\Overlay", L"LatencyReadout",
+					RRF_RT_REG_DWORD, nullptr, &value, &size);
+				if (result != ERROR_SUCCESS && result != ERROR_FILE_NOT_FOUND && result != ERROR_PATH_NOT_FOUND)
+				{
+					LOG_WARNING("(OVERLAY) Could not read latency readout setting, error " << result << std::endl);
+				}
+				return result == ERROR_SUCCESS && value != 0;
+			}() };
+			return enabled;
+		}
+
 		enum class Page { NoteByNote, Mixer, Input, Output, Record, General, Debug, DropPedal, AmpSim };
 
 		// ---- Engine access ------------------------------------------------------------------------------
@@ -78,13 +98,21 @@ namespace Overlay
 		struct LiveState
 		{
 			Audio::ControlResponse status{};
+			Audio::ControlResponse output{};
 			Audio::CableInput::Diagnostics input{};
 		};
+
+		unsigned OutputStatusNumber(const LiveState& live, const wchar_t* field)
+		{
+			const wchar_t* value = wcsstr(live.output.file, field);
+			return value ? static_cast<unsigned>(wcstoul(value + wcslen(field), nullptr, 10)) : 0;
+		}
 
 		const LiveState& Poll()
 		{
 			static LiveState state;
 			static ULONGLONG last = 0;
+			static ULONGLONG lastOutput = 0;
 			const ULONGLONG now = GetTickCount64();
 			if (now - last >= 100) {
 				// Never wait on the render thread: while a slow op (e.g. the ASIO pick, op 25) runs, keep the last status.
@@ -94,6 +122,14 @@ namespace Overlay
 				if (Audio::SharedOutput::TryDispatchControl(request, fresh)) state.status = fresh;
 				state.input = Audio::CableInput::GetDiagnostics();
 				last = now;
+			}
+			if (now - lastOutput >= 500)
+			{
+				Audio::ControlRequest request;
+				request.operation = 5;
+				Audio::ControlResponse fresh;
+				if (Audio::SharedOutput::TryDispatchControl(request, fresh)) state.output = fresh;
+				lastOutput = now;
 			}
 			return state;
 		}
@@ -2991,7 +3027,7 @@ namespace Overlay
 			// On the cable the link's own blocks are a small part of the delay (the output device and its buffer are the
 			// rest), so the measured guitar-to-speaker figure is shown instead (CableAmpLink's measurement).
 			if (link.frames > 0 && amp.cableHost && amp.cableLatencyMs > 0.0f)
-				sprintf_s(text, "48 kHz, %d samples, guitar to speaker %.0f ms (measured)", link.frames, amp.cableLatencyMs);
+				sprintf_s(text, "48 kHz, %d samples, latency estimate %.0f ms", link.frames, amp.cableLatencyMs);
 			else if (link.frames > 0)
 				sprintf_s(text, "48 kHz, %d samples, +%.1f ms", link.frames, link.frames * (link.latencyBlocks > 1 ? 2 : 1) * 1000.0 / AmpLink::kSampleRate);
 			InfoRow("Format", link.frames > 0 ? text : "Waiting for the game's audio");
@@ -3340,7 +3376,8 @@ namespace Overlay
 		std::string g_outputMessage;
 		bool g_outputMessageIsError = false;
 
-		void OutputSay(const std::string& text, bool error) { g_outputMessage = text; g_outputMessageIsError = error; }
+		std::wstring g_outputMessageEndpoint;   // the output a "Now playing through" message is about (empty: any other message)
+		void OutputSay(const std::string& text, bool error) { g_outputMessage = text; g_outputMessageIsError = error; g_outputMessageEndpoint.clear(); }
 
 		// Picking the ASIO entry while the proxy runs on its virtual clock (the game booted with the interface
 		// unplugged, so input is the Real Tone Cable and the mix is routed to a Windows device). Stopping the
@@ -3392,7 +3429,7 @@ namespace Overlay
 				pending.active = false;
 				return;
 			}
-			if (std::wstring(live.status.endpoint) == pending.target) { OutputSay("Now playing through " + pending.name + ". Lasts until you close Rocksmith.", false); pending.active = false; return; }
+			if (std::wstring(live.status.endpoint) == pending.target) { OutputSay("Now playing through " + pending.name + ". Lasts until you close Rocksmith.", false); g_outputMessageEndpoint = pending.target; pending.active = false; return; }
 			if (elapsed < 4000) return;
 			if (!pending.previous.empty()) BridgeControl(4, pending.previous.c_str());
 			if (Audio::SharedOutput::ExclusiveOutputDevice::IsExclusiveEndpoint(pending.target))
@@ -3426,6 +3463,7 @@ namespace Overlay
 			const bool passthrough = endpoint == L"(passthrough)" || endpoint == L"(silent)";
 			const bool switching = endpoint == L"(starting)" || endpoint == L"(downgrading)";
 			const bool session = !endpoint.empty() && endpoint[0] != L'(';
+			const unsigned outputMode = OutputStatusNumber(live, L"outputMode=");
 			std::wstring routedId;
 			if (routing) { const size_t close = endpoint.find(L')'); if (close != std::wstring::npos) routedId = endpoint.substr(close + 1); }
 			const std::wstring asioDriver = ReadPassthroughOutputName();
@@ -3456,6 +3494,17 @@ namespace Overlay
 			else if (endpoint == L"(passthrough)") { current = asioName; state = proxy ? "ASIO" : "Direct"; stateColor = Color::Good; }
 			else if (endpoint == L"(silent)") { current = "No output"; state = "Silent"; stateColor = Color::Bad; }
 			else if (switching) { current = "Switching"; state = "Switching"; stateColor = Color::Warn; }
+			if (session)
+			{
+				switch (outputMode)
+				{
+				case 1: state = "Shared"; break;
+				case 2: state = "Exclusive (event-driven)"; break;
+				case 3: state = "Exclusive (polling)"; stateColor = Color::Warn; break;
+				case 4: state = "ASIO"; break;
+				default: state = "Opening"; stateColor = Color::Warn; break;
+				}
+			}
 
 			// The real ASIO device refused to open this launch, so the proxy runs on its virtual clock and the
 			// guitar is silent. Without this the card reads "ASIO" in green and the player only notices "no input".
@@ -3473,6 +3522,22 @@ namespace Overlay
 			ImGui::TextUnformatted(current.c_str());
 			ImGui::PopFont();
 			StatusPill(state, stateColor);
+			if (session && outputMode != 0)
+			{
+				const unsigned deviceFrames = OutputStatusNumber(live, L"outputBufferFrames=");
+				const unsigned periodFrames = OutputStatusNumber(live, L"outputPeriodFrames=");
+				char bufferText[64];
+				if (deviceFrames)
+				{
+					sprintf_s(bufferText, "%u samples (%.1f ms)", deviceFrames, deviceFrames / 48.0);
+					InfoRow("Device buffer", bufferText);
+				}
+				if (periodFrames && periodFrames != deviceFrames)
+				{
+					sprintf_s(bufferText, "%u samples (%.1f ms)", periodFrames, periodFrames / 48.0);
+					InfoRow("Output period", bufferText);
+				}
+			}
 			// A setup that crashed the game is not reopened at boot (the driver's last-known-good guard); say what happened.
 			static std::string safeBootNotice;
 			static uint64_t safeBootPolled = 0;
@@ -3617,14 +3682,19 @@ namespace Overlay
 				const bool selected = routing ? device.id == routedId
 					: (session && device.id == Audio::SharedOutput::ExclusiveOutputDevice::WindowsId(endpoint));
 				std::string caption = device.isDefault ? "Windows default" : "";
-				// Expected guitar to ear with the Tone designer, from the periods the device reports (OutputDevices): the
-				// cable and a 64-sample block (~3.5 ms), the return's cushion (~1.5), then the device: two periods queued in
-				// shared mode, one plus the driver's own in exclusive. Close to what was measured on a laptop (2026-10-13).
+				// Device-reported periods describe capability, not total latency or the buffer granted after alignment.
 				if (device.sharedPeriod || device.exclusivePeriod) {
 					char estimate[64] = "";
-					const double shared = 5.0 + 2.0 * device.sharedPeriod / 48.0, exclusive = 5.0 + 2.0 * device.exclusivePeriod / 48.0;
-					if (device.sharedPeriod && device.exclusivePeriod) sprintf_s(estimate, "~%.0f ms, exclusive ~%.0f ms", shared, exclusive);
-					else if (device.sharedPeriod) sprintf_s(estimate, "~%.0f ms", shared);
+					const double shared = device.sharedPeriod / 48.0, exclusive = device.exclusivePeriod / 48.0;
+					// A device whose driver stalls in event-driven exclusive mode runs it polling, three periods deep
+					// (OutputBackend remembers it): say what it really gets, not the minimum it reports (2026-10-13).
+					DWORD polling = 0, pollingSize = sizeof(polling);
+					const bool needsPolling = RegGetValueW(HKEY_CURRENT_USER, L"Software\\RSMods\\AsioProxy\\ExclusivePolling", device.id.c_str(),
+						RRF_RT_REG_DWORD, nullptr, &polling, &pollingSize) == ERROR_SUCCESS && polling;
+					if (device.sharedPeriod && device.exclusivePeriod && needsPolling)
+						sprintf_s(estimate, "Periods: shared %.1f ms, exclusive %.1f ms (polling)", shared, exclusive * 3.0);
+					else if (device.sharedPeriod && device.exclusivePeriod) sprintf_s(estimate, "Periods: shared %.1f ms, exclusive min %.1f ms", shared, exclusive);
+					else if (device.sharedPeriod) sprintf_s(estimate, "Shared period %.1f ms", shared);
 					caption = caption.empty() ? estimate : caption + "  " + estimate;
 				}
 				ImGui::BeginDisabled(device.isProtected);
@@ -3657,14 +3727,39 @@ namespace Overlay
 			ImGui::PopStyleVar();
 			ImGui::Dummy(ImVec2(0, 2));
 
+			// Exclusive and ASIO outputs: other programs cannot play on the device, so the bridge mixes them in
+			// (AppAudioMix, Windows' app capture of everything but Rocksmith). Not offered in shared mode, where they play
+			// on the device already and mixing them in too would double them.
+			if (session && (Audio::SharedOutput::ExclusiveOutputDevice::IsExclusiveEndpoint(endpoint)
+				|| Audio::SharedOutput::AsioOutputDevice::IsAsioEndpoint(endpoint))) {
+				bool mixApps = Audio::AppAudioMix::Enabled();
+				if (ToggleRow("Hear other apps here", "YouTube, Discord, Spotify and Windows sounds play through this device too. Set Windows' default output to a spare device (such as the laptop speakers) and mute it there: the bridge picks the sound up before the mute. The guitar's delay is not affected.", &mixApps))
+					Audio::AppAudioMix::SetEnabled(mixApps);
+				if (mixApps) Caption(Audio::AppAudioMix::Hearing() ? "Other apps: playing through here now." : "Other apps: nothing playing right now.");
+			}
+
 			// Cable mode on a Windows device: exclusive mode (ExclusiveOutputDevice) takes Windows' mixer out of the way,
 			// the device's own ~3 ms period instead of its shared 10 ms. Switching it is a device switch ("excl:<id>"), so
 			// it is remembered and verified like one.
 			const bool onWindowsDevice = session && !Audio::SharedOutput::AsioOutputDevice::IsAsioEndpoint(endpoint);
 			if (onWindowsDevice && !pending.active) {
-				const bool isExclusive = Audio::SharedOutput::ExclusiveOutputDevice::IsExclusiveEndpoint(endpoint);
+				const bool isExclusive = outputMode == 2 || outputMode == 3;
 				bool wantExclusive = isExclusive;
-				if (ToggleRow("Exclusive mode", "Lowest delay on this device: the game plays to it directly at its own small buffer (often 3 ms) instead of through Windows' mixer (usually 10 ms). While Rocksmith runs, other programs (YouTube, Discord) cannot play on this device.", &wantExclusive)) {
+				// Taking Windows' default output away breaks what plays on it (YouTube showed "Audio renderer error",
+				// 2026-10-13): say so before, while there is still time to move Windows' default.
+				bool windowsDefault = false;
+				for (const auto& device : snapshot.devices)
+					if (device.id == Audio::SharedOutput::ExclusiveOutputDevice::WindowsId(endpoint)) windowsDefault = device.isDefault;
+				if (!isExclusive && windowsDefault) {
+					ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Color::Warn));
+					ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + RowWidth());
+					ImGui::TextUnformatted("This is Windows' default output: programs playing on it (YouTube, Discord) stop when exclusive mode starts. Make another device (such as the laptop speakers) the Windows default first and mute it; \"Hear other apps here\" then plays them through this one.");
+					ImGui::PopTextWrapPos();
+					ImGui::PopStyleColor();
+				}
+				ImGui::BeginDisabled(outputMode == 0);
+				if (ToggleRow("Exclusive mode", "Bypasses Windows' mixer. Actual mode and buffer are shown above.", &wantExclusive,
+					"Other apps cannot play on this device while exclusive output is active. Some devices require polling with a larger buffer; shared recovery turns this switch off.")) {
 					const std::wstring windowsId = Audio::SharedOutput::ExclusiveOutputDevice::WindowsId(endpoint);
 					const std::wstring target = wantExclusive ? Audio::SharedOutput::ExclusiveOutputDevice::EndpointOf(windowsId) : windowsId;
 					pending = PendingSwitch{};
@@ -3677,6 +3772,7 @@ namespace Overlay
 					if (FAILED(result.result)) { OutputSay("Could not switch exclusive mode.", true); pending.active = false; }
 					else OutputSay(wantExclusive ? "Opening exclusive mode..." : "Back to shared mode...", false);
 				}
+				ImGui::EndDisabled();
 			}
 
 			if (!snapshot.asioWrapper.empty() && canRoute)
@@ -3706,6 +3802,9 @@ namespace Overlay
 					ImGui::PopStyleColor();
 				}
 			}
+			// The output moved without the user (unplugged, fell back, came back): an old "Now playing through" named the
+			// wrong device next to the one shown playing (2026-10-13).
+			if (!pending.active && !g_outputMessageEndpoint.empty() && std::wstring(live.status.endpoint) != g_outputMessageEndpoint) OutputSay(std::string(), false);
 			if (!g_outputMessage.empty()) {
 				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(g_outputMessageIsError ? Color::Bad : Color::Muted));
 				ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + RowWidth());
@@ -3765,7 +3864,11 @@ namespace Overlay
 			BeginCard("Device buffer");
 			char current[64];
 			sprintf_s(current, "Now %u frames (%.2f ms).", period, period / 48.0);
-			const bool toggled = ToggleRow("Automatic", (std::string(current) + " How much sound Windows hands this device at a time. Smaller is lower latency; raise it if you hear crackles. Applies at once.").c_str(), &automatic);
+			// At the device's smallest, say so, or players wonder why it cannot go lower (2026-10-13).
+			const std::string about = period && period <= minimum
+				? std::string(current) + " The smallest this device allows in shared mode; for less, turn on Exclusive mode above."
+				: std::string(current) + " How much sound Windows hands this device at a time. Smaller is lower latency; raise it if you hear crackles. Applies at once.";
+			const bool toggled = ToggleRow("Automatic", about.c_str(), &automatic);
 			static float frames = 0.0f;
 			if (frames <= 0.0f || toggled) frames = static_cast<float>(period ? period : minimum);
 			ImGui::BeginDisabled(automatic);
@@ -3811,17 +3914,43 @@ namespace Overlay
 			int index = 0;
 			for (int i = 0; i < 5; ++i) if (values[i] == setting) index = i;
 			BeginCard("Game engine");
-			const UINT32 now = Audio::CableGamePeriod::Frames();
+			// What the game's output really runs at; the requested size only takes over when the game reopens its output.
+			const UINT32 running = Audio::SharedOutput::GameOutputBlockFrames();
+			const UINT32 now = running ? running : Audio::CableGamePeriod::Frames();
 			char text[96];
 			sprintf_s(text, "%u samples (%.1f ms)", now, now / 48.0);
-			InfoRow("Running at", text);
-			if (SegmentedRow("Game block", &index, labels, 5,"How many samples the game's own engine (its amps, pedals and note detection) processes in one go: the ASIO buffer size under RS_ASIO. Smaller is less delay in the game's tones but more work for the PC; raise it if game tones crackle. Automatic follows the output: an ASIO interface's own buffer size, or the device buffer up to 256. The game reads it at start-up, so a change needs a game restart.")) {
+			InfoRow("Processing block", text);
+			if (SegmentedRow("Game block", &index, labels, 5,"How many samples the game's own engine (its amps, pedals and note detection) processes in one go: the ASIO buffer size under RS_ASIO. Smaller is less delay in the game's tones but more work for the PC; raise it if game tones crackle. Automatic follows the output: an ASIO interface's own buffer size, or the device buffer up to 144. A change applies with Apply now, or at the next game start.")) {
 				Audio::CableGamePeriod::SetSetting(values[index]);
 				readAt = 0;
 			}
+			// A different size waiting: one action, Apply now. The bridge tells the game its output changed and it reopens
+			// it at the new size (the input keeps its start-up size); off the render thread, the game may work inside the
+			// call. "Restart the game" only shows once Apply now was tried and the game did not take it within 3 s
+			// (a warning plus a button was two answers to one question, 2026-10-13).
+			static ULONGLONG appliedAt = 0;
+			static UINT32 appliedSize = 0;
 			if (next != now) {
-				sprintf_s(text, "%u samples after you restart the game", next);
-				InfoRow("Restart needed", text, Color::Warn);
+				const bool refused = appliedAt && appliedSize == next && GetTickCount64() - appliedAt > 3000;
+				if (refused) {
+					sprintf_s(text, "%u samples after you restart the game (the game did not take it now)", next);
+					InfoRow("Restart needed", text, Color::Warn);
+				}
+				else {
+					sprintf_s(text, "Apply %u samples now (game sound restarts for a moment)", next);
+					const bool pending = appliedAt && appliedSize == next && GetTickCount64() - appliedAt <= 3000;
+					ImGui::BeginDisabled(pending);
+					if (ImGui::Button(pending ? "Applying..." : text)) {
+						appliedAt = GetTickCount64();
+						appliedSize = next;
+						std::thread([] {
+							Audio::CableGamePeriod::ApplyNextStart();
+							Audio::PersistentInput::ResetGameOutput();
+						}).detach();
+					}
+					ImGui::EndDisabled();
+					if (setting == 0 && !pending) Caption("Automatic follows your output; it also applies at the next game start.");
+				}
 			}
 			EndCard();
 		}
@@ -4250,6 +4379,10 @@ namespace Overlay
 			bool diagnostics = Audio::CableInput::IsOverlayEnabled();
 			if (ToggleRow("Audio diagnostics HUD", "Signal level, packet rate and route state in the top right corner.", &diagnostics))
 				BridgeControl(27, diagnostics ? L"1" : L"0");
+			bool latencyReadout = IsLatencyReadoutEnabled();
+			if (ToggleRow("Latency readout", "Shows a compact estimate below SIGNAL.", &latencyReadout,
+				"Requires Audio diagnostics HUD. Software timing plus reported output delay; cable hardware and USB delivery are excluded. Hidden when no estimate is available."))
+				SetLatencyReadoutEnabled(latencyReadout);
 			EndCard();
 
 			// The cable is added as Player 2 next to an ASIO Player 1; in Cable mode it already is Player 1.
@@ -4388,10 +4521,12 @@ namespace Overlay
 			char designer[48], game[48];
 			if (amp.cableLatencyMs > 0.0f) sprintf_s(designer, "Tone designer %.0f ms", amp.cableLatencyMs);
 			else sprintf_s(designer, "Tone designer -");
+			// Measured now, or the remembered game part plus the live output part ("~"), e.g. while the Tone designer plays.
 			if (Audio::GameToneLatency::Valid()) sprintf_s(game, "Game tones %.0f ms", Audio::GameToneLatency::MedianMs());
-			else sprintf_s(game, "Game tones: play to measure");
+			else if (Audio::GameToneLatency::Available()) sprintf_s(game, "Game tones ~%.0f ms", Audio::GameToneLatency::CurrentMs());
+			else sprintf_s(game, "Game tones: play with the game amp once");
 			ImGui::PushFont(GetFonts().caption);
-			const char* title = "GUITAR TO EAR";
+			const char* title = "LATENCY ESTIMATE";
 			const float gap = 14.0f;
 			const float designerW = ImGui::CalcTextSize(designer).x, gameW = ImGui::CalcTextSize(game).x;
 			const float x = right - 18.0f - designerW - gap - gameW;
@@ -4402,7 +4537,7 @@ namespace Overlay
 			ImGui::PopFont();
 			ImGui::SetCursorScreenPos(ImVec2(x, top + 10.0f));
 			ImGui::InvisibleButton("##latency", ImVec2(designerW + gap + gameW, 38.0f));
-			Hint("Guitar to ear, measured while you play: from the cable to your speakers or headphones, for the Tone designer and for the game's own tones (the brighter one is what you hear now). Game tones are timed from your picks and the game's attacks, so they show after a few notes. Not included: the cable's own converter (about 1-2 ms).");
+			Hint("Latency estimates: software timing plus the output driver's reported delay. Tone designer tracks audio blocks; game tones match your picks to output attacks. Cable conversion and USB delivery are excluded. This is not a calibrated guitar-to-ear measurement.");
 		}
 
 		void Sidebar(Page& page)
@@ -4447,6 +4582,31 @@ namespace Overlay
 	}
 
 	namespace { const char* g_pageName = "none"; }
+	bool IsLatencyReadoutEnabled()
+	{
+		return LatencyReadoutSetting().load(std::memory_order_relaxed);
+	}
+
+	bool SetLatencyReadoutEnabled(bool enabled)
+	{
+		HKEY key = nullptr;
+		LSTATUS result = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\RSMods\\Overlay", 0, nullptr, 0,
+			KEY_SET_VALUE, nullptr, &key, nullptr);
+		if (result == ERROR_SUCCESS)
+		{
+			const DWORD value = enabled ? 1 : 0;
+			result = RegSetValueExW(key, L"LatencyReadout", 0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value));
+			RegCloseKey(key);
+		}
+		if (result != ERROR_SUCCESS)
+		{
+			LOG_WARNING("(OVERLAY) Could not save latency readout setting, error " << result << std::endl);
+			return false;
+		}
+		LatencyReadoutSetting().store(enabled, std::memory_order_relaxed);
+		return true;
+	}
+
 	const char* CurrentPageName() { return g_pageName; }
 
 	void DrawShell(bool* open)

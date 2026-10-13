@@ -9,8 +9,10 @@
 #include "AsioOutputDevice.hpp"
 #include "ExclusiveOutputDevice.hpp"
 #include "DeviceVolume.hpp"
+#include "AppAudioMix.hpp"
 #include "ExternalAmp/CableAmpLink.hpp"
 #include "OutputRateMatcher.hpp"
+#include "Recorder/GameAudioRecorder.hpp"
 
 namespace Audio::SharedOutput
 {
@@ -41,9 +43,12 @@ namespace Audio::SharedOutput
 		std::wstring activeEndpoint;
 		uint64_t generation = 0;
 		UINT32 period = 0, minimum = 0, fundamental = 0, maximum = 0;
+		UINT32 outputMode = 0; // 0 unknown, 1 shared, 2 exclusive event, 3 exclusive polling, 4 ASIO
+		UINT32 outputBufferFrames = 0;
 		UINT32 padding = 0, queuedFrames = 0;
 		uint64_t expiredFrames = 0, overruns = 0, emptyObservations = 0, trims = 0;   // trims: backlogs dropped at once (Pump)
 		uint64_t longestPumpGapMs = 0;
+		UINT32 cushionFrames = 0;   // AsioFill's extra reserve after the game was late (0 = the lean minimum)
 		double clockPpm = 0, correctionPpm = 0;
 		bool clockMeasured = false;
 	};
@@ -105,12 +110,15 @@ namespace Audio::SharedOutput
 			std::lock_guard<std::mutex> guard(mutex);
 			status.requestedEndpoint = endpoint;
 			status.activeEndpoint.clear();
+			status.outputMode = 0;
+			status.outputBufferFrames = 0;
 			++status.generation;
 			status.state = BackendState::Opening;
 			status.error = E_PENDING;
 			desiredPeriod = requestedPeriod;
 			count = 0;
 			status.queuedFrames = 0;
+			cushion = status.cushionFrames = 0;
 			SetEvent(wake);
 		}
 
@@ -125,6 +133,8 @@ namespace Audio::SharedOutput
 				++status.generation;
 				status.error = E_PENDING;
 				status.activeEndpoint.clear();
+				status.outputMode = 0;
+				status.outputBufferFrames = 0;
 				status.state = BackendState::Opening;
 			}
 			SetEvent(wake);
@@ -136,9 +146,12 @@ namespace Audio::SharedOutput
 			if (!status.generation) return;
 			++status.generation;
 			status.activeEndpoint.clear();
+			status.outputMode = 0;
+			status.outputBufferFrames = 0;
 			status.state = BackendState::Opening;
 			status.error = E_PENDING;
 			count = status.queuedFrames = 0;
+			cushion = status.cushionFrames = 0;
 			SetEvent(wake);
 		}
 
@@ -151,6 +164,8 @@ namespace Audio::SharedOutput
 				snapshot.state = BackendState::Recovering;
 				snapshot.error = HRESULT_FROM_WIN32(ERROR_TIMEOUT);
 				snapshot.activeEndpoint.clear();
+				snapshot.outputMode = 0;
+				snapshot.outputBufferFrames = 0;
 			}
 			return snapshot;
 		}
@@ -192,6 +207,11 @@ namespace Audio::SharedOutput
 		}
 
 		void SetGamePacketFrames(UINT32 frames) { if (frames) gamePacketFrames.store(frames); }
+
+		// The recorder's game track, taken as the device is filled: the game plus the Tone designer's guitar, which is
+		// mixed in here and so was missing from a track taken where the game hands its sound over (2026-10-13). Other
+		// programs' sound (AppAudioMix) is added after this, so a take does not record YouTube or Discord.
+		void SetRecorder(std::shared_ptr<RecordingSession> session) { std::atomic_store(&recordTap, std::move(session)); }
 		// Frames between a game packet handed over now and the speaker: the FIFO plus what the device holds (Windows'
 		// padding) or will hold (the ASIO / exclusive device's own delay). For GameToneLatency.
 		UINT32 HeardDelayFrames() const { return heardDelayFrames.load(std::memory_order_relaxed); }
@@ -253,6 +273,8 @@ namespace Audio::SharedOutput
 					status.error = error;
 					status.state = BackendState::Recovering;
 					status.activeEndpoint.clear();
+					status.outputMode = 0;
+					status.outputBufferFrames = 0;
 					status.padding = status.queuedFrames = count = 0;
 					status.clockMeasured = false;
 				}
@@ -455,7 +477,15 @@ namespace Audio::SharedOutput
 				// `frames` at a time, so the FIFO swings by a game packet: keep a packet plus two buffers in hand, and drop
 				// a backlog above that at once.
 				const UINT32 gamePacket = gamePacketFrames.load(std::memory_order_relaxed);
-				const UINT32 target = (std::min)(CAPACITY, gamePacket + frames * 2);
+				// A packet, one buffer and 1 ms of slack (was two buffers: 6-7 ms queued here on a 3 ms exclusive device,
+				// 2026-10-13). The game is clocked by the cable 1 ms at a time, so a second buffer of reserve was idle delay;
+				// "device found empty" in the 30 s (CABLE LATENCY) line shows whether this one is enough.
+				// Plus a cushion that adapts (2026-10-13): while the game loads its menus it is late and the lean minimum
+				// ran dry ~400-600 times in the first 80 s of every boot (clicks), then never again. A run dry while the
+				// game is delivering adds a game packet (at most once a second, up to 10 ms); 30 s without one takes a
+				// packet back every 10 s. Shrinking only lowers the servo's centre, so the queue drains without a cut.
+				if (count) cushionFedAt = now;
+				const UINT32 target = (std::min)(CAPACITY, gamePacket + frames + 48 + cushion);
 				if (count > target + (std::max)(gamePacket, frames))
 				{
 					const UINT32 excess = count - target;
@@ -471,7 +501,21 @@ namespace Audio::SharedOutput
 				count -= consumed;
 				status.queuedFrames = count;
 				heardDelayFrames.store(count + asioDeviceDelay, std::memory_order_relaxed);
-				if (produced < frames) ++status.emptyObservations;
+				if (produced < frames)
+				{
+					++status.emptyObservations;
+					if (now - cushionFedAt <= 100)   // the game is running, just late (not stopped or not started yet)
+					{
+						cushionEmptyAt = now;
+						if (now - cushionChangedAt >= 1000 && cushion + gamePacket <= 480) { cushion += gamePacket; cushionChangedAt = now; }
+					}
+				}
+				else if (cushion && now - cushionEmptyAt >= 30000 && now - cushionChangedAt >= 10000)
+				{
+					cushion -= (std::min)(cushion, gamePacket);
+					cushionChangedAt = now;
+				}
+				status.cushionFrames = cushion;
 				current = produced && now - oldestFrame <= 40;
 				// The interface's clock against QPC over 2 s windows (callback jitter averages out), then the same servo as
 				// the Windows path, centred on the target fill.
@@ -502,6 +546,9 @@ namespace Audio::SharedOutput
 			if (!current) produced = 0;
 			std::fill(staging.begin() + produced * 2, staging.begin() + frames * 2, 0.0f);
 			CableAmpLink::Render(staging.data(), frames, asioDeviceDelay, frames);   // the Tone designer's return on the cable (no-op otherwise)
+			RecordHeard(frames);
+			// Other programs' sound: they cannot play on a device held exclusively or through ASIO (AppAudioMix).
+			AppAudioMix::Mix(staging.data(), frames);
 			ApplyOutputGuard(frames);
 			// Exclusive mode skips Windows' own volume: on a device without hardware volume the Output page's device
 			// volume is applied here (DeviceVolume).
@@ -611,8 +658,14 @@ namespace Audio::SharedOutput
 				if (current)
 				{
 					CableAmpLink::Render(staging.data(), frames, padding, period);   // the Tone designer's return on the cable (no-op otherwise)
+					RecordHeard(frames);
 					ApplyOutputGuard(frames);
 					std::memcpy(destination, staging.data(), frames * 2 * sizeof(float));
+				}
+				else
+				{
+					std::fill(staging.begin(), staging.begin() + frames * 2, 0.0f);
+					RecordHeard(frames);   // silence played: the take stays in step with the video
 				}
 				result = render->ReleaseBuffer(frames, current ? 0 : AUDCLNT_BUFFERFLAGS_SILENT);
 				if (FAILED(result)) return result;
@@ -746,6 +799,8 @@ namespace Audio::SharedOutput
 						lastProgress.store(GetTickCount64());
 						status.state = run ? BackendState::Running : BackendState::Priming;
 						status.period = period; status.minimum = minimum; status.fundamental = fundamental; status.maximum = maximum;
+						status.outputBufferFrames = exclusive ? exclusive->DeviceBufferFrames() : bufferFrames;
+						status.outputMode = asio ? 4u : (exclusive ? (exclusive->Polling() ? 3u : 2u) : 1u);
 						status.clockMeasured = false;
 					}
 				}
@@ -831,6 +886,8 @@ namespace Audio::SharedOutput
 
 		static constexpr UINT32 CAPACITY = 4096;
 		static constexpr UINT32 AUTOMATIC_PERIOD_FRAMES = 144;   // 3 ms at 48 kHz, see AutomaticPeriod
+		std::shared_ptr<RecordingSession> recordTap;             // SetRecorder (std::atomic_load / atomic_store)
+		void RecordHeard(uint32_t frames) { if (auto tap = std::atomic_load(&recordTap)) tap->SubmitWet(staging.data(), frames); }
 		std::atomic<UINT32> gamePacketFrames{ 480 };             // what the game delivers at a time (OutputSession)
 		std::atomic<UINT32> heardDelayFrames{ 0 };               // HeardDelayFrames
 		std::unique_ptr<AsioOutputDevice> asio;                  // Cable mode on an ASIO interface's own driver (OpenAsio)
@@ -840,6 +897,8 @@ namespace Audio::SharedOutput
 		int exclusiveStage = 0;                                  // 0 event driven, 1 polling, 2 shared mode instead (this session)
 		uint64_t asioGeneration = 0;                             // under mutex: the generation AsioFill serves
 		UINT64 asioClockQpc = 0, asioClockFrames = 0;            // under mutex: AsioFill's clock window
+		UINT32 cushion = 0;                                      // under mutex: AsioFill's adaptive extra reserve, frames
+		ULONGLONG cushionFedAt = 0, cushionEmptyAt = 0, cushionChangedAt = 0;   // under mutex: AsioFill
 		ULONGLONG asioStartedAt = 0;                             // backend thread
 		uint32_t asioDeviceDelay = 0;                            // frames until a filled ASIO buffer is heard (latency log)
 		EndpointFactory factory;

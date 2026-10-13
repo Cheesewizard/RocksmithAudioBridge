@@ -2,6 +2,7 @@
 #include "AudioBridge/Cable/CableCaptureSession.hpp"
 #include "AudioBridge/Engine/AudioBridgeEngine.hpp"
 #include "AudioBridge/Engine/OutputTap.hpp"
+#include "AudioBridge/Engine/CableGamePeriod.hpp"
 #include <functiondiscoverykeys_devpkey.h>
 #include <propvarutil.h>
 
@@ -306,6 +307,21 @@ namespace Audio::PersistentInput
 				}
 			}
 		}
+		// Tells the game a device changed state, so it reopens its output (a fresh output session, at the game block size
+		// in force now). A default-device change did nothing (2026-10-13: told, no reopen); the game reopened by itself
+		// when Windows reported a headphone device going away (OnDeviceStateChanged passes through CableNotifications),
+		// so it is told the same kind of news, about our own virtual output. Returns the callbacks told.
+		int NotifyOutputReset()
+		{
+			if (!replaceOutput) return 0;
+			std::vector<ComPtr<IMMNotificationClient>> clients;
+			{
+				std::lock_guard<std::mutex> guard(notificationMutex);
+				for (const auto& notification : notifications) clients.push_back(notification->client);
+			}
+			for (const auto& client : clients) client->OnDeviceStateChanged(OUTPUT_DEVICE_ID, DEVICE_STATE_ACTIVE);
+			return static_cast<int>(clients.size());
+		}
 		bool IsPlayerTwoCableWrapper() const { return !replaceCapture; }
 		HRESULT STDMETHODCALLTYPE EnumAudioEndpoints(EDataFlow flow, DWORD mask, IMMDeviceCollection** devices) override
 		{
@@ -467,6 +483,20 @@ namespace Audio::PersistentInput
 	bool IsCableForPlayerTwoEnabled()
 	{
 		return cableForPlayerTwoEnabled.load(std::memory_order_acquire);
+	}
+
+	int ResetGameOutput()
+	{
+		std::vector<CableEnumerator*> targets;
+		{
+			std::lock_guard<std::mutex> guard(enumeratorRegistryMutex);
+			targets = enumerators;
+		}
+		int told = 0;
+		for (CableEnumerator* enumerator : targets) told += enumerator->NotifyOutputReset();
+		LOG_INFO("(AUDIO ROUTING) Asked the game to reopen its output (game block " << Audio::CableGamePeriod::Frames()
+			<< " samples); told " << told << " device-change listener(s)" << std::endl);
+		return told;
 	}
 
 	bool IsCableForPlayerTwoAvailable()

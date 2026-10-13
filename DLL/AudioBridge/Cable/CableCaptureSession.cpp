@@ -218,18 +218,12 @@ namespace Audio::PersistentInput
 		lastPhysicalTick = GetTickCount64();
 		lastPhysicalTime = CaptureTime();
 		const bool ready = QueueCapturedPacket();
-		// Player 1's cable over USB clocks the game's output wakes: one per block of input (AudioBridgeEngine's
-		// NotifyCableInputBlock). Windows' cable input arrives in 10 ms bursts, so it keeps the output timer.
-		uint32_t blocks = 0;
-		if (!gatedByPlayerTwoToggle && CableAmpLink::IsDirectUsb())
-		{
-			clockFrames += frames;
-			blocks = clockFrames / periodFrames;
-			clockFrames %= periodFrames;
-		}
+		// Player 1's cable over USB clocks the game's output wakes: a wake per output block of input (AudioBridgeEngine's
+		// NotifyCableInputFrames). Windows' cable input arrives in 10 ms bursts, so it keeps the output timer.
+		const bool clocks = !gatedByPlayerTwoToggle && CableAmpLink::IsDirectUsb();
 		guard.unlock();
 		if (ready && gameEvent) ::SetEvent(gameEvent);
-		while (blocks--) SharedOutput::NotifyCableInputBlock();
+		if (clocks) SharedOutput::NotifyCableInputFrames(frames);
 	}
 
 	// Called under packetMutex. Physical delivery follows capture, not the silence timer.
@@ -451,8 +445,8 @@ namespace Audio::PersistentInput
 		return S_OK;
 	}
 
-	// The cable read directly over USB, when its audio function is on WinUSB (the player's opt-in; see
-	// UsbCableCapture.hpp). S_FALSE: no cable is on WinUSB, so the Windows microphone path (OpenDevice) applies.
+	// UsbDk temporarily takes the cable's audio function while capture runs (see UsbCableCapture.hpp).
+	// S_FALSE means no matching cable is available to UsbDk.
 	// The game-facing side is unchanged: Publish gets 1 ms packets instead of 10 ms ones, the game still takes
 	// periodFrames at a time, and Player 1's raw guitar reaches the Tone designer's link 1 ms at a time.
 	HRESULT CaptureSession::OpenUsb()
@@ -552,7 +546,7 @@ namespace Audio::PersistentInput
 					nextOpen = now + 10000000;
 					if (FAILED(result) && result != lastOpenResult)
 					{
-						if (onUsb) LOG_WARNING("(PERSISTENT INPUT) The Real Tone Cable is on WinUSB but could not be opened, HRESULT " << std::hex << result << std::dec << "; retrying" << std::endl);
+						if (onUsb) LOG_WARNING("(PERSISTENT INPUT) The Real Tone Cable could not be opened through UsbDk, HRESULT " << std::hex << result << std::dec << "; retrying" << std::endl);
 						else LOG_WARNING("(PERSISTENT INPUT) Waiting for selected cable, HRESULT " << std::hex << result << std::dec << std::endl);
 					}
 					lastOpenResult = result;

@@ -920,6 +920,7 @@ if exist "$(OutDir)$(TargetName).map" copy /Y "$(OutDir)$(TargetName).map" "$(Bu
     <ClCompile Include="AudioBridge\Cable\CableCaptureSession.cpp" />
     <ClCompile Include="AudioBridge\Cable\UsbCableCapture.cpp" />
     <ClCompile Include="AudioBridge\Engine\AsioOutputDevice.cpp" />
+    <ClCompile Include="AudioBridge\Engine\AppAudioMix.cpp" />
     <ClCompile Include="AudioBridge\Engine\GameToneLatency.cpp" />
     <ClCompile Include="AudioBridge\Engine\DeviceVolume.cpp" />
     <ClCompile Include="AudioBridge\Engine\ExclusiveOutputDevice.cpp" />
@@ -928,6 +929,7 @@ if exist "$(OutDir)$(TargetName).map" copy /Y "$(OutDir)$(TargetName).map" "$(Bu
     <ClInclude Include="AudioBridge\Cable\CableCaptureSession.hpp" />
     <ClInclude Include="AudioBridge\Cable\UsbCableCapture.hpp" />
     <ClInclude Include="AudioBridge\Engine\AsioOutputDevice.hpp" />
+    <ClInclude Include="AudioBridge\Engine\AppAudioMix.hpp" />
     <ClInclude Include="AudioBridge\Engine\GameToneLatency.hpp" />
     <ClInclude Include="AudioBridge\Engine\DeviceVolume.hpp" />
     <ClInclude Include="AudioBridge\Engine\ExclusiveOutputDevice.hpp" />
