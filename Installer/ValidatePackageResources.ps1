@@ -24,6 +24,16 @@ function Get-PeMachine([string]$path) {
     return [BitConverter]::ToUInt16($bytes, $peOffset + 4)
 }
 
+function Get-Sha256Hash([string]$path) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [IO.File]::OpenRead($path)
+        try { return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '') }
+        finally { $stream.Dispose() }
+    }
+    finally { $sha.Dispose() }
+}
+
 $expected = @{
     xinput1_3 = Join-Path $repositoryRoot 'Installer\Resources\Master\xinput1_3.dll'
     RocksmithAudioBridge = Join-Path $repositoryRoot 'Installer\Resources\Release\RocksmithAudioBridgeAsio.dll'
@@ -31,6 +41,20 @@ $expected = @{
     RocksmithAudioBridgeVstHost = Join-Path $repositoryRoot 'Installer\Resources\Release\RocksmithAudioBridgeVstHost.exe'
     RocksmithAudioBridgeLibrary = Join-Path $repositoryRoot 'Installer\Resources\RSModsGUI\RocksmithAudioBridge.dll'
 }
+
+$usbDkPackage = Join-Path $repositoryRoot 'Installer\Resources\UsbDk\UsbDk_1.0.22_x64.msi'
+$usbDkLicense = Join-Path $repositoryRoot 'Installer\Resources\UsbDk\LICENSE.txt'
+if (-not (Test-Path -LiteralPath $usbDkPackage -PathType Leaf)) {
+    throw "UsbDk package input is missing: $usbDkPackage"
+}
+if (-not (Test-Path -LiteralPath $usbDkLicense -PathType Leaf)) {
+    throw "UsbDk licence input is missing: $usbDkLicense"
+}
+$usbDkHash = Get-Sha256Hash $usbDkPackage
+if ($usbDkHash -ne '91F6F695E1E13C656024E6D3B55620BF08D8835EF05EE0496935BA6BB62466A5') {
+    throw "UsbDk package hash does not match the pinned v1.0.22 x64 release: $usbDkPackage"
+}
+Write-Output ("PASS: UsbDk package -> {0} ({1})" -f $usbDkPackage, $usbDkHash)
 
 foreach ($name in $expected.Keys) {
     $referenced = Get-ResourcePath $name
@@ -47,7 +71,7 @@ foreach ($name in $expected.Keys) {
     if ((Get-PeMachine $authoritative) -ne $machine) {
         throw ("{0} must be a PE image for machine 0x{1:X}: {2}" -f $name, $machine, $authoritative)
     }
-    $hash = (Get-FileHash -LiteralPath $authoritative -Algorithm SHA256).Hash
+    $hash = Get-Sha256Hash $authoritative
     Write-Output ("PASS: {0} -> {1} ({2})" -f $name, $authoritative, $hash)
 }
 
@@ -58,10 +82,10 @@ $legacyInputs = @(
 )
 foreach ($legacyInput in $legacyInputs) {
     if (Test-Path -LiteralPath $legacyInput -PathType Leaf) {
-        $legacyHash = (Get-FileHash -LiteralPath $legacyInput -Algorithm SHA256).Hash
+        $legacyHash = Get-Sha256Hash $legacyInput
         $authoritativeName = [IO.Path]::GetFileName($legacyInput)
         $authoritativePath = if ($authoritativeName -eq 'xinput1_3.dll') { $expected.xinput1_3 } else { $expected.RocksmithAudioBridge }
-        $authoritativeHash = (Get-FileHash -LiteralPath $authoritativePath -Algorithm SHA256).Hash
+        $authoritativeHash = Get-Sha256Hash $authoritativePath
         if ($legacyHash -ne $authoritativeHash) {
             Write-Warning "Stale legacy package input is ignored by Resources.resx: $legacyInput differs from $authoritativePath."
             continue

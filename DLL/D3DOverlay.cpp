@@ -8,7 +8,10 @@
 #include "NoteByNote/Ml/MlStringFretReader.hpp"
 #include "NoteByNote/Host/ControllerBridge.hpp"
 #include "AudioBridge/Cable/CableInput.hpp"
+#include "AudioBridge/Engine/GameToneLatency.hpp"
+#include "ExternalAmp/ExternalAmp.hpp"
 #include "Overlay/OverlayToggles.hpp"
+#include "Overlay/OverlayShell.hpp"
 #include "Core/PitchNames.hpp"
 #include "Core/Extensions.hpp"
 #include "ToneDesigner/VstHostLink.hpp"
@@ -560,6 +563,24 @@ void GameOverlay::DisplayAudioDiagnostics()
 		}
 	}
 
+	std::wostringstream latencyEstimate;
+	bool showLatencyReadout = false;
+	if (Overlay::IsLatencyReadoutEnabled())
+	{
+		const ExternalAmp::Snapshot amp = ExternalAmp::GetSnapshot();
+		const bool ampPlaying = amp.cableHost && amp.enabled && !amp.comparing && amp.link.linkOpen && amp.link.connected;
+		if (ampPlaying && amp.cableLatencyMs > 0.0f)
+		{
+			latencyEstimate << L"LATENCY  ~" << std::fixed << std::setprecision(0) << amp.cableLatencyMs << L" ms";
+			showLatencyReadout = true;
+		}
+		else if (amp.cableHost && !ampPlaying && Audio::GameToneLatency::Available())
+		{
+			latencyEstimate << L"LATENCY  ~" << std::fixed << std::setprecision(0) << Audio::GameToneLatency::CurrentMs() << L" ms";
+			showLatencyReadout = true;
+		}
+	}
+
 	// Top row (the Drop Pedal "Pitch" row; that overlay draws one Pitch row per player, so the signal
 	// readout must not take a row of its own), anchored to the TRUE right edge of the backbuffer with the
 	// viewport widened for the draw (see FullSurfaceViewport). While a take is recording the REC badge
@@ -585,6 +606,11 @@ void GameOverlay::DisplayAudioDiagnostics()
 	};
 	drawRow(signal.str(), 0);
 	if (showPlayerTwo) drawRow(playerTwo.str(), 1);
+	if (showLatencyReadout)
+	{
+		const int firstLatencyRow = showPlayerTwo ? 2 : 1;
+		drawRow(latencyEstimate.str(), firstLatencyRow);
+	}
 }
 
 // Paired detection readout: Rocksmith's OWN pitch read (line 1) with the FretNet ML

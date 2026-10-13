@@ -8,147 +8,274 @@ using RSMods.Util;
 
 namespace RSMods
 {
-	// The Audit card on the RS_ASIO Settings tab, under upstream's Config card: three lines (Rocksmith settings, RS_ASIO
-	// installed, RS_ASIO set up) with the reason in each line's tooltip, one Fix button for whatever is safe to fix
-	// (Rocksmith.ini's audio values and/or "Set up for me" for RS_ASIO.ini), and Restore once Set up for me has kept a
-	// backup. It sits where its fixes apply and uses only the gap under Config, so the tab keeps upstream's one-screen
-	// layout. History: a separate Audit tab, then a Details panel with every finding and a Rocksmith.ini table, both
-	// dropped 2026-10-12 as more than players need (see AuditChecks). Feedback is inline (no message boxes).
+	// The Audit tab: basic checks for the guitar input mode that is selected (Guitar input on the Rocksmith Audio
+	// Bridge tab), because the Real Tone Cable and an ASIO interface fail in different ways (decided 2026-10-13). Both
+	// modes: Rocksmith.ini's audio values with Use recommended. Cable: the cable seen by Windows and Windows' microphone
+	// access. ASIO: RS_ASIO installed, RS_ASIO.ini set up (Set up for me / Restore), the bridge's interface and whether
+	// it opened last launch. The RS_ASIO Settings tab keeps a small card (mode, worst result, Open audit) under
+	// upstream's Config card, and the Rocksmith Settings tab an Open audit button, so the audit is one click from both
+	// files it changes.
+	// History: an Audit tab (10-11), then a card with a Details panel on the RS_ASIO tab, then three lines on that card
+	// (10-12); back to a tab once the checks became mode-specific. Rebuilt on every visit and after every change, so it
+	// shows the files as they are now. Feedback is inline (no message boxes).
 	public partial class MainForm
 	{
-		private RsAsioCard auditCard;
-		private readonly List<Label> auditLines = new List<Label>();
-		private Label auditResult;
-		private StudioButton auditFixButton, auditRestoreButton;
+		private const int AuditCardWidth = 900;   // logical px
+		private TabPage tabAudit;
+		private FlowLayoutPanel auditPage;
+		private string auditResult = "";
 		private readonly ToolTip auditTips = new ToolTip();
+
+		// the small card on the RS_ASIO tab
+		private RsAsioCard auditCard;
+		private Label auditCardTitle, auditCardSummary;
+		private StudioButton auditCardOpen;
 
 		private void InitializeAuditTab()
 		{
+			tabAudit = new TabPage("Audit") { Name = "tab_Audit", BackColor = OverlayLook.Window, ForeColor = OverlayLook.Text };
+			// TabPages.Insert does nothing until the TabControl has its window handle (a WinForms quirk), and this runs
+			// at startup before it does: without this the tab was silently never added.
+			_ = TabController.Handle;
+			int after = TabController.TabPages.IndexOf(tab_RSModsPlus);
+			TabController.TabPages.Insert(after < 0 ? TabController.TabPages.Count : after + 1, tabAudit);
+			auditPage = new FlowLayoutPanel
+			{
+				Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true,
+				BackColor = OverlayLook.Window, ForeColor = OverlayLook.Text, Font = StudioTheme.Body
+			};
+			auditPage.Padding = new Padding(auditPage.LogicalToDeviceUnits(28), auditPage.LogicalToDeviceUnits(18), auditPage.LogicalToDeviceUnits(12), 0);
+			tabAudit.Controls.Add(auditPage);
+			tabAudit.Enter += (sender, args) => RefreshAudit();
+			StudioTheme.StyleTips(auditTips);
+
+			InitializeRsAsioAuditCard();
+			InitializeRocksmithAuditButton();
+		}
+
+		private void OpenAudit() => TabController.SelectedTab = tabAudit;
+
+		// ---- the checks for the selected mode --------------------------------------------------------------------
+		private static List<AuditCheck> AuditChecksForMode(string gameDirectory, AudioInputMode mode)
+		{
+			bool asio = mode == AudioInputMode.Asio;
+			var checks = new List<AuditCheck> { AuditChecks.CheckRocksmithSettings(gameDirectory, asio) };
+			if (asio)
+			{
+				checks.Add(AuditChecks.CheckRsAsioInstalled(gameDirectory));
+				AuditCheck setUp = AuditChecks.CheckRsAsioSetUp(gameDirectory);
+				if (setUp.State == AuditState.Problem || setUp.State == AuditState.Warning) setUp.FixLabel = "Set up for me";
+				checks.Add(setUp);
+				checks.Add(AuditChecks.CheckBridgeInterface());
+			}
+			else
+			{
+				checks.Add(AuditChecks.CheckCable());
+				checks.Add(AuditChecks.CheckMicrophoneAccess());
+			}
+			return checks;
+		}
+
+		private static string ModeName(AudioInputMode mode) => mode == AudioInputMode.Asio ? "ASIO interface" : "Real Tone Cable";
+
+		// ---- the tab ----------------------------------------------------------------------------------------------
+		private void RefreshAudit()
+		{
+			string gameDirectory = GenUtil.GetRSDirectory();
+			tabAudit.SuspendLayout();
+			auditPage.SuspendLayout();
+			while (auditPage.Controls.Count > 0) auditPage.Controls[0].Dispose();
+			int width = auditPage.LogicalToDeviceUnits(AuditCardWidth);
+
+			var header = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, WrapContents = false, Margin = new Padding(0, 0, 0, auditPage.LogicalToDeviceUnits(12)) };
+			header.Controls.Add(new Label { Text = "Checks the basics that most often cost the guitar or the sound, for the guitar input you use.", Font = StudioTheme.Body, ForeColor = OverlayLook.Muted, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, auditPage.LogicalToDeviceUnits(8), auditPage.LogicalToDeviceUnits(16), 0) });
+			var again = CreateSetupButton("Check again", auditPage);
+			again.Click += (sender, args) => { auditResult = ""; RefreshAudit(); };
+			header.Controls.Add(again);
+			auditPage.Controls.Add(header);
+
+			if (string.IsNullOrEmpty(gameDirectory) || !Directory.Exists(gameDirectory))
+				auditPage.Controls.Add(new Label { Text = "The Rocksmith folder was not found. Set it in GUI Settings.", ForeColor = OverlayLook.Warn, AutoSize = true });
+			else
+			{
+				AudioInputMode mode = AuditChecks.Mode(gameDirectory);
+				bool asio = mode == AudioInputMode.Asio;
+				List<AuditCheck> checks = AuditChecksForMode(gameDirectory, mode);
+
+				// Guitar input: which mode is being checked, and where to change it.
+				var modeCard = new SetupCard("Guitar input", width);
+				var change = CreateSetupButton("Change", modeCard);
+				change.Click += (sender, args) => TabController.SelectedTab = tab_RSModsPlus;
+				string modeNote = asio ? "The guitar comes in through RS_ASIO and the Rocksmith Audio Bridge driver."
+					: mode == AudioInputMode.Cable ? "RS_ASIO is installed but off. Switch to ASIO interface on the Rocksmith Audio Bridge tab to use it."
+					: "RS_ASIO is not installed; it is only needed for an audio interface.";
+				var modeRow = AddSetupRow(modeCard, ModeName(mode), modeNote, change);
+				((Label)((FlowLayoutPanel)((TableLayoutPanel)modeRow).GetControlFromPosition(0, 0)).Controls[0]).ForeColor = OverlayLook.Accent;
+				auditPage.Controls.Add(modeCard);
+
+				// Rocksmith settings: each value this mode needs, yours beside it, one button for all.
+				auditPage.Controls.Add(AuditRocksmithCard(gameDirectory, asio, checks[0], width));
+
+				// The mode's own checks.
+				var modeChecks = new SetupCard(asio ? "ASIO interface" : "Real Tone Cable", width);
+				for (int i = 1; i < checks.Count; i++)
+				{
+					if (i > 1) AddSetupDivider(modeChecks);
+					AddAuditCheckRow(modeChecks, checks[i], gameDirectory);
+				}
+				if (asio && RsAsioIniSetup.CanRestore)
+				{
+					AddSetupDivider(modeChecks);
+					var restore = CreateSetupButton("Restore", modeChecks);
+					restore.Click += (sender, args) =>
+					{
+						try { RsAsioIniSetup.Restore(gameDirectory); auditResult = "Your original RS_ASIO.ini is back. It applies when Rocksmith starts."; }
+						catch (Exception error) { auditResult = "Could not restore: " + error.Message; }
+						ReloadSettingsTabs();
+						RefreshAudit();
+					};
+					AddSetupRow(modeChecks, "Your original RS_ASIO.ini", "Puts back the file you had before Set up for me. Backups: " + RsAsioIniSetup.BackupFolder, restore);
+				}
+				auditPage.Controls.Add(modeChecks);
+			}
+
+			if (auditResult.Length > 0)
+				auditPage.Controls.Add(new Label { Text = auditResult, Font = StudioTheme.Body, ForeColor = OverlayLook.Text, AutoSize = true, MaximumSize = new Size(width, 0), Margin = new Padding(0, auditPage.LogicalToDeviceUnits(4), 0, 0) });
+			// A FlowLayoutPanel's scroll range ignores its bottom padding; an empty spacer is counted.
+			auditPage.Controls.Add(new Panel { Size = new Size(1, auditPage.LogicalToDeviceUnits(24)), Margin = Padding.Empty });
+			auditPage.ResumeLayout(true);
+			tabAudit.ResumeLayout(true);
+			RefreshAuditSummary();
+		}
+
+		private SetupCard AuditRocksmithCard(string gameDirectory, bool asio, AuditCheck check, int width)
+		{
+			var card = new SetupCard("Rocksmith settings", width);
+			var ini = File.Exists(AuditChecks.RocksmithIniPath(gameDirectory)) ? IniText.Load(AuditChecks.RocksmithIniPath(gameDirectory)) : null;
+			bool first = true;
+			foreach (var (key, value) in AuditChecks.RocksmithWanted(asio))
+			{
+				if (!first) AddSetupDivider(card);
+				first = false;
+				string current = ini?.Get("Audio", key);
+				bool off = !string.IsNullOrEmpty(current) && current != value;
+				var values = new Label { Text = off ? current + "   →   " + value : "✓ " + value, Font = StudioTheme.Strong, ForeColor = off ? OverlayLook.Warn : OverlayLook.Good, AutoSize = true };
+				AddSetupRow(card, key, off ? "Yours, then recommended for the " + ModeName(asio ? AudioInputMode.Asio : AudioInputMode.Cable) + "." : "Recommended for the " + ModeName(asio ? AudioInputMode.Asio : AudioInputMode.Cable) + ".", values);
+			}
+			card.Controls.Add(new Label { Text = check.Detail, Font = StudioTheme.Small, ForeColor = OverlayLook.Muted, AutoSize = true, MaximumSize = new Size(card.InnerWidth, 0), Margin = new Padding(0, card.LogicalToDeviceUnits(10), 0, 0) });
+			if (check.State == AuditState.Problem)
+			{
+				var use = CreateSetupButton("Use recommended", card, StudioButtonKind.Primary);
+				use.Margin = new Padding(0, card.LogicalToDeviceUnits(10), 0, 0);
+				use.Click += (sender, args) =>
+				{
+					try { AuditChecks.FixRocksmithSettings(gameDirectory, asio); auditResult = "Rocksmith.ini updated (a backup is kept)." + AppliesNextStart(gameDirectory); }
+					catch (Exception error) { auditResult = "Could not change Rocksmith.ini: " + error.Message; }
+					ReloadSettingsTabs();
+					RefreshAudit();
+				};
+				card.Controls.Add(use);
+			}
+			return card;
+		}
+
+		private void AddAuditCheckRow(SetupCard card, AuditCheck check, string gameDirectory)
+		{
+			Control fix = new Label { AutoSize = true, Text = "" };
+			if (check.FixLabel != null)
+			{
+				var button = CreateSetupButton(check.FixLabel, card, check.Fix == null ? StudioButtonKind.Primary : StudioButtonKind.Ghost);
+				button.Click += (sender, args) =>
+				{
+					try
+					{
+						if (check.Fix != null) check.Fix();
+						else { auditResult = string.Join(" ", RsAsioIniSetup.SetUp(gameDirectory)) + AppliesNextStart(gameDirectory); ReloadSettingsTabs(); }
+					}
+					catch (Exception error) { auditResult = "That did not work: " + error.Message; }
+					RefreshAudit();
+				};
+				fix = button;
+			}
+			var row = AddSetupRow(card, AuditMark(check.State) + check.Name, check.Detail, fix);
+			((Label)((FlowLayoutPanel)((TableLayoutPanel)row).GetControlFromPosition(0, 0)).Controls[0]).ForeColor = AuditColour(check.State);
+		}
+
+		private static string AppliesNextStart(string gameDirectory) =>
+			new AudioInputModeConfiguration(gameDirectory).IsGameRunning() ? " Applies the next time Rocksmith starts." : "";
+
+		private static string AuditMark(AuditState state) =>
+			state == AuditState.Ok ? "✓ " : state == AuditState.Warning ? "▲ " : state == AuditState.Problem ? "● " : "– ";
+
+		private static Color AuditColour(AuditState state) =>
+			state == AuditState.Ok ? OverlayLook.Good : state == AuditState.Warning ? OverlayLook.Warn : state == AuditState.Problem ? Color.FromArgb(248, 113, 113) : OverlayLook.Faint;
+
+		// ---- the small card on the RS_ASIO tab, and the button on the Rocksmith Settings tab -------------------------
+		private void InitializeRsAsioAuditCard()
+		{
 			if (rsAsioConfigCard == null) return;
-			tab_RSASIO.SuspendLayout();
 			int pad = rsAsioConfigCard.LogicalToDeviceUnits(10);
 			auditCard = new RsAsioCard { Left = rsAsioConfigCard.Left, Top = rsAsioConfigCard.Bottom + rsAsioConfigCard.LogicalToDeviceUnits(6), Width = rsAsioConfigCard.Width, Anchor = rsAsioConfigCard.Anchor };
 			int inner = auditCard.Width - pad * 2;
-			auditCard.Controls.Add(new Label { Text = "AUDIT", Font = StudioTheme.SectionFont, ForeColor = OverlayLook.Muted, BackColor = OverlayLook.Card, AutoSize = true, Location = new Point(pad, auditCard.LogicalToDeviceUnits(8)) });
-			for (int i = 0; i < 3; i++)
-			{
-				var line = new Label { Font = StudioTheme.Small, BackColor = OverlayLook.Card, AutoSize = true, MaximumSize = new Size(inner, 0), Left = pad };
-				auditLines.Add(line);
-				auditCard.Controls.Add(line);
-			}
-			auditResult = new Label { Font = StudioTheme.Small, ForeColor = OverlayLook.Text, BackColor = OverlayLook.Card, AutoSize = true, MaximumSize = new Size(inner, 0), Left = pad };
-			ShowAuditPart(auditResult, false);
-			auditCard.Controls.Add(auditResult);
-			auditFixButton = CreateSetupButton("Fix", auditCard, StudioButtonKind.Primary);
-			auditRestoreButton = CreateSetupButton("Restore original", auditCard);
-			foreach (var button in new[] { auditFixButton, auditRestoreButton })
-			{
-				button.Height = auditCard.LogicalToDeviceUnits(26);
-				button.Width = inner;
-				button.Left = pad;
-				auditCard.Controls.Add(button);
-			}
-			auditFixButton.Click += (sender, args) => RunAuditFix();
-			auditRestoreButton.Click += (sender, args) =>
-			{
-				string gameDirectory = GenUtil.GetRSDirectory();
-				try { RsAsioIniSetup.Restore(gameDirectory); ShowAuditResult("Your original RS_ASIO.ini is back. It applies when Rocksmith starts."); }
-				catch (Exception error) { ShowAuditResult("Could not restore: " + error.Message); }
-				ReloadSettingsTabs();
-				RefreshAuditSummary();
-			};
+			auditCardTitle = new Label { Text = "AUDIT", Font = StudioTheme.SectionFont, ForeColor = OverlayLook.Muted, BackColor = OverlayLook.Card, AutoSize = true, Location = new Point(pad, auditCard.LogicalToDeviceUnits(8)) };
+			auditCardSummary = new Label { Font = StudioTheme.Small, BackColor = OverlayLook.Card, AutoSize = true, MaximumSize = new Size(inner, 0), Location = new Point(pad, auditCardTitle.Bottom + auditCard.LogicalToDeviceUnits(4)) };
+			auditCardOpen = CreateSetupButton("Open audit", auditCard);
+			auditCardOpen.Height = auditCard.LogicalToDeviceUnits(26);
+			auditCardOpen.Width = inner;
+			auditCardOpen.Left = pad;
+			auditCardOpen.Click += (sender, args) => OpenAudit();
+			auditCard.Controls.Add(auditCardTitle);
+			auditCard.Controls.Add(auditCardSummary);
+			auditCard.Controls.Add(auditCardOpen);
 			tab_RSASIO.Controls.Add(auditCard);
-			StudioTheme.StyleTips(auditTips);
 			RefreshAuditSummary();
-			tab_RSASIO.ResumeLayout(true);
-			tab_RSASIO.Enter += (sender, args) => { ShowAuditPart(auditResult, false); RefreshAuditSummary(); };
+			tab_RSASIO.Enter += (sender, args) => RefreshAuditSummary();
 		}
 
-		private bool auditNeedsRocksmithFix, auditNeedsSetUp;
+		// Upstream's light tab: a plain button beside the Audio settings group, in the empty space on its right.
+		private void InitializeRocksmithAuditButton()
+		{
+			var button = new Button { Text = "Open audit", AutoSize = true, Anchor = AnchorStyles.Top | AnchorStyles.Left };
+			button.Location = new Point(groupBox_Rocksmith_AudioSettings.Right + groupBox_Rocksmith_AudioSettings.LogicalToDeviceUnits(12), groupBox_Rocksmith_AudioSettings.Top + groupBox_Rocksmith_AudioSettings.LogicalToDeviceUnits(8));
+			button.Click += (sender, args) => OpenAudit();
+			auditTips.SetToolTip(button, "Checks Rocksmith's audio settings and your guitar input, with the recommended values.");
+			tab_Rocksmith.Controls.Add(button);
+		}
 
+		// The RS_ASIO card's lines: the mode, and the worst result for it. Laid out by hand and sized to its contents;
+		// Control.Visible is not read back (it is false while the tab is hidden at startup, which once shrank this card
+		// to its title).
 		private void RefreshAuditSummary()
 		{
 			if (auditCard == null) return;
 			string gameDirectory = GenUtil.GetRSDirectory();
-			bool found = !string.IsNullOrEmpty(gameDirectory) && Directory.Exists(gameDirectory);
-			bool asio = found && AuditChecks.AsioMode(gameDirectory);
-			AuditCheck[] checks = found
-				? new[] { AuditChecks.CheckRocksmithSettings(gameDirectory, asio), AuditChecks.CheckRsAsioInstalled(gameDirectory, asio), AuditChecks.CheckRsAsioSetUp(gameDirectory, asio) }
-				: new[] { new AuditCheck { Name = "Rocksmith folder not found", State = AuditState.Problem, Detail = "Set the Rocksmith folder in GUI Settings." } };
-			for (int i = 0; i < auditLines.Count; i++)
+			if (string.IsNullOrEmpty(gameDirectory) || !Directory.Exists(gameDirectory))
 			{
-				Label line = auditLines[i];
-				ShowAuditPart(line, i < checks.Length);
-				if (i >= checks.Length) continue;
-				AuditCheck check = checks[i];
-				switch (check.State)
+				auditCardTitle.Text = "AUDIT";
+				auditCardSummary.Text = "Rocksmith folder not found";
+				auditCardSummary.ForeColor = OverlayLook.Warn;
+			}
+			else
+			{
+				AudioInputMode mode = AuditChecks.Mode(gameDirectory);
+				auditCardTitle.Text = mode == AudioInputMode.Asio ? "AUDIT · ASIO MODE" : "AUDIT · CABLE MODE";
+				int problems = 0, warnings = 0;
+				try
 				{
-					case AuditState.Ok: line.Text = "✓ " + check.Name; line.ForeColor = OverlayLook.Good; break;
-					case AuditState.Warning: line.Text = "▲ " + check.Name; line.ForeColor = OverlayLook.Warn; break;
-					case AuditState.Problem: line.Text = "● " + check.Name; line.ForeColor = Color.FromArgb(248, 113, 113); break;
-					default: line.Text = "– " + check.Name; line.ForeColor = OverlayLook.Faint; break;
+					foreach (AuditCheck check in AuditChecksForMode(gameDirectory, mode))
+					{
+						if (check.State == AuditState.Problem) problems++;
+						else if (check.State == AuditState.Warning) warnings++;
+					}
 				}
-				auditTips.SetToolTip(line, check.Detail);
+				catch { warnings++; }
+				if (problems > 0) { auditCardSummary.Text = "● " + problems + (problems == 1 ? " problem" : " problems"); auditCardSummary.ForeColor = AuditColour(AuditState.Problem); }
+				else if (warnings > 0) { auditCardSummary.Text = "▲ " + warnings + (warnings == 1 ? " warning" : " warnings"); auditCardSummary.ForeColor = OverlayLook.Warn; }
+				else { auditCardSummary.Text = "✓ No problems found"; auditCardSummary.ForeColor = OverlayLook.Good; }
+				auditTips.SetToolTip(auditCardSummary, mode == AudioInputMode.Cable ? "Checked for the Real Tone Cable. RS_ASIO is installed but off." : "Checked for the " + ModeName(mode) + ".");
 			}
-			auditNeedsRocksmithFix = found && checks[0].State == AuditState.Problem;
-			auditNeedsSetUp = found && checks.Length > 2 && (checks[2].State == AuditState.Problem || checks[2].State == AuditState.Warning);
-			ShowAuditPart(auditFixButton, auditNeedsRocksmithFix || auditNeedsSetUp);
-			auditFixButton.Text = auditNeedsSetUp && !auditNeedsRocksmithFix ? "Set up for me" : "Fix";
-			auditFixButton.Width = auditRestoreButton.Width;   // setting Text re-measures the button
-			auditTips.SetToolTip(auditFixButton, (auditNeedsRocksmithFix ? "Sets Rocksmith.ini's audio values. " : "") + (auditNeedsSetUp ? "Points RS_ASIO.ini at the Rocksmith Audio Bridge, keeping your device and channel picks. " : "") + "Backups are kept.");
-			ShowAuditPart(auditRestoreButton, found && RsAsioIniSetup.CanRestore);
-			auditTips.SetToolTip(auditRestoreButton, "Puts back the RS_ASIO.ini you had before Set up for me. Backups: " + RsAsioIniSetup.BackupFolder);
-			LayoutAuditCard();
-		}
-
-		private void RunAuditFix()
-		{
-			string gameDirectory = GenUtil.GetRSDirectory();
-			bool asio = AuditChecks.AsioMode(gameDirectory);
-			var said = new List<string>();
-			try
-			{
-				if (auditNeedsRocksmithFix) { AuditChecks.FixRocksmithSettings(gameDirectory, asio); said.Add("Rocksmith.ini updated."); }
-				if (auditNeedsSetUp) said.AddRange(RsAsioIniSetup.SetUp(gameDirectory));
-			}
-			catch (Exception error) { said.Add("The fix failed: " + error.Message); }
-			if (new AudioInputModeConfiguration(gameDirectory).IsGameRunning()) said.Add("Applies the next time Rocksmith starts.");
-			ShowAuditResult(string.Join(" ", said));
-			ReloadSettingsTabs();
-			RefreshAuditSummary();
-		}
-
-		private void ShowAuditResult(string text)
-		{
-			auditResult.Text = text;
-			ShowAuditPart(auditResult, text.Length > 0);
-			LayoutAuditCard();
-		}
-
-		// Which parts of the card are meant to show. Control.Visible can't be read back for this: the card is laid out at
-		// startup while the RS_ASIO tab is hidden, and Visible reads false for every child of a hidden control, which
-		// shrank the card to its title (seen live 2026-10-12).
-		private readonly HashSet<Control> auditShown = new HashSet<Control>();
-
-		private void ShowAuditPart(Control control, bool show)
-		{
-			control.Visible = show;
-			if (show) auditShown.Add(control); else auditShown.Remove(control);
-		}
-
-		// Stacks the card's contents and fits the card to them. Upstream's credits line sits under the card; if the
-		// card needs more room than the designer left, the credits move down instead of being covered.
-		private void LayoutAuditCard()
-		{
-			int y = auditCard.LogicalToDeviceUnits(8 + 15 + 4);
-			foreach (Control control in new Control[] { auditLines[0], auditLines[1], auditLines[2], auditResult, auditFixButton, auditRestoreButton })
-			{
-				if (!auditShown.Contains(control)) continue;
-				if (control is StudioButton) y += auditCard.LogicalToDeviceUnits(4);
-				control.Top = y;
-				y = control.Bottom + auditCard.LogicalToDeviceUnits(2);
-			}
-			auditCard.Height = y + auditCard.LogicalToDeviceUnits(4);
+			auditCardOpen.Top = auditCardSummary.Bottom + auditCard.LogicalToDeviceUnits(6);
+			auditCard.Height = auditCardOpen.Bottom + auditCard.LogicalToDeviceUnits(8);
 			int gap = auditCard.LogicalToDeviceUnits(4);
 			if (label_ASIO_Credits.Parent == tab_RSASIO && label_ASIO_Credits.Left < auditCard.Right && label_ASIO_Credits.Top < auditCard.Bottom + gap)
 				label_ASIO_Credits.Top = auditCard.Bottom + gap;

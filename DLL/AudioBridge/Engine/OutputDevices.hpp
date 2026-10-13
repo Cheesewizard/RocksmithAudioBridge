@@ -27,6 +27,10 @@ namespace Audio::OutputDevices
 		bool isDefault = false;    // Windows default playback device
 		bool isProtected = false;  // belongs to the interface RS_ASIO is bound to; never switch to it
 		bool isAsioTwin = false;   // Windows endpoint of the ASIO interface in RS_ASIO.ini, bound or not; the overlay hides it
+		// What the device reports without being opened (frames at 48 kHz; 0 = unknown), for the overlay's delay estimate:
+		// the smallest shared-mode period (Windows' low-latency engine, else its default) and the smallest exclusive one.
+		unsigned sharedPeriod = 0;
+		unsigned exclusivePeriod = 0;
 	};
 
 	struct Snapshot

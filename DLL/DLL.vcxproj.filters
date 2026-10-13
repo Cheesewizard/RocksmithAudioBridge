@@ -931,6 +931,24 @@
     <ClCompile Include="AudioBridge\Cable\CableCaptureSession.cpp">
       <Filter>AudioBridge\Cable</Filter>
     </ClCompile>
+    <ClCompile Include="AudioBridge\Cable\UsbCableCapture.cpp">
+      <Filter>AudioBridge\Cable</Filter>
+    </ClCompile>
+    <ClCompile Include="AudioBridge\Engine\AsioOutputDevice.cpp">
+      <Filter>AudioBridge\Engine</Filter>
+    </ClCompile>
+    <ClCompile Include="AudioBridge\Engine\AppAudioMix.cpp">
+      <Filter>AudioBridge\Engine</Filter>
+    </ClCompile>
+    <ClCompile Include="AudioBridge\Engine\GameToneLatency.cpp">
+      <Filter>AudioBridge\Engine</Filter>
+    </ClCompile>
+    <ClCompile Include="AudioBridge\Engine\DeviceVolume.cpp">
+      <Filter>AudioBridge\Engine</Filter>
+    </ClCompile>
+    <ClCompile Include="AudioBridge\Engine\ExclusiveOutputDevice.cpp">
+      <Filter>AudioBridge\Engine</Filter>
+    </ClCompile>
     <ClCompile Include="AudioBridge\Devices\DeviceEnumeratorHook.cpp">
       <Filter>AudioBridge\Devices</Filter>
     </ClCompile>
@@ -1011,11 +1029,32 @@
     <ClInclude Include="AudioBridge\Engine\OutputRateMatcher.hpp">
       <Filter>AudioBridge\Engine</Filter>
     </ClInclude>
+    <ClInclude Include="AudioBridge\Engine\CableGamePeriod.hpp">
+      <Filter>AudioBridge\Engine</Filter>
+    </ClInclude>
     <ClInclude Include="AudioBridge\Engine\OutputTap.hpp">
       <Filter>AudioBridge\Engine</Filter>
     </ClInclude>
     <ClInclude Include="AudioBridge\Cable\CableCaptureSession.hpp">
       <Filter>AudioBridge\Cable</Filter>
+    </ClInclude>
+    <ClInclude Include="AudioBridge\Cable\UsbCableCapture.hpp">
+      <Filter>AudioBridge\Cable</Filter>
+    </ClInclude>
+    <ClInclude Include="AudioBridge\Engine\AsioOutputDevice.hpp">
+      <Filter>AudioBridge\Engine</Filter>
+    </ClInclude>
+    <ClInclude Include="AudioBridge\Engine\AppAudioMix.hpp">
+      <Filter>AudioBridge\Engine</Filter>
+    </ClInclude>
+    <ClInclude Include="AudioBridge\Engine\GameToneLatency.hpp">
+      <Filter>AudioBridge\Engine</Filter>
+    </ClInclude>
+    <ClInclude Include="AudioBridge\Engine\DeviceVolume.hpp">
+      <Filter>AudioBridge\Engine</Filter>
+    </ClInclude>
+    <ClInclude Include="AudioBridge\Engine\ExclusiveOutputDevice.hpp">
+      <Filter>AudioBridge\Engine</Filter>
     </ClInclude>
     <ClInclude Include="AudioBridge\Devices\DeviceEnumeratorHook.hpp">
       <Filter>AudioBridge\Devices</Filter>

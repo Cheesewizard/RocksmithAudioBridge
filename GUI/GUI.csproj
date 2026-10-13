@@ -167,6 +167,7 @@
     <Compile Include="Audio\StudioFormat.cs" />
     <Compile Include="Audio\AudioControlClient.cs" />
     <Compile Include="Features\AudioBridge\BridgeDriverSetup.cs" />
+    <Compile Include="Features\AudioBridge\UsbDkSetup.cs" />
     <Compile Include="Audio\OutputApplyPlan.cs" />
     <Compile Include="Audio\AudioBufferSnapshot.cs" />
     <Compile Include="Features\AudioBridge\AudioInputMode.cs" />
@@ -177,7 +178,6 @@
     <Compile Include="Audio\StudioNumber.cs" />
     <Compile Include="Features\AudioBridge\UI.BridgeSettingsSync.cs" />
     <Compile Include="Features\AudioBridge\UI.AudioBridgeSetup.cs" />
-    <Compile Include="Features\AudioBridge\UI.PlaybackBuffer.cs" />
     <Compile Include="Features\AudioBridge\UI.AudioBridgeTab.cs" />
     <Compile Include="Features\RsAsio\UI.RsAsioTab.cs" />
     <Compile Include="Features\RsAsio\IniText.cs" />
@@ -264,6 +264,12 @@
     <EmbeddedResource Include="Resources\original.rs_soundpack" />
     <EmbeddedResource Include="Resources\ui_menu_pillar_startup.database.json" />
     <EmbeddedResource Include="Resources\init.bnk" />
+    <EmbeddedResource Include="..\Installer\Resources\UsbDk\UsbDk_1.0.22_x64.msi">
+      <LogicalName>RSMods.UsbDk_1.0.22_x64.msi</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\Installer\Resources\UsbDk\LICENSE.txt">
+      <LogicalName>RSMods.UsbDk_LICENSE.txt</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
@@ -364,6 +370,9 @@
   <Target Name="BuildRuntimePayload" BeforeTargets="PrepareResources" DependsOnTargets="ResolveReferences">
     <WriteLinesToFile File="$(IntermediateOutputPath)RuntimeReferences.txt" Lines="@(ReferenceCopyLocalPaths)" Overwrite="true" />
     <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(ProjectDir)BuildRuntimePayload.ps1&quot; -References &quot;$(ProjectDir)$(IntermediateOutputPath)RuntimeReferences.txt&quot; -Output &quot;$(ProjectDir)$(IntermediateOutputPath)BundledRuntime.zip&quot; -ProjectDirectory &quot;$(ProjectDir).&quot;" />
+  </Target>
+  <Target Name="AcquireUsbDk" BeforeTargets="PrepareForBuild">
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(ProjectDir)..\Installer\AcquireUsbDk.ps1&quot;" />
   </Target>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Target Name="PlaceMainGameLibrary" AfterTargets="Build">

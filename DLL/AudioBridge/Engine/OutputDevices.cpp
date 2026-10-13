@@ -2,6 +2,7 @@
 #include "OutputDevices.hpp"
 #include "OutputTap.hpp"
 #include <mmdeviceapi.h>
+#include <audioclient.h>
 #include <functiondiscoverykeys_devpkey.h>
 #include <wrl/client.h>
 #include <filesystem>
@@ -242,6 +243,28 @@ namespace Audio::OutputDevices
 			device.isDefault = endpoint.id == defaultId;
 			device.isProtected = protectedIds.count(endpoint.id) != 0;
 			device.isAsioTwin = twinIds.count(endpoint.id) != 0;
+			// Periods, read from an activated but never initialised client (nothing opens or plays).
+			ComPtr<IMMDevice> handle;
+			ComPtr<IAudioClient3> client;
+			if (!device.isProtected && SUCCEEDED(enumerator->GetDevice(endpoint.id.c_str(), &handle))
+				&& SUCCEEDED(handle->Activate(__uuidof(IAudioClient3), CLSCTX_ALL, nullptr, reinterpret_cast<void**>(client.GetAddressOf()))))
+			{
+				REFERENCE_TIME normal = 0, minimum = 0;
+				if (SUCCEEDED(client->GetDevicePeriod(&normal, &minimum)))
+				{
+					device.exclusivePeriod = static_cast<unsigned>((minimum * 48000 + 9999999) / 10000000);
+					device.sharedPeriod = static_cast<unsigned>((normal * 48000 + 9999999) / 10000000);
+				}
+				WAVEFORMATEX* mix = nullptr;
+				UINT32 defaultFrames = 0, step = 0, smallest = 0, largest = 0;
+				if (SUCCEEDED(client->GetMixFormat(&mix)) && mix)
+				{
+					// The bridge's Automatic: 144 frames where the low-latency engine allows it, else the device's smallest.
+					if (SUCCEEDED(client->GetSharedModeEnginePeriod(mix, &defaultFrames, &step, &smallest, &largest)) && smallest && mix->nSamplesPerSec == 48000)
+						device.sharedPeriod = smallest <= 144 && largest >= 144 ? 144 : smallest;
+					CoTaskMemFree(mix);
+				}
+			}
 			snapshot.devices.push_back(std::move(device));
 		}
 		std::stable_partition(snapshot.devices.begin(), snapshot.devices.end(), [](const Device& d) { return d.isDefault; });

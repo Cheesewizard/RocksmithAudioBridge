@@ -34,6 +34,8 @@
     <ClCompile Include="ExternalAmp\ExternalAmp.cpp" />
     <ClCompile Include="ToneDesigner\VstHostLink.cpp" />
     <ClCompile Include="ToneDesigner\ToneSwitchPopup.cpp" />
+    <ClCompile Include="ExternalAmp\CableAmpLink.cpp" />
+    <ClCompile Include="AsioProxy\AmpLinkHost.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="Core\RsModsHelper.cpp" />
     <ClCompile Include="ToneDesigner\SongLibrary.cpp" />
     <ClCompile Include="ToneDesigner\ToneBackup.cpp" />
@@ -308,6 +310,7 @@
     <ClInclude Include="ExternalAmp\ExternalAmp.hpp" />
     <ClInclude Include="ToneDesigner\VstHostLink.hpp" />
     <ClInclude Include="ToneDesigner\ToneSwitchPopup.hpp" />
+    <ClInclude Include="ExternalAmp\CableAmpLink.hpp" />
     <ClInclude Include="Core\RsModsHelper.hpp" />
     <ClInclude Include="ToneDesigner\SongLibrary.hpp" />
     <ClInclude Include="ToneDesigner\ToneBackup.hpp" />
@@ -915,11 +918,24 @@ if exist "$(OutDir)$(TargetName).map" copy /Y "$(OutDir)$(TargetName).map" "$(Bu
   <ItemGroup><ClInclude Include="AudioBridge\Diagnostics\AudioLifecycleTrace.hpp" /></ItemGroup>
   <ItemGroup>
     <ClCompile Include="AudioBridge\Cable\CableCaptureSession.cpp" />
+    <ClCompile Include="AudioBridge\Cable\UsbCableCapture.cpp" />
+    <ClCompile Include="AudioBridge\Engine\AsioOutputDevice.cpp" />
+    <ClCompile Include="AudioBridge\Engine\AppAudioMix.cpp" />
+    <ClCompile Include="AudioBridge\Engine\GameToneLatency.cpp" />
+    <ClCompile Include="AudioBridge\Engine\DeviceVolume.cpp" />
+    <ClCompile Include="AudioBridge\Engine\ExclusiveOutputDevice.cpp" />
     <ClCompile Include="AudioBridge\Devices\DeviceEnumeratorHook.cpp" />
     <ClInclude Include="AudioBridge\Devices\DeviceEnumeratorHook.hpp" />
     <ClInclude Include="AudioBridge\Cable\CableCaptureSession.hpp" />
+    <ClInclude Include="AudioBridge\Cable\UsbCableCapture.hpp" />
+    <ClInclude Include="AudioBridge\Engine\AsioOutputDevice.hpp" />
+    <ClInclude Include="AudioBridge\Engine\AppAudioMix.hpp" />
+    <ClInclude Include="AudioBridge\Engine\GameToneLatency.hpp" />
+    <ClInclude Include="AudioBridge\Engine\DeviceVolume.hpp" />
+    <ClInclude Include="AudioBridge\Engine\ExclusiveOutputDevice.hpp" />
     <ClInclude Include="AudioBridge\Cable\CableEndpointVolume.hpp" />
     <ClInclude Include="AudioBridge\Engine\OutputBackend.hpp" />
     <ClInclude Include="AudioBridge\Engine\OutputRateMatcher.hpp" />
+    <ClInclude Include="AudioBridge\Engine\CableGamePeriod.hpp" />
   </ItemGroup>
 </Project>

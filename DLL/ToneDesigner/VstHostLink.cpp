@@ -704,6 +704,18 @@ namespace VstHostLink
 			LOG_INFO("(VST HOST) song " << g_songKey << " started: " << (tone.empty() ? std::string("no tone of its own") : "its tone is '" + tone + "'") << std::endl);
 			char current[sizeof(shared->toneName) + 1]{};
 			memcpy(current, shared->toneName, sizeof(shared->toneName));
+			// A chain with unsaved changes is work in progress: it keeps playing through the song instead of the song's
+			// tone or the default tone (2026-10-12: a song start loaded over it, skipping the page's "Discard changes?",
+			// and the edits were gone; restoring afterwards only knew the tone's name). The readout names the chain.
+			if (shared->toneModified != 0 && shared->slotCount > 0)
+			{
+				const std::string skipped = !tone.empty() ? tone : ReadSlow([](SlowState& slow) { return slow.defaultTone; });
+				if (!skipped.empty() && _stricmp(skipped.c_str(), current) != 0)
+					LOG_INFO("(VST HOST) song " << g_songKey << ": the chain has unsaved changes, it keeps playing instead of '" << skipped << "'" << std::endl);
+				g_songTarget.clear();
+				g_toneBeforeSong.clear();   // the work in progress is the player's tone now: nothing to go back to
+				return;
+			}
 			if (!tone.empty())
 			{
 				if (_stricmp(tone.c_str(), current) == 0) return;
@@ -970,6 +982,12 @@ namespace VstHostLink
 		PublishPopupName(shared, on);
 		FollowTuner(on);
 		PumpCommands(shared, hostRunning);
+	}
+
+	bool IsLoading()
+	{
+		VstHostControl::Shared* shared = g_shared;
+		return shared && (shared->loading != 0 || shared->commandDone != shared->commandSeq);
 	}
 
 	Snapshot GetSnapshot()

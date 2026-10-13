@@ -78,7 +78,6 @@ namespace RSMods
 			AddSetupRow(setup, "Guitar input", "Takes effect next time Rocksmith starts.", audioSetupInput);
 
 			InitializeAsioDriverSetup(setup);
-			InitializePlaybackBufferSetup(setup);
 			page.Controls.Add(setup);
 
 			InitializeRecordingFolderSetup(page);
@@ -257,7 +256,6 @@ namespace RSMods
 				audioSetupInput.SelectedIndex = mode == AudioInputMode.Asio ? InputSegmentAsio : InputSegmentCable;
 
 				RefreshAsioDriverSetup(gameRunning, mode == AudioInputMode.Asio);
-				RefreshPlaybackBufferSetup();
 
 				audioSetupStatus.Text = gameRunning
 					? "Rocksmith is running. Close it to change these."

@@ -38,6 +38,22 @@ namespace AmpLink
 		void MixReturn(const ASIOBufferInfo* infos, const long* outputBuffers, const long* outputTypes, long outputCount,
 			long index, long frames) noexcept;
 
+		// Decoupled use (the Real Tone Cable, DLL/ExternalAmp/CableAmpLink.cpp): input is published on the capture
+		// thread in bursts and the output device pulls on its own clock, so "the previous block" is not ready at a
+		// fixed moment. Reads the guest's output for block `seq` (a value Publish returned) as float stereo with the
+		// return gain and the on/off fade applied. Not reentrant: the caller serialises it (CableAmpLink's FIFO lock).
+		// Publish keeps working as before for the ASIO driver.
+		enum class Return
+		{
+			Ready,     // copied
+			NotYet,    // the guest is still working on it
+			Lost,      // the guest has already reused its slot for a newer block: it was not read in time
+			NoGuest,   // nothing is attached (or it stopped processing, e.g. Tone designer in standby)
+		};
+		Return ReadReturn(LONG seq, float* left, float* right, long frames) noexcept;
+		LONG PublishedSeq() const noexcept { return m_publishedSeq.load(std::memory_order_acquire); }
+		void CountLate() noexcept { m_late.fetch_add(1, std::memory_order_relaxed); }
+
 		Status GetStatus() const;
 
 	private:
@@ -47,6 +63,7 @@ namespace AmpLink
 		HANDLE m_event = nullptr;
 		Shared* m_shared = nullptr;
 		LONG m_seq = 0;                       // audio thread: the block being published
+		std::atomic<LONG> m_publishedSeq{ 0 };   // m_seq after each Publish, for a reader on another thread
 		long m_frames = 0;
 		std::atomic<bool> m_mixOn{ false };
 		float m_mixLevel = 0.0f;              // audio thread: 0..1, follows m_mixOn over kMixFadeFrames so switching never clicks

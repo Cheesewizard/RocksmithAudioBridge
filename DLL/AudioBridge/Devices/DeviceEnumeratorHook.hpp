@@ -28,6 +28,9 @@ namespace Audio::PersistentInput
 	void SetCableForPlayerTwoEnabled(bool enabled);
 	bool IsCableForPlayerTwoEnabled();
 	bool IsCableForPlayerTwoAvailable();
+	// Cable mode: makes the game reopen its (virtual) output now, e.g. at a new game block size
+	// (CableGamePeriod::ApplyNextStart first). Call off the render thread. Returns the game's listeners told.
+	int ResetGameOutput();
 	// tapMode installs the passive output tap (wrap render devices to copy the wet mix) instead of the
 	// replace-the-endpoint routing. It reuses the same call-site interception; the enumerator it hands
 	// the game wraps the real render device rather than substituting one. Used in passthrough.
