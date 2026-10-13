@@ -74,6 +74,9 @@ namespace VstHostLink
 
 	void OnFrame(bool overlayVisible);   // every rendered frame
 	Snapshot GetSnapshot();              // cheap: refreshed a few times a second
+	// Any thread: the host is loading plugins or a tone, or has commands not yet handled. A raw read of the shared
+	// state (no refresh, never opens the mapping); for the cable amp link, which must not treat a load as a slow PC.
+	bool IsLoading();
 	bool IsHostGuest(const std::string& guestName);   // the amp link's guest is the VST host (Tone designer)
 
 	// Plugins: 64-bit VST3 in Common Files\VST3 and any added folders, scanned on first use.

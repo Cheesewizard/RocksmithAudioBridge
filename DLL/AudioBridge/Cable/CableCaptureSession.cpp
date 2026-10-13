@@ -2,6 +2,9 @@
 #include "CableCaptureSession.hpp"
 #include "ExternalAmp/CableAmpLink.hpp"
 #include "CableInput.hpp"
+#include "AudioBridge/Engine/CableGamePeriod.hpp"
+#include "AudioBridge/Engine/AudioBridgeEngine.hpp"
+#include "AudioBridge/Engine/GameToneLatency.hpp"
 #include <avrt.h>
 #include <functiondiscoverykeys_devpkey.h>
 
@@ -91,9 +94,9 @@ namespace Audio::PersistentInput
 		if (!(flags & AUDCLNT_STREAMFLAGS_EVENTCALLBACK)
 			|| (flags & ~(AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_NOPERSIST))) return E_INVALIDARG;
 		if (duration < 0 || duration > 10000000) return E_INVALIDARG;
-		const UINT64 frames = duration ? (duration * SAMPLE_RATE + 9999999) / 10000000 : 480;
-		if (frames < 48 || frames > MAX_PACKET_FRAMES) return AUDCLNT_E_INVALID_DEVICE_PERIOD;
-		periodFrames = static_cast<UINT32>(frames);
+		// The game's packets are the size this device reports (CableGamePeriod.hpp), whatever it asked for, as RS_ASIO
+		// does: it asks for the reported period rounded to whole milliseconds.
+		periodFrames = CableGamePeriod::Frames();
 		gameFormat = *format;
 		floatFormat = format->wBitsPerSample == 32;
 		try
@@ -160,6 +163,7 @@ namespace Audio::PersistentInput
 		discontinuityPending = true;
 		physicalPacket = false;
 		lastPhysicalTick = 0;
+		lastPhysicalTime = 0;
 	}
 
 	HRESULT CaptureSession::Reset()
@@ -190,7 +194,12 @@ namespace Audio::PersistentInput
 	{
 		if (!samples || !frames || frames > RING_FRAMES) return;
 		// Player 1's raw cable guitar also feeds the Tone designer's amp link (cable mode has no ASIO driver to host it).
-		if (!gatedByPlayerTwoToggle) CableAmpLink::FeedInput(samples, frames);
+		if (!gatedByPlayerTwoToggle)
+		{
+			CableAmpLink::FeedInput(samples, frames);
+			// The game tones' delay is timed from here: picks as they come off the cable (GameToneLatency).
+			GameToneLatency::Input(samples, frames, timestamp + UINT64(frames - 1) * 10000000 / SAMPLE_RATE);
+		}
 		std::unique_lock<std::mutex> guard(packetMutex);
 		if (!running || deviceResetRequested) return;
 		if (availableFrames + frames > RING_FRAMES || discontinuity)
@@ -207,9 +216,20 @@ namespace Audio::PersistentInput
 		}
 		availableFrames += frames;
 		lastPhysicalTick = GetTickCount64();
+		lastPhysicalTime = CaptureTime();
 		const bool ready = QueueCapturedPacket();
+		// Player 1's cable over USB clocks the game's output wakes: one per block of input (AudioBridgeEngine's
+		// NotifyCableInputBlock). Windows' cable input arrives in 10 ms bursts, so it keeps the output timer.
+		uint32_t blocks = 0;
+		if (!gatedByPlayerTwoToggle && CableAmpLink::IsDirectUsb())
+		{
+			clockFrames += frames;
+			blocks = clockFrames / periodFrames;
+			clockFrames %= periodFrames;
+		}
 		guard.unlock();
 		if (ready && gameEvent) ::SetEvent(gameEvent);
+		while (blocks--) SharedOutput::NotifyCableInputBlock();
 	}
 
 	// Called under packetMutex. Physical delivery follows capture, not the silence timer.
@@ -231,9 +251,16 @@ namespace Audio::PersistentInput
 	{
 		std::unique_lock<std::mutex> guard(packetMutex);
 		if (!running) return;
-		const UINT64 lastCapture = lastPhysicalTick.load();
-		const UINT64 captureGraceMs = (UINT64(periodFrames) * 2000 + SAMPLE_RATE - 1) / SAMPLE_RATE;
-		if (lastCapture && GetTickCount64() - lastCapture <= captureGraceMs) return;
+		// The silence clock stands in only when the cable has really stopped: nothing for two packets, and never less
+		// than 20 ms. It was timed with GetTickCount64, which moves in 15.6 ms steps, against a grace of two packets:
+		// 20 ms at 480 frames hid that, but at 256 (10.7 ms) or 128 (5.3 ms) the counter stepping just after the latest
+		// 1 ms USB packet looked like a stopped cable, and a packet of silence went into the game's input every few
+		// hundred ms. Game tones only (Tone designer is fed before this), a click each time and one more packet of delay
+		// (2026-10-13). Timed with QPC now.
+		const UINT64 lastCapture = lastPhysicalTime.load();
+		const UINT64 grace = (std::max)(UINT64(periodFrames) * 2 * 10000000 / SAMPLE_RATE, UINT64(200000));
+		if (lastCapture && CaptureTime() - lastCapture <= grace) return;
+		if (lastCapture) ++silenceFills;
 		if (readyFrames) discontinuityPending = true;
 		readyFrames = periodFrames;
 		readyPosition = timelineFrames;
@@ -267,8 +294,10 @@ namespace Audio::PersistentInput
 			physicalPacket = physical;
 			if (physical)
 			{
-				// Bound latency after a delayed consumer, without an ever-growing input backlog.
-				if (availableFrames > periodFrames * 2)
+				// Bound latency after a delayed consumer, without an ever-growing input backlog. The game reads every
+				// ready packet when it wakes, so a backlog only means it woke late; 20 ms of it is caught up, not dropped
+				// (at 128-frame packets "two packets" was 5 ms, a normal late wake, and each drop is a click).
+				if (availableFrames > (std::max)(periodFrames * 2, 960u))
 				{
 					const UINT32 discarded = availableFrames - periodFrames;
 					readFrame = (readFrame + discarded) % RING_FRAMES;
@@ -554,6 +583,8 @@ namespace Audio::PersistentInput
 		HANDLE task = AvSetMmThreadCharacteristicsW(L"Pro Audio", &index);
 		const UINT64 period = UINT64(periodFrames) * 10000000 / SAMPLE_RATE;
 		UINT64 next = CaptureTime() + period;
+		UINT64 lastFillLog = CaptureTime();
+		uint64_t loggedFills = 0;
 		HANDLE events[] = { quitEvent, timer };
 		for (;;)
 		{
@@ -568,6 +599,18 @@ namespace Audio::PersistentInput
 			if (WaitForMultipleObjects(2, events, FALSE, INFINITE) != WAIT_OBJECT_0 + 1) break;
 			const UINT64 now = CaptureTime();
 			Tick(now - period);
+			// Every 30 s, if any: packets of silence the game got while the cable had stopped (unplugged, a USB stall).
+			if (now - lastFillLog >= 300000000ull)
+			{
+				lastFillLog = now;
+				const uint64_t fills = silenceFills.load();
+				if (fills != loggedFills)
+				{
+					LOG_INFO("(PERSISTENT INPUT) " << (gatedByPlayerTwoToggle ? "Player 2" : "Player 1") << " cable stopped delivering; the game got "
+						<< fills - loggedFills << " packet(s) of silence in the last 30 s (" << fills << " this session)" << std::endl);
+					loggedFills = fills;
+				}
+			}
 			next = now - next > period ? now + period : next + period;
 		}
 		if (task) AvRevertMmThreadCharacteristics(task);
@@ -644,8 +687,8 @@ namespace Audio::PersistentInput
 		{
 			if (session->IsGatedByPlayerTwoToggle()) LOG_INFO("(P2 CABLE SCAN) client GetDevicePeriod" << std::endl);
 			if (!normal && !minimum) return E_POINTER;
-			if (normal) *normal = 100000;
-			if (minimum) *minimum = 100000;
+			if (normal) *normal = CableGamePeriod::Period();   // the game sizes its engine from this (CableGamePeriod.hpp)
+			if (minimum) *minimum = CableGamePeriod::Period();
 			return S_OK;
 		}
 		HRESULT STDMETHODCALLTYPE Start() override { return session->Start(); }

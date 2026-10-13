@@ -14,8 +14,9 @@
 // and the cable has no exclusive mode), while the cable itself sends 1 ms isochronous packets. Read here, the guitar
 // arrives every 1 ms: the Tone designer's amp link (CableAmpLink::FeedInput) gets it about 10 ms sooner.
 //
-// What it does not change: the game's own input contract. CaptureSession still hands the game the 480-frame packets it
-// asked for; this is only another physical producer feeding CaptureSession::Publish, in place of the WASAPI capture.
+// It is only another physical producer feeding CaptureSession::Publish, in place of the WASAPI capture. The game's own
+// packets are CaptureSession's (CableGamePeriod, 128 frames by default); 1 ms arrival is what lets them be that small
+// without waiting on a 10 ms burst.
 //
 // There is no fallback between the two: with the audio function on WinUSB, Windows has no cable microphone to fall
 // back to, and with it on the USB Audio driver this class finds no cable. Whichever driver the cable is on decides.

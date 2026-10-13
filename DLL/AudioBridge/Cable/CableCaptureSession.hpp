@@ -72,6 +72,8 @@ namespace Audio::PersistentInput
 		std::atomic<bool> physicalPacket{ false };
 		std::atomic<UINT64> generation{ 0 };
 		std::atomic<UINT64> lastPhysicalTick{ 0 };
+		std::atomic<UINT64> lastPhysicalTime{ 0 };   // CaptureTime (QPC, 100 ns) of the last cable delivery, for Tick
+		std::atomic<uint64_t> silenceFills{ 0 };     // packets of silence Tick gave the game after cable data had flowed
 		WAVEFORMATEX gameFormat{};
 		Microsoft::WRL::ComPtr<CableVolume> volume;
 		UINT32 periodFrames = 480;
@@ -100,5 +102,6 @@ namespace Audio::PersistentInput
 		// The cable read directly over USB (its audio function on WinUSB) instead of `backend`; one or the other.
 		UsbCableCapture usb;
 		bool usbOpen = false;
+		UINT32 clockFrames = 0;   // packetMutex: input frames toward the next NotifyCableInputBlock
 	};
 }

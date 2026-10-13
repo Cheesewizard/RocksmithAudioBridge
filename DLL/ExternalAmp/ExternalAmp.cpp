@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "ExternalAmp.hpp"
 #include "CableAmpLink.hpp"
+#include "ToneDesigner/VstHostLink.hpp"
 #include "Mods/VolumeControl.hpp"
 #include "DropPedal/DropPedal.hpp"
 #include "GameState.hpp"
@@ -275,9 +276,15 @@ namespace ExternalAmp
 					g_snapshot.gameAmpMuted = mute.Muted();
 					g_snapshot.pedalSemitones = pedalSemitones;
 					g_snapshot.link = link;
+					// Blocks the amp missed while Tone designer was loading are not a performance problem: not shown as late.
+					if (!Proxy()) g_snapshot.link.lateBlocks -= (std::min)(g_snapshot.link.lateBlocks, CableAmpLink::LateWhileLoading());
 					g_snapshot.cableHost = proxyLoaded && !Proxy();
 					g_snapshot.cableDirectUsb = CableAmpLink::IsDirectUsb();
+					g_snapshot.cableLatencyMs = CableAmpLink::RecentLatencyMs();
 				}
+				CableAmpLink::LogLatency();   // every 30 s while the cable hosts the link
+				CableAmpLink::SetGuestLoading(VstHostLink::IsLoading());
+				CableAmpLink::Maintain();
 				Sleep(100);
 			}
 		}

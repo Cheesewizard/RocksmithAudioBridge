@@ -6,6 +6,9 @@
 #include <thread>
 #include <wrl.h>
 #include "AsioProxy/OutputGuardDsp.h"
+#include "AsioOutputDevice.hpp"
+#include "ExclusiveOutputDevice.hpp"
+#include "DeviceVolume.hpp"
 #include "ExternalAmp/CableAmpLink.hpp"
 #include "OutputRateMatcher.hpp"
 
@@ -188,6 +191,11 @@ namespace Audio::SharedOutput
 			SetEvent(wake);
 		}
 
+		void SetGamePacketFrames(UINT32 frames) { if (frames) gamePacketFrames.store(frames); }
+		// Frames between a game packet handed over now and the speaker: the FIFO plus what the device holds (Windows'
+		// padding) or will hold (the ASIO / exclusive device's own delay). For GameToneLatency.
+		UINT32 HeardDelayFrames() const { return heardDelayFrames.load(std::memory_order_relaxed); }
+
 		bool ConfigureOutputGuard(bool limiterOn, float ceiling, bool agcOn, float target)
 		{
 			if (!std::isfinite(ceiling) || ceiling <= 0.0f || ceiling > 1.0f) return false;
@@ -216,6 +224,15 @@ namespace Audio::SharedOutput
 
 		void Close()
 		{
+			if (asio)
+			{
+				const bool ranAWhile = asio->Callbacks() > 0;
+				// A driver stuck in its callback is abandoned, never freed under it (AsioOutputDevice::Close).
+				if (asio->Close()) { if (ranAWhile) AsioCrashGuard::Clear(); asio.reset(); }
+				else asio.release();
+				asioStartedAt = 0;
+			}
+			if (exclusive) { exclusive->Close(); exclusive.reset(); asioStartedAt = 0; }
 			if (client && started) client->Stop();
 			started = false;
 			if (clock) { clock->Release(); clock = nullptr; }
@@ -315,8 +332,192 @@ namespace Audio::SharedOutput
 			return fitted > maximum ? normal : fitted;
 		}
 
+		// Cable mode playing through an ASIO interface's own driver ("asio:<driver>", AsioOutputDevice.hpp). Its buffer
+		// size is the one set in the interface's control panel; there is no Windows period, so the Playback buffer
+		// card hides itself (minimum, step and maximum stay 0).
+		HRESULT OpenAsio(const std::wstring& endpoint)
+		{
+			resolvedEndpoint = endpoint;
+			const std::wstring name = AsioOutputDevice::DriverName(endpoint);
+			if (AsioCrashGuard::CrashedLastTime(name))
+			{
+				LOG_WARNING("(ASIO OUTPUT) '" << std::string(name.begin(), name.end()) << "' was opening when the game closed last time; not reopened at"
+					" launch (pick it again on the Output page to try it)" << std::endl);
+				return HRESULT_FROM_WIN32(ERROR_CANCELLED);
+			}
+			AsioCrashGuard::Mark(name);
+			auto device = std::make_unique<AsioOutputDevice>();
+			std::string failure;
+			if (!device->Open(name, [this](float* stereo, uint32_t frames) { AsioFill(stereo, frames); }, failure))
+			{
+				AsioCrashGuard::Clear();   // it refused without taking the game down
+				LOG_WARNING("(ASIO OUTPUT) '" << std::string(name.begin(), name.end()) << "' would not open: " << failure << std::endl);
+				return HRESULT_FROM_WIN32(ERROR_DEVICE_NOT_AVAILABLE);
+			}
+			asio = std::move(device);
+			period = bufferFrames = asio->BufferFrames();
+			// What this buffer waits before it is heard: the driver's own output latency (the ASIO convention includes the
+			// buffer), or one buffer when it reports none.
+			asioDeviceDelay = asio->OutputLatencyFrames() ? asio->OutputLatencyFrames() : asio->BufferFrames();
+			minimum = fundamental = maximum = 0;
+			asioClockQpc = asioClockFrames = 0;
+			outputGuard.Reset(2);
+			return S_OK;
+		}
+
+		// Cable mode on a Windows device in exclusive mode ("excl:<id>", ExclusiveOutputDevice.hpp): the device's own period,
+		// usually ~3 ms, instead of Windows' shared mixer. Driven like an ASIO output: its thread pulls AsioFill.
+		// Devices whose driver stops in event-driven exclusive mode, remembered so the next open goes straight to polling
+		// (the stall is a second of high, broken sound each time). HKCU\Software\RSMods\AsioProxy\ExclusivePolling,
+		// one DWORD per Windows endpoint id.
+		static bool NeedsPolling(const std::wstring& windowsId)
+		{
+			DWORD value = 0, size = sizeof(value);
+			return RegGetValueW(HKEY_CURRENT_USER, L"Software\\RSMods\\AsioProxy\\ExclusivePolling", windowsId.c_str(), RRF_RT_REG_DWORD, nullptr, &value, &size) == ERROR_SUCCESS && value;
+		}
+		static void RememberPolling(const std::wstring& windowsId)
+		{
+			const DWORD value = 1;
+			RegSetKeyValueW(HKEY_CURRENT_USER, L"Software\\RSMods\\AsioProxy\\ExclusivePolling", windowsId.c_str(), REG_DWORD, &value, sizeof(value));
+		}
+
+		HRESULT OpenExclusive(const std::wstring& endpoint, UINT32 desired)
+		{
+			if (endpoint != exclusiveTried)
+			{
+				exclusiveTried = endpoint;
+				exclusiveStage = NeedsPolling(ExclusiveOutputDevice::WindowsId(endpoint)) ? 1 : 0;
+			}
+			if (exclusiveStage >= 2)
+			{
+				// Neither way kept playing: shared mode on the same device, so the player still hears the game. The overlay
+				// sees the device open without "excl:" and says exclusive mode did not work on it.
+				LOG_WARNING("(EXCLUSIVE OUTPUT) This device does not keep playing in exclusive mode; using shared mode on it" << std::endl);
+				return OpenAttempt(ExclusiveOutputDevice::WindowsId(endpoint), desired);
+			}
+			resolvedEndpoint = endpoint;
+			auto device = std::make_unique<ExclusiveOutputDevice>();
+			std::string failure;
+			if (!device->Open(ExclusiveOutputDevice::WindowsId(endpoint), factory, desired, exclusiveStage == 1, [this](float* stereo, uint32_t frames) { AsioFill(stereo, frames); }, failure))
+			{
+				LOG_WARNING("(EXCLUSIVE OUTPUT) Could not open the device in exclusive mode: " << failure << std::endl);
+				exclusiveFailure = failure;
+				return HRESULT_FROM_WIN32(ERROR_DEVICE_NOT_AVAILABLE);
+			}
+			exclusiveFailure.clear();
+			exclusive = std::move(device);
+			period = bufferFrames = exclusive->BufferFrames();
+			asioDeviceDelay = exclusive->OutputLatencyFrames();
+			minimum = fundamental = maximum = 0;
+			asioClockQpc = asioClockFrames = 0;
+			outputGuard.Reset(2);
+			return S_OK;
+		}
+
+		HRESULT StartDevice()
+		{
+			if (exclusive)
+			{
+				if (!exclusive->Start()) return HRESULT_FROM_WIN32(ERROR_DEVICE_NOT_AVAILABLE);
+				asioStartedAt = GetTickCount64();
+				return S_OK;
+			}
+			if (asio)
+			{
+				if (!asio->Start()) return HRESULT_FROM_WIN32(ERROR_DEVICE_NOT_AVAILABLE);
+				asioStartedAt = GetTickCount64();
+				return S_OK;
+			}
+			return client->Start();
+		}
+
+		HRESULT StopDevice()
+		{
+			if (asio) { asio->Stop(); asioStartedAt = 0; return S_OK; }
+			if (exclusive) { exclusive->Stop(); asioStartedAt = 0; return S_OK; }
+			return client->Stop();
+		}
+
+		// The ASIO driver's thread, once per buffer: the same FIFO, rate matcher, Tone designer return and output guard
+		// as Pump, pulled by the interface's clock instead of a Windows event. Always fills the whole buffer (silence
+		// where the game has not delivered yet).
+		void AsioFill(float* stereo, uint32_t frames)
+		{
+			const ULONGLONG now = GetTickCount64();
+			unsigned produced = 0;
+			bool current = false;
+			{
+				std::lock_guard<std::mutex> guard(mutex);
+				if (asioGeneration != status.generation || quit.load() || frames > CAPACITY) return;
+				Expire(now);
+				status.padding = 0;
+				// The game delivers a packet at a time (CableGamePeriod, 128 frames by default) while the interface takes
+				// `frames` at a time, so the FIFO swings by a game packet: keep a packet plus two buffers in hand, and drop
+				// a backlog above that at once.
+				const UINT32 gamePacket = gamePacketFrames.load(std::memory_order_relaxed);
+				const UINT32 target = (std::min)(CAPACITY, gamePacket + frames * 2);
+				if (count > target + (std::max)(gamePacket, frames))
+				{
+					const UINT32 excess = count - target;
+					head = (head + excess) % CAPACITY;
+					count -= excess;
+					status.expiredFrames += excess;
+					++status.trims;
+				}
+				const ULONGLONG oldestFrame = count ? ages[head] : now;
+				unsigned consumed = 0;
+				produced = rateMatcher.Read([this](unsigned frame, unsigned channel) { return fifo[((head + frame) % CAPACITY) * 2 + channel]; }, count, staging.data(), frames, consumed);
+				head = (head + consumed) % CAPACITY;
+				count -= consumed;
+				status.queuedFrames = count;
+				heardDelayFrames.store(count + asioDeviceDelay, std::memory_order_relaxed);
+				if (produced < frames) ++status.emptyObservations;
+				current = produced && now - oldestFrame <= 40;
+				// The interface's clock against QPC over 2 s windows (callback jitter averages out), then the same servo as
+				// the Windows path, centred on the target fill.
+				LARGE_INTEGER qpc{};
+				QueryPerformanceCounter(&qpc);
+				if (!asioClockQpc) { asioClockQpc = static_cast<UINT64>(qpc.QuadPart); asioClockFrames = 0; }
+				else
+				{
+					asioClockFrames += frames;
+					LARGE_INTEGER frequency{};
+					QueryPerformanceFrequency(&frequency);
+					const double seconds = double(static_cast<UINT64>(qpc.QuadPart) - asioClockQpc) / double(frequency.QuadPart);
+					if (seconds >= 2.0)
+					{
+						const double measured = (double(asioClockFrames) / seconds / 48000.0 - 1.0) * 1000000.0;
+						if (std::isfinite(measured) && std::abs(measured) < 5000)
+						{
+							status.clockPpm = status.clockMeasured ? status.clockPpm * 0.9 + measured * 0.1 : measured;
+							status.clockMeasured = true;
+							rateMatcher.Measure(status.clockPpm, double(count) - target);
+							status.correctionPpm = rateMatcher.GetCorrectionPpm();
+						}
+						asioClockQpc = static_cast<UINT64>(qpc.QuadPart);
+						asioClockFrames = 0;
+					}
+				}
+			}
+			if (!current) produced = 0;
+			std::fill(staging.begin() + produced * 2, staging.begin() + frames * 2, 0.0f);
+			CableAmpLink::Render(staging.data(), frames, asioDeviceDelay, frames);   // the Tone designer's return on the cable (no-op otherwise)
+			ApplyOutputGuard(frames);
+			// Exclusive mode skips Windows' own volume: on a device without hardware volume the Output page's device
+			// volume is applied here (DeviceVolume).
+			if (exclusive)
+			{
+				const float gain = DeviceVolume::SoftwareGain();
+				if (gain != 1.0f) for (uint32_t i = 0; i < frames * 2; ++i) staging[i] *= gain;
+			}
+			std::memcpy(stereo, staging.data(), frames * 2 * sizeof(float));
+			lastProgress.store(now);
+		}
+
 		HRESULT OpenAttempt(const std::wstring& endpoint, UINT32 desired)
 		{
+			if (AsioOutputDevice::IsAsioEndpoint(endpoint)) return OpenAsio(endpoint);
+			if (ExclusiveOutputDevice::IsExclusiveEndpoint(endpoint)) return OpenExclusive(endpoint, desired);
 			resolvedEndpoint = endpoint;
 			HRESULT result = factory(resolvedEndpoint, &client);
 			if (SUCCEEDED(result) && !client) result = E_UNEXPECTED;
@@ -395,6 +596,7 @@ namespace Audio::SharedOutput
 				head = (head + consumed) % CAPACITY;
 				count -= consumed;
 				status.queuedFrames = count;
+				heardDelayFrames.store(count + padding + frames, std::memory_order_relaxed);
 			}
 			if (frames)
 			{
@@ -408,7 +610,7 @@ namespace Audio::SharedOutput
 				}
 				if (current)
 				{
-					CableAmpLink::Render(staging.data(), frames);   // the Tone designer's return on the cable (no-op otherwise)
+					CableAmpLink::Render(staging.data(), frames, padding, period);   // the Tone designer's return on the cable (no-op otherwise)
 					ApplyOutputGuard(frames);
 					std::memcpy(destination, staging.data(), frames * 2 * sizeof(float));
 				}
@@ -495,14 +697,16 @@ namespace Audio::SharedOutput
 			while (!quit.load())
 			{
 				if (WaitForSingleObject(wake, 10) == WAIT_FAILED) { Fail(HRESULT_FROM_WIN32(GetLastError()), generation); break; }
-				if (notifications && notifications->changed.exchange(false))
+				// An ASIO output does not care about Windows' device list (headphones plugged in, a device switched on).
+				// Nor an exclusive one: it notices losing its device itself (its watchdog below).
+				if (notifications && notifications->changed.exchange(false) && !asio && !exclusive)
 				{
 					LOG_INFO("(AUDIO ROUTING) Windows devices changed; reopening the configured bridge output" << std::endl);
 					ReapplyOutput();
 				}
 				OutputBackendStatus request = GetStatus();
 				if (!request.generation) continue;
-				if (generation != request.generation || (!client && GetTickCount64() >= nextRetry))
+				if (generation != request.generation || (!client && !asio && !exclusive && GetTickCount64() >= nextRetry))
 				{
 					generation = request.generation;
 					UINT32 desired = 0;
@@ -524,8 +728,9 @@ namespace Audio::SharedOutput
 						std::lock_guard<std::mutex> guard(mutex);
 						if (generation != status.generation || quit.load()) continue;
 						status.state = BackendState::Priming;
+						asioGeneration = generation;   // AsioFill serves only this generation
 					}
-					if (run) { result = client->Start(); started = SUCCEEDED(result); }
+					if (run) { result = StartDevice(); started = SUCCEEDED(result); }
 					if (FAILED(result)) { Fail(result, generation); continue; }
 					{
 						std::lock_guard<std::mutex> guard(mutex);
@@ -544,7 +749,7 @@ namespace Audio::SharedOutput
 						status.clockMeasured = false;
 					}
 				}
-				if (client)
+				if (client || asio || exclusive)
 				{
 					bool run = false;
 					{
@@ -553,11 +758,60 @@ namespace Audio::SharedOutput
 					}
 					if (run != started)
 					{
-						const HRESULT transition = run ? client->Start() : client->Stop();
+						const HRESULT transition = run ? StartDevice() : StopDevice();
 						if (FAILED(transition)) { Fail(transition, generation); continue; }
 						started = run;
 						std::lock_guard<std::mutex> guard(mutex);
 						if (status.generation == generation) status.state = run ? BackendState::Running : BackendState::Priming;
+					}
+					if (exclusive)
+					{
+						// Its own thread does the work (AsioFill). Here: a failure it reported, and a stall watchdog.
+						const ULONGLONG now = GetTickCount64();
+						// A device that played for 10 s and then stopped was unplugged or taken; one that stopped sooner has a
+						// driver that does not keep exclusive mode going this way: next try is polling, then shared mode.
+						const bool brief = !asioStartedAt || now - asioStartedAt < 10000;
+						if (exclusive->TakeResetRequest())
+						{
+							if (brief) ++exclusiveStage;
+							LOG_WARNING("(EXCLUSIVE OUTPUT) The device stopped taking audio after " << exclusive->Callbacks() << " periods"
+								<< (exclusive->Polling() ? " (polling)" : "") << "; reopening it" << std::endl);
+							Fail(AUDCLNT_E_DEVICE_INVALIDATED, generation);
+							continue;
+						}
+						if (!started) { lastProgress.store(now); continue; }
+						const ULONGLONG last = exclusive->LastCallbackTick();
+						if ((last && now - last > 1000) || (!last && asioStartedAt && now - asioStartedAt > 2000))
+						{
+							if (brief && !exclusive->Polling()) RememberPolling(ExclusiveOutputDevice::WindowsId(resolvedEndpoint));
+							if (brief) ++exclusiveStage;
+							LOG_WARNING("(EXCLUSIVE OUTPUT) The device stopped asking for audio after " << exclusive->Callbacks() << " periods"
+								<< (exclusive->Polling() ? " (polling)" : "") << "; reopening it" << (brief && exclusiveStage == 1 ? " polling" : "") << std::endl);
+							Fail(HRESULT_FROM_WIN32(ERROR_TIMEOUT), generation);
+						}
+						continue;
+					}
+					if (asio)
+					{
+						// The driver's own thread does the work (AsioFill). Here: its reset requests, and a stall watchdog.
+						const ULONGLONG now = GetTickCount64();
+						if (asio->TakeResetRequest())
+						{
+							LOG_INFO("(ASIO OUTPUT) '" << std::string(asio->Name().begin(), asio->Name().end()) << "' asked for a reset; reopening it" << std::endl);
+							ReapplyOutput();
+							continue;
+						}
+						if (!started) { lastProgress.store(now); continue; }
+						const ULONGLONG last = asio->LastCallbackTick();
+						if ((last && now - last > 1000) || (!last && asioStartedAt && now - asioStartedAt > 2000))
+						{
+							LOG_WARNING("(ASIO OUTPUT) '" << std::string(asio->Name().begin(), asio->Name().end()) << "' stopped calling back; reopening it" << std::endl);
+							Fail(HRESULT_FROM_WIN32(ERROR_TIMEOUT), generation);
+							continue;
+						}
+						// Ten seconds of playing: it did not take the game down while opening, so the boot guard can let go.
+						if (asioStartedAt && now - asioStartedAt > 10000) AsioCrashGuard::Clear();
+						continue;
 					}
 					const auto began = GetTickCount64();
 					const HRESULT result = Pump(generation);
@@ -577,6 +831,17 @@ namespace Audio::SharedOutput
 
 		static constexpr UINT32 CAPACITY = 4096;
 		static constexpr UINT32 AUTOMATIC_PERIOD_FRAMES = 144;   // 3 ms at 48 kHz, see AutomaticPeriod
+		std::atomic<UINT32> gamePacketFrames{ 480 };             // what the game delivers at a time (OutputSession)
+		std::atomic<UINT32> heardDelayFrames{ 0 };               // HeardDelayFrames
+		std::unique_ptr<AsioOutputDevice> asio;                  // Cable mode on an ASIO interface's own driver (OpenAsio)
+		std::unique_ptr<ExclusiveOutputDevice> exclusive;        // Cable mode on a Windows device in exclusive mode (OpenExclusive)
+		std::string exclusiveFailure;                            // backend thread: why the last exclusive open failed
+		std::wstring exclusiveTried;                             // backend thread: the "excl:" endpoint exclusiveStage is about
+		int exclusiveStage = 0;                                  // 0 event driven, 1 polling, 2 shared mode instead (this session)
+		uint64_t asioGeneration = 0;                             // under mutex: the generation AsioFill serves
+		UINT64 asioClockQpc = 0, asioClockFrames = 0;            // under mutex: AsioFill's clock window
+		ULONGLONG asioStartedAt = 0;                             // backend thread
+		uint32_t asioDeviceDelay = 0;                            // frames until a filled ASIO buffer is heard (latency log)
 		EndpointFactory factory;
 		bool watchDevices;
 		Microsoft::WRL::ComPtr<OutputNotifications> notifications;

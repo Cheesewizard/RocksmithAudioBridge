@@ -41,6 +41,7 @@ namespace ExternalAmp
 		bool cableHost = false;        // the Real Tone Cable hosts the link (no ASIO driver): the block size is ours to pick
 		bool cableDirectUsb = false;   // ...and the cable is read directly over USB
 		int cableBlockSetting = 0;     // cable block size: 0 = Automatic, else 64 / 128 / 256 frames
+		float cableLatencyMs = 0.0f;   // measured guitar-to-speaker delay through the amp sim on the cable (0 = not yet)
 		AmpLink::Status link{};
 	};
 

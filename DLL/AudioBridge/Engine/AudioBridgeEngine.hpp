@@ -57,4 +57,8 @@ namespace Audio::SharedOutput
 	// always paired with output: losing the interface demotes to the cable, and plugging it back in does
 	// nothing until the interface is applied as output, which makes it input and output again.
 	void RefreshProxyOutput();
+	// Player 1's cable read directly over USB: one call per game block of input (CaptureSession::Publish). While
+	// these arrive, the game is woken for output on them instead of on a timer, so it gets its input and gives its
+	// output in step, as one ASIO callback does under RS_ASIO (see OutputSession::SignalGame).
+	void NotifyCableInputBlock();
 }

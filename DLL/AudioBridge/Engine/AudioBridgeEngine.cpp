@@ -24,6 +24,8 @@
 #include <mutex>
 #include <array>
 #include "OutputBackend.hpp"
+#include "CableGamePeriod.hpp"
+#include "GameToneLatency.hpp"
 #include <wrl/client.h>
 #include <functiondiscoverykeys_devpkey.h>
 
@@ -41,6 +43,18 @@ namespace Audio::SharedOutput
 		// Set for the duration of one DispatchControlPreview on the calling thread: the op applies live but writes
 		// nothing to RSMods.ini (the overlay's sliders preview every drag step and save once on release).
 		thread_local bool previewOnly = false;
+
+		// NotifyCableInputBlock -> OutputSession: game blocks of cable input not yet answered with an output wake, when
+		// the last one came, and an event to wake the session's worker (auto-reset, made once for the process).
+		std::atomic<uint32_t> g_inputBlocks{ 0 };
+		std::atomic<uint32_t> g_inputBlockLimit{ 2 };      // ~100 ms of blocks, set by OutputSession::Initialize
+		std::atomic<uint64_t> g_inputBlocksDropped{ 0 };  // over the limit: the game stays that many blocks behind
+		std::atomic<ULONGLONG> g_lastInputBlock{ 0 };
+		HANDLE InputBlockEvent()
+		{
+			static const HANDLE event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+			return event;
+		}
 
 		HRESULT PersistCustomSetting(const char* name, long value)
 		{
@@ -98,8 +112,9 @@ namespace Audio::SharedOutput
 		wchar_t executable[MAX_PATH]{};
 		GetModuleFileNameW(nullptr, executable, MAX_PATH);
 		const auto path = std::filesystem::path(executable).parent_path() / L"RSMods.ini";
-		// A per-device buffer (the old routing window, or a hand edit) wins; otherwise the one Playback buffer setting
-		// on the Audio Bridge tab, [Audio Bridge] OutputPeriodFrames. 0 = Automatic (OutputBackend::AutomaticPeriod).
+		// A per-device buffer (the old routing window, or a hand edit) wins; otherwise the one global setting,
+		// [Audio Bridge] OutputPeriodFrames (once set on the GUI tab, removed 2026-10-13; the overlay Device buffer card
+		// is the control now, saving per device). 0 = Automatic (OutputBackend::AutomaticPeriod).
 		const UINT32 perDevice = GetPrivateProfileIntW((L"Audio Bridge Output Buffer " + endpointId).c_str(), L"PeriodFrames", 0, path.c_str());
 		return perDevice ? perDevice : GetPrivateProfileIntW(L"Audio Bridge", L"OutputPeriodFrames", 0, path.c_str());
 	}
@@ -459,7 +474,7 @@ namespace Audio::SharedOutput
 			return Invoke([&]()
 			{
 				activeEndpoint = endpointId;
-				defaultPeriod = minimumPeriod = 100000;
+				defaultPeriod = minimumPeriod = CableGamePeriod::Period();   // the game sizes its engine from this (CableGamePeriod.hpp)
 				clockFrequency = 48000;
 				return S_OK;
 			});
@@ -474,7 +489,9 @@ namespace Audio::SharedOutput
 			return Invoke([this, format]()
 			{
 				gameFormat = *format;
-				periodFrames = 480;
+				periodFrames = CableGamePeriod::Frames();   // what the game requested is ignored, as RS_ASIO does
+				g_inputBlockLimit.store((std::max)(2u, 4800u / periodFrames));
+				physical->SetGamePacketFrames(periodFrames);
 				gamePacketFrames.store(periodFrames);
 				queue.Initialize(periodFrames * gameFormat.nBlockAlign, 2);
 				converted.resize(periodFrames * 2);
@@ -483,7 +500,7 @@ namespace Audio::SharedOutput
 				const HRESULT result = ConnectOutput(activeEndpoint, ReadSavedPeriod(activeEndpoint));
 				CableAmpLink::Open();   // cable mode: the game DLL hosts the Tone designer's amp link (no ASIO driver here)
 
-				LOG_INFO("(AUDIO ROUTING) Permanent game output initialized: 48 kHz stereo, 480-frame capacity; physical output HRESULT "
+				LOG_INFO("(AUDIO ROUTING) Permanent game output initialized: 48 kHz stereo, " << periodFrames << "-frame game blocks; physical output HRESULT "
 					<< std::hex << result << std::dec << std::endl);
 				return S_OK;
 			});
@@ -877,6 +894,25 @@ namespace Audio::SharedOutput
 			}
 			LARGE_INTEGER now{};
 			QueryPerformanceCounter(&now);
+			// Cable read directly over USB: one output wake per block of cable input, right after it is queued for the
+			// game, instead of on the timer below. Under RS_ASIO one interface callback hands the game its input and
+			// takes its output, so the two never drift; with input on the cable's clock and output on a timer they did,
+			// and at 128-frame blocks an input block landing just after the game's turn left a gap in the game's own
+			// tones only (Tone designer, fed directly, stayed clean; 2026-10-12). The cable is now the game's clock;
+			// the output backend already matches that to the device's.
+			if (GetTickCount64() - g_lastInputBlock.load() < 50)
+			{
+				uint32_t blocks = g_inputBlocks.load();
+				while (blocks && !g_inputBlocks.compare_exchange_weak(blocks, blocks - 1)) {}
+				if (!blocks)
+				{
+					gameWakeOutstanding.store(false);
+					return;
+				}
+				lastGameWakeTick = now.QuadPart;
+				SetEvent(gameEvent);
+				return;
+			}
 			const LONGLONG interval = wakeFrequency * gamePacketFrames.load() / 48000;
 			const LONGLONG due = lastGameWakeTick + interval;
 			if (lastGameWakeTick && now.QuadPart < due)
@@ -928,6 +964,11 @@ namespace Audio::SharedOutput
 				latencyFifoSum += status.queuedFrames;
 				latencyPeriod = status.period;
 				latencyTrims = status.trims;
+				latencyEmpty = status.emptyObservations;
+				latencyExpired = status.expiredFrames;
+				// The output's buffer, for the next start's Automatic game block size (CableGamePeriod.hpp).
+				if (status.state == BackendState::Running)
+					CableGamePeriod::Remember(status.period, AsioOutputDevice::IsAsioEndpoint(status.activeEndpoint));
 				++latencyBackendSamples;
 			}
 			if (now - latencySince < 30000 || !latencyQueueSamples || !latencyBackendSamples || !latencyPackets) return;
@@ -940,7 +981,9 @@ namespace Audio::SharedOutput
 				<< "), game queue avg " << std::fixed << std::setprecision(2) << queueBlocks << " blocks = " << std::setprecision(1) << gameMs
 				<< " ms; Windows period " << latencyPeriod << " frames, device holds " << static_cast<int>(padding) << " + backend FIFO "
 				<< static_cast<int>(fifo) << " frames = " << windowsMs << " ms; output delay about " << gameMs + windowsMs << " ms; backlog trims so far "
-				<< latencyTrims << std::endl);
+				<< latencyTrims << ", device found empty " << latencyEmpty << ", frames expired " << latencyExpired
+				<< (GetTickCount64() - g_lastInputBlock.load() < 50 ? "; game clocked by the cable, waiting wakes " + std::to_string(g_inputBlocks.load())
+					+ ", dropped " + std::to_string(g_inputBlocksDropped.load()) : std::string("; game clocked by a timer")) << std::endl);
 			latencySince = now;
 			latencyQueueSum = latencyQueueSamples = latencyPaddingSum = latencyFifoSum = latencyBackendSamples = 0;
 			latencyPackets = latencyPacketFrames = 0;
@@ -970,7 +1013,12 @@ namespace Audio::SharedOutput
 					for (size_t index = 0; index < samples; ++index) converted[index] = pcm[index] / 32768.0f;
 				}
 				if (packetGenerations[packetReadIndex % 2] == routeGeneration.load())
+				{
+					// Heard after what the backend and the device hold ahead of it: the game tones' delay ends here.
+					GameToneLatency::Output(converted.data(), packetFrames,
+						GameToneLatency::Now100ns() + UINT64(physical->HeardDelayFrames()) * 10000000 / 48000);
 					physical->Submit(converted.data(), packetFrames, packetTimes[packetReadIndex % 2]);
+				}
 				submittedFrames += packetFrames;
 				// Held as the loudest sample since the window last asked, not the last packet alone. A
 				// packet is about ten milliseconds and the window polls every hundred, so a per-packet
@@ -991,10 +1039,11 @@ namespace Audio::SharedOutput
 		{
 			DWORD taskIndex = 0;
 			HANDLE task = AvSetMmThreadCharacteristicsW(L"Pro Audio", &taskIndex);
-			HANDLE events[] = { packetEvent, gameTimer };
+			HANDLE events[] = { packetEvent, gameTimer, InputBlockEvent() };
+			const DWORD eventCount = events[2] ? 3 : 2;
 			while (!quitting.load())
 			{
-				const DWORD wake = WaitForMultipleObjects(2, events, FALSE, 2);
+				const DWORD wake = WaitForMultipleObjects(eventCount, events, FALSE, 2);
 				if (wake == WAIT_FAILED)
 				{
 					streamError.store(HRESULT_FROM_WIN32(GetLastError()));
@@ -1043,7 +1092,7 @@ namespace Audio::SharedOutput
 		uint64_t latencyQueueSum = 0, latencyQueueSamples = 0, latencyPaddingSum = 0, latencyFifoSum = 0, latencyBackendSamples = 0;
 		uint64_t latencyPackets = 0, latencyPacketFrames = 0;
 		UINT32 latencyMinPacket = UINT32_MAX, latencyMaxPacket = 0, latencyPeriod = 0;
-		uint64_t latencyTrims = 0;
+		uint64_t latencyTrims = 0, latencyEmpty = 0, latencyExpired = 0;
 		std::array<BYTE, 1024> diagnosticBlock{}, previousBlock{};
 		UINT32 diagnosticBytes = 0;
 		bool havePreviousBlock = false;
@@ -1654,6 +1703,21 @@ namespace Audio::SharedOutput
 			}
 			return session ? session->HandleControl(request) : PassthroughStatus(request);
 		}
+	}
+
+	void NotifyCableInputBlock()
+	{
+		g_lastInputBlock.store(GetTickCount64());
+		// Every block of input owes the game one output wake, kept until it is given: the game reads its input as it
+		// arrives, so a wake thrown away leaves a block queued inside the game for good and every note that much later.
+		// The first version kept two; each game audio stall longer than that (frame hitches of 40-220 ms in the log)
+		// added a block, and the game's amp drifted from ~20 to ~46 ms behind the guitar in 20 s, heard as an echo
+		// against the strings (recording 2026-10-13). Past ~100 ms behind, the rest is dropped and counted.
+		uint32_t blocks = g_inputBlocks.load();
+		const uint32_t limit = g_inputBlockLimit.load();
+		while (blocks < limit && !g_inputBlocks.compare_exchange_weak(blocks, blocks + 1)) {}
+		if (blocks >= limit) g_inputBlocksDropped.fetch_add(1);
+		if (HANDLE event = InputBlockEvent()) SetEvent(event);
 	}
 
 	ControlResponse DispatchControl(const ControlRequest& request)

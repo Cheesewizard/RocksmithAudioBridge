@@ -36,8 +36,12 @@
 
 namespace AmpLink
 {
-	constexpr wchar_t kMappingName[] = L"Local\\RocksmithAudioBridge.AmpLink.v1";
-	constexpr wchar_t kInputEventName[] = L"Local\\RocksmithAudioBridge.AmpLink.v1.Input";
+	// A test build can give the link a name of its own, so it never meets a running game (the names are session-wide).
+#ifndef AMPLINK_NAME_SUFFIX
+#define AMPLINK_NAME_SUFFIX L""
+#endif
+	constexpr wchar_t kMappingName[] = L"Local\\RocksmithAudioBridge.AmpLink.v1" AMPLINK_NAME_SUFFIX;
+	constexpr wchar_t kInputEventName[] = L"Local\\RocksmithAudioBridge.AmpLink.v1.Input" AMPLINK_NAME_SUFFIX;
 	constexpr LONG kMagic = 0x4B4C4D41;   // "AMLK"
 	constexpr LONG kVersion = 1;
 	constexpr LONG kSlots = 4;            // blocks of history; the guest may be up to 3 blocks behind and still read

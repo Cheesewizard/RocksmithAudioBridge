@@ -28,8 +28,19 @@ namespace CableAmpLink
 
 	// Capture thread: mono float guitar samples (48 kHz).
 	void FeedInput(const float* mono, uint32_t frames) noexcept;
-	// Output device thread: add the guest's return to `stereo` (interleaved float, `frames` frames).
-	void Render(float* stereo, uint32_t frames) noexcept;
+	// Output device thread: add the guest's return to `stereo` (interleaved float, `frames` frames). deviceDelayFrames:
+	// how long the device takes to play what is written now (for the latency measurement only). periodFrames: what the
+	// device takes per pull in steady state (its Windows period or ASIO buffer), which sizes the FIFO target.
+	void Render(float* stereo, uint32_t frames, uint32_t deviceDelayFrames, uint32_t periodFrames) noexcept;
+	// Every 30 s, from a control thread: the measured Tone designer delay, cable in to speaker out, in the log.
+	void LogLatency();
+	// Every 100 ms, from a control thread: Automatic block size steps 64 -> 128 when the amp keeps missing blocks.
+	void Maintain();
+	// Every 100 ms, from the same thread: Tone designer is loading a plugin or a tone (VstHostLink::IsLoading).
+	void SetGuestLoading(bool loading);
+	uint32_t LateWhileLoading();   // late blocks set aside because they came while Tone designer was loading
+	// The same delay, smoothed, for the Amp sim page; 0 until measured.
+	float RecentLatencyMs();
 
 	// Block size between the cable and the guest (Amp sim page, cable players only): 0 = Automatic (64 on direct USB,
 	// 128 on the Windows cable input), else 64 / 128 / 256; 64 is raised to 128 on the Windows input. A change while
