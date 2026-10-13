@@ -24,7 +24,10 @@ namespace Audio::PersistentInput
 		constexpr UCHAR kStreamingAlternate = 1;
 		constexpr UCHAR kEndpoint = 0x82;
 		constexpr ULONG kSampleRate = 48000;
-		constexpr size_t kSlots = 8;               // 8 transfers of one 1 ms frame each in flight
+		// Transfers of one 1 ms frame each, queued ahead. More in the queue adds no delay (each completes as soon as its
+		// frame arrives); it is how long the reader thread may be held up before the stream loses its place. 8 (8 ms)
+		// broke a few times a minute while outputs were being switched (2026-10-12, error 87); 32 gives 32 ms.
+		constexpr size_t kSlots = 32;
 		constexpr DWORD kStallMs = 2000;           // no completion this long = the stream is gone
 
 		HRESULT LastError()
@@ -211,14 +214,65 @@ namespace Audio::PersistentInput
 			return slot.pending;
 		};
 
+		// Queue every slot, the first starting a new stream and the rest continuing it.
+		auto queueAll = [&]()
+		{
+			for (size_t index = 0; index < slots.size(); ++index)
+				if (!submit(*slots[index], index != 0)) return false;
+			return true;
+		};
+		// The stream lost its place in the USB schedule (the reader was held up longer than the queue, or a transfer could
+		// not continue the previous one): cancel what is queued and start again from the next frame. A few milliseconds
+		// are lost, reported as a discontinuity; this used to stop the stream and cost a second or two of silence.
+		auto restart = [&]()
+		{
+			for (Slot* slot : slots) if (slot->pending) CancelIoEx(device, &slot->overlapped);
+			for (Slot* slot : slots)
+			{
+				if (!slot->pending) continue;
+				DWORD ignored = 0;
+				WinUsb_GetOverlappedResult(streaming, &slot->overlapped, &ignored, TRUE);
+				slot->pending = false;
+			}
+			return queueAll();
+		};
+		// Errors that mean the cable is gone; anything else is a lost place in the schedule.
+		auto gone = [](DWORD code)
+		{
+			return code == ERROR_DEVICE_NOT_CONNECTED || code == ERROR_GEN_FAILURE || code == ERROR_FILE_NOT_FOUND
+				|| code == ERROR_BAD_COMMAND || code == ERROR_NO_SUCH_DEVICE || code == ERROR_DEV_NOT_EXIST || code == ERROR_INVALID_HANDLE;
+		};
+
 		bool discontinuity = true;
 		std::string error;
-		for (size_t index = 0; index < slots.size() && error.empty(); ++index)
-			if (!submit(*slots[index], index != 0)) error = "could not start the transfers (error " + std::to_string(GetLastError()) + ")";
+		if (!queueAll()) error = "could not start the transfers (error " + std::to_string(GetLastError()) + ")";
+		unsigned restarts = 0, restartsLogged = 0;
+		ULONGLONG burstStart = 0, lastLog = 0;
+		unsigned burst = 0;
+		DWORD lastCode = 0;
+		// Restarts the stream, or gives up when it keeps breaking (20 in 2 s): then the session reopens the cable.
+		auto recover = [&](DWORD code) -> bool
+		{
+			const ULONGLONG now = GetTickCount64();
+			if (now - burstStart > 2000) { burstStart = now; burst = 0; }
+			lastCode = code;
+			++restarts;
+			discontinuity = true;
+			if (++burst > 20) { error = "the stream kept breaking (error " + std::to_string(code) + ")"; return false; }
+			if (!restart()) { error = "could not queue the transfers again (error " + std::to_string(GetLastError()) + ")"; return false; }
+			return true;
+		};
 
 		std::array<float, 512> samples{};
 		for (size_t next = 0; error.empty(); next = (next + 1) % slots.size())
 		{
+			if (restarts != restartsLogged && GetTickCount64() - lastLog >= 10000)
+			{
+				LOG_WARNING("(USB CABLE) Stream restarted " << restarts - restartsLogged << " time(s) since the last report (error "
+					<< lastCode << "): the reader was held up, a few ms of guitar lost each time" << std::endl);
+				restartsLogged = restarts;
+				lastLog = GetTickCount64();
+			}
 			Slot& slot = *slots[next];
 			const HANDLE waits[] = { quit, slot.overlapped.hEvent };
 			const DWORD wake = WaitForMultipleObjects(2, waits, FALSE, kStallMs);
@@ -228,7 +282,14 @@ namespace Audio::PersistentInput
 			DWORD ignored = 0;
 			const BOOL completed = WinUsb_GetOverlappedResult(streaming, &slot.overlapped, &ignored, FALSE);
 			slot.pending = false;
-			if (!completed) { error = "transfer failed (error " + std::to_string(GetLastError()) + "), cable unplugged?"; break; }
+			if (!completed)
+			{
+				const DWORD code = GetLastError();
+				if (gone(code)) { error = "transfer failed (error " + std::to_string(code) + "), cable unplugged?"; break; }
+				if (!recover(code)) break;
+				next = slots.size() - 1;   // the loop's step makes it 0: the restarted queue begins at slot 0
+				continue;
+			}
 
 			const USBD_ISO_PACKET_DESCRIPTOR& packet = slot.packet;
 			const bool valid = packet.Status == 0 && packet.Length > 0 && packet.Length % 2 == 0
@@ -247,8 +308,11 @@ namespace Audio::PersistentInput
 
 			if (!submit(slot, true))
 			{
-				if (!submit(slot, false)) { error = "could not queue a transfer (error " + std::to_string(GetLastError()) + ")"; break; }
-				discontinuity = true;
+				const DWORD code = GetLastError();
+				if (gone(code)) { error = "could not queue a transfer (error " + std::to_string(code) + "), cable unplugged?"; break; }
+				if (!recover(code)) break;
+				next = slots.size() - 1;
+				continue;
 			}
 		}
 
