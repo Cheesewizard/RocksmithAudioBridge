@@ -40,6 +40,9 @@ NAudio                    MIT License, (c) Mark Heath and contributors.
 TwitchLib                 MIT License, (c) TwitchLib contributors.
 Microsoft Detours         DLL/Lib/Detours (header dated 1995-2001), inherited
                           from upstream RSMods.
+UsbDk 1.0.22              Apache License 2.0, (c) daynix. The signed x64 MSI
+                          and licence are bundled under Installer/Resources/UsbDk
+                          and copied to RSMods/UsbDk for the direct USB capture.
 
 The settings application also bundles libraries inherited unchanged from
 upstream RSMods (GUI/Lib: Rocksmith Custom Song Toolkit libraries, 7-Zip,

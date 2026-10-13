@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Text;
 using Microsoft.Win32;
 
@@ -243,10 +244,10 @@ namespace RSMods.Audio
 			}
 			var info = new ProcessStartInfo(regsvr, args)
 			{
-				UseShellExecute = true,      // required for the "runas" (elevation) verb
-				Verb = "runas",
+				UseShellExecute = !IsAdministrator(),
 				WindowStyle = ProcessWindowStyle.Hidden,
 			};
+			if (!IsAdministrator()) info.Verb = "runas";
 			try
 			{
 				using (var process = Process.Start(info))
@@ -355,14 +356,14 @@ namespace RSMods.Audio
 
 		/// <summary>The driver is part of the mod: the installer sets it up on every Install / Reinstall / Repair
 		/// (through RSMods.exe --install-audio-bridge-driver "&lt;game folder&gt;") and its Uninstall removes it.
-		/// Registers the driver and its 64-bit guest (one admin prompt, skipped when the registration is already
-		/// current), then records the interface it wraps when one can be chosen. Throws OperationCanceledException
+		/// Installs the shared UsbDk dependency and registers the driver and its 64-bit guest (one admin prompt,
+		/// skipped when each is already current). The caller records the interface it wraps after elevation. Throws OperationCanceledException
 		/// when the prompt is declined.</summary>
 		public static void Install(string gameDirectory)
 		{
+			UsbDkSetup.Install(gameDirectory);
 			string driverPath = Path.Combine(Path.GetFullPath(gameDirectory), "RocksmithAudioBridgeAsio.dll");
 			if (!IsProxyRegistrationCurrent(driverPath)) Register(driverPath);
-			FillTarget(gameDirectory);
 		}
 
 		/// <summary>Records the interface the bridge wraps when none is saved yet and one can be chosen (see
@@ -380,6 +381,7 @@ namespace RSMods.Audio
 		}
 
 		public const string InstallArgument = "--install-audio-bridge-driver";
+		private const string ELEVATED_MARKER = "--elevated";
 
 		/// <summary>Exit codes for the installer: 0 set up, 2 the admin prompt was declined, 1 any other failure
 		/// (details in RSMods\AudioBridgeDriverInstall.log).</summary>
@@ -390,17 +392,76 @@ namespace RSMods.Audio
 			string log = Path.Combine(System.Windows.Forms.Application.StartupPath, "AudioBridgeDriverInstall.log");
 			try
 			{
-				if (arguments.Length != 2) throw new ArgumentException("Usage: " + InstallArgument + " <Rocksmith directory>");
+				if (arguments.Length != 2 && !(arguments.Length == 3 && string.Equals(arguments[2], ELEVATED_MARKER, StringComparison.OrdinalIgnoreCase)))
+					throw new ArgumentException("Usage: " + InstallArgument + " <Rocksmith directory>");
+				bool elevatedChild = arguments.Length == 3;
+				if (!elevatedChild && !IsAdministrator())
+				{
+					exitCode = RunElevated(arguments[1]);
+					if (exitCode == 0) CompletePerUserSetup(arguments[1], log);
+					return true;
+				}
 				Install(arguments[1]);
-				// A fresh install also points RS_ASIO.ini at the bridge, backing the player's file up first. Only a
-				// file nobody set up yet that uses one interface throughout (RsAsioIniSetup.SetUpOnInstall).
-				string iniSetup = RsAsioIniSetup.SetUpOnInstall(arguments[1]);
-				string target = ReadTarget();
-				File.WriteAllText(log, "Driver registered; " + (string.IsNullOrEmpty(target) ? "no interface chosen yet." : "wraps " + target + ".") + Environment.NewLine + iniSetup);
+				if (elevatedChild) return true;
+				CompletePerUserSetup(arguments[1], log);
 			}
 			catch (OperationCanceledException error) { exitCode = 2; File.WriteAllText(log, error.Message); }
 			catch (Exception error) { exitCode = 1; File.WriteAllText(log, error.ToString()); }
 			return true;
+		}
+
+		private static void CompletePerUserSetup(string gameDirectory, string log)
+		{
+			// A fresh install also points RS_ASIO.ini at the bridge, backing the player's file up first. Only a
+			// file nobody set up yet that uses one interface throughout (RsAsioIniSetup.SetUpOnInstall).
+			FillTarget(gameDirectory);
+			string iniSetup = RsAsioIniSetup.SetUpOnInstall(gameDirectory);
+			string target = ReadTarget();
+			File.WriteAllText(log, "Driver registered; " + (string.IsNullOrEmpty(target) ? "no interface chosen yet." : "wraps " + target + ".") + Environment.NewLine + iniSetup);
+		}
+
+		private static int RunElevated(string gameDirectory)
+		{
+			string executable = System.Reflection.Assembly.GetExecutingAssembly().Location;
+			var info = new ProcessStartInfo(executable, QuoteArgument(InstallArgument) + " " + QuoteArgument(gameDirectory) + " " + QuoteArgument(ELEVATED_MARKER))
+			{
+				UseShellExecute = true,
+				Verb = "runas",
+				WindowStyle = ProcessWindowStyle.Hidden,
+			};
+			try
+			{
+				using (var process = Process.Start(info))
+				{
+					process.WaitForExit();
+					return process.ExitCode;
+				}
+			}
+			catch (Win32Exception error) when (error.NativeErrorCode == 1223)
+			{
+				throw new OperationCanceledException("Installing Rocksmith Audio Bridge needs one Windows admin approval, and the prompt was declined.");
+			}
+		}
+
+		private static string QuoteArgument(string argument)
+		{
+			var builder = new StringBuilder("\"");
+			int backslashes = 0;
+			foreach (char character in argument)
+			{
+				if (character == '\\') { backslashes++; continue; }
+				if (character == '"') builder.Append('\\', backslashes * 2 + 1).Append('"');
+				else builder.Append('\\', backslashes).Append(character);
+				backslashes = 0;
+			}
+			builder.Append('\\', backslashes * 2).Append('"');
+			return builder.ToString();
+		}
+
+		private static bool IsAdministrator()
+		{
+			using (var identity = WindowsIdentity.GetCurrent())
+				return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
 		}
 
 		/// <summary>Read-only: RS_ASIO.ini's [Asio.Output] Driver, or "" when the file or line is missing.</summary>

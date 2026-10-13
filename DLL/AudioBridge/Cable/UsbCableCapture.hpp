@@ -7,8 +7,7 @@
 #include <thread>
 #include <vector>
 
-// The Real Tone Cable read directly over USB, for players who moved the cable's audio function to Microsoft's in-box
-// WinUSB driver (the opt-in; binding it is an installer step).
+// The Real Tone Cable read directly over USB through the installed UsbDk runtime.
 //
 // Why: Windows' audio engine hands the cable's input over in 10 ms packets (480 frames, its minimum for this device,
 // and the cable has no exclusive mode), while the cable itself sends 1 ms isochronous packets. Read here, the guitar
@@ -18,8 +17,8 @@
 // packets are CaptureSession's (CableGamePeriod, 128 frames by default); 1 ms arrival is what lets them be that small
 // without waiting on a 10 ms burst.
 //
-// There is no fallback between the two: with the audio function on WinUSB, Windows has no cable microphone to fall
-// back to, and with it on the USB Audio driver this class finds no cable. Whichever driver the cable is on decides.
+// There is no fallback inside this class: UsbDk owns the redirected function while capture is active, and the normal
+// WASAPI path remains the separate CaptureSession producer when UsbDk is unavailable.
 //
 // Contract with the device (verified on the cable 2026-10-12 with a standalone capture test): VID 12BA PID 00FF,
 // full speed, audio streaming interface 1 alternate setting 1, isochronous IN endpoint 0x82, at most 100 bytes per
@@ -33,8 +32,7 @@ namespace Audio::PersistentInput
 		// before this packet. Called on the capture thread every millisecond; must not block.
 		using Sink = std::function<void(const float* samples, UINT32 frames, UINT64 timestamp, bool discontinuity)>;
 
-		// Device paths of cables whose audio function is on WinUSB with this project's interface GUID, sorted (the same
-		// player-to-cable rule as the WASAPI cables: Player 1 the first, Player 2 the second).
+		// Serialized UsbDk device identities, sorted (the same player-to-cable rule as the WASAPI cables).
 		static std::vector<std::wstring> FindCables();
 
 		UsbCableCapture() = default;
@@ -58,9 +56,7 @@ namespace Audio::PersistentInput
 		std::wstring path;
 		Sink sink;
 		HANDLE device = INVALID_HANDLE_VALUE;
-		void* root = nullptr;        // WINUSB_INTERFACE_HANDLE of interface 0 (audio control)
-		void* streaming = nullptr;   // WINUSB_INTERFACE_HANDLE of interface 1 (audio streaming)
-		bool alternateSelected = false;
+		HANDLE systemHandle = nullptr;
 		std::vector<Slot*> slots;
 		HANDLE quit = nullptr;
 		std::thread worker;

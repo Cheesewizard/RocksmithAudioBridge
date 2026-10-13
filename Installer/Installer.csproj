@@ -187,6 +187,8 @@
     <Content Include="Resources\RSModsGUI\X360.dll" />
     <Content Include="Resources\RSModsGUI\zlib.net.dll" />
     <Content Include="Resources\xinput1_3.dll" />
+    <Content Include="Resources\UsbDk\UsbDk_1.0.22_x64.msi" />
+    <Content Include="Resources\UsbDk\LICENSE.txt" />
     <None Include="Assets\LogoX256.ico" />
     <Content Include="LogoX256.ico" />
     <Content Include="Resources\RSModsGUI\ddc\ddc.exe" />

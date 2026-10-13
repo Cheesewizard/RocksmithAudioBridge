@@ -25,6 +25,7 @@ namespace RS2014_Mod_Installer
         {
             "xinput1_3.dll", "xinput1_3.pdb", "RocksmithAudioBridgeAsio.dll", "RocksmithAudioBridgeAsio64.dll", "RocksmithAudioBridgeVstHost.exe", ".rsmods-audio-mode.lock",
             @"RSMods\RSMods.exe", @"RSMods\RSMods.exe.config", @"RSMods\RocksmithAudioBridge.dll", @"RSMods\RSMods.pdb",
+            @"RSMods\UsbDk\UsbDk_1.0.22_x64.msi", @"RSMods\UsbDk\LICENSE.txt", @"RSMods\UsbDk\UsbDkInstall.log",
             "RSMods.exe", "RSMods.exe.config", "RocksmithAudioBridge.dll", "RSMods.pdb",
         };
         // Written by the menu tool next to RSMods.exe. Kept when removing the menu entry failed, since the uninstall
