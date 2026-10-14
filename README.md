@@ -38,6 +38,7 @@ https://github.com/user-attachments/assets/1b51d057-285e-4ded-a113-5c25af1f3346
 - [Drop Pedal](#drop-pedal)
 - [Speaker Mode](#speaker-mode)
 - [Note by Note (beta)](#note-by-note-beta)
+- [Tone designer](#tone-designer)
 - [External amp](#external-amp)
 - [Recording](#recording)
 - [Mixer](#mixer)
@@ -50,12 +51,15 @@ https://github.com/user-attachments/assets/1b51d057-285e-4ded-a113-5c25af1f3346
 2. Download `RocksmithAudioBridge-Installer.exe` from the
    [latest release](https://github.com/Cheesewizard/RocksmithAudioBridge/releases).
 3. Run it and press **Install**. Accept the Windows admin prompt; it registers
-   the Audio Bridge ASIO driver.
+   the Audio Bridge ASIO driver and installs UsbDk, which the Real Tone Cable's
+   direct USB read uses.
+4. **Restart your PC** when the installer asks. UsbDk only starts after a
+   restart; until then the cable still works, but with Windows' usual delay.
 
 The installer includes the full RSMods suite, so you do not need to install
 RSMods first. Run it again to **Reinstall / Repair** (for example after a Steam
 file check) or **Uninstall**. Uninstall asks before removing your settings and
-never touches your recordings.
+UsbDk, and never touches your recordings.
 
 Requirements: the Steam version of Rocksmith 2014 Remastered on Windows, and
 the MS Visual C++ 2015-2019 redistributable. Works with a Real Tone Cable or an
@@ -77,6 +81,12 @@ connected.
 
 With an ASIO interface, the **ASIO bridge driver** row shows that the driver is
 installed and which interface it is using.
+
+The **Audit** tab checks the basics for your guitar input (Rocksmith's audio
+settings, RS_ASIO or the cable) and offers a fix where it can. The RS_ASIO
+Settings tab shows its result on a small Audit card. If something goes wrong,
+**Make bug report** on the Rocksmith Audio Bridge tab zips your logs and
+settings and opens an email to the developer.
 
 ## The overlay
 
@@ -105,7 +115,8 @@ playback device, or to whichever one you pick in
 [Output switching](#output-switching).
 
 **Needs:** nothing with a Real Tone Cable. With an ASIO interface, set the
-Audio Bridge driver in `RS_ASIO.ini`.
+Audio Bridge driver in `RS_ASIO.ini` (**Set up for me** on the Audit tab can do
+it for you).
 
 ## Drop Pedal
 
@@ -163,6 +174,20 @@ colours, and dragging the on-screen readout into place).
 Works on guitar and bass arrangements. Bass support is experimental: it uses
 the game's own detection with a bass-trained machine-learning model.
 
+## Tone designer
+
+Play through your own VST3 amp sims and pedals instead of Rocksmith's amp. The
+plugins run in a separate 64-bit host, so 64-bit plugins work in the 32-bit game
+and a plugin that crashes never takes the game with it. Build a chain of up to
+8 plugins, save it as a tone, and give songs their own tone that loads when the
+song starts.
+
+Works with an ASIO interface and with the Real Tone Cable. With the cable, the
+bridge reads it directly over USB through UsbDk when it can, about 10 ms sooner
+than the Windows cable input, and uses the Windows input otherwise.
+
+**Overlay page:** Amp sim, Tone designer tab.
+
 ## External amp
 
 Play through your own amp sim, such as AmpliTube 5, instead of Rocksmith's amp,
@@ -178,10 +203,14 @@ the outputs to **Rocksmith out L** and **Rocksmith out R**.
 
 <img src=".github/images/external-amp-amplitube-setup.png" alt="AmpliTube 5 audio settings using Rocksmith Audio Bridge ASIO" width="600">
 
-**Overlay page:** External amp (status, return level, safety buffer).
+**Overlay page:** Amp sim, External app tab (status, return level). The safety
+buffer is on the page's Amp link card.
 
 **Needs:** an ASIO interface with the Audio Bridge driver set as the `Driver` in
-`RS_ASIO.ini`. The mod never edits `RS_ASIO.ini` for you.
+`RS_ASIO.ini`. **Set up for me** on the settings app's Audit tab can do this: it
+backs up your file first, and **Restore** puts the original back. Nothing else
+in the mod changes `RS_ASIO.ini` on its own, apart from a fresh install setting
+up a file nobody has set up yet (backed up the same way).
 
 ## Recording
 
@@ -251,7 +280,8 @@ long way towards keeping it going. Thank you!
 
 ## Reporting problems
 
-Report bugs [here](https://github.com/Cheesewizard/RocksmithAudioBridge/issues), not on
+The quickest way is **Make bug report** on the settings app's Rocksmith Audio
+Bridge tab. Or report bugs [here](https://github.com/Cheesewizard/RocksmithAudioBridge/issues), not on
 the RSMods tracker. A bug in an inherited RSMods feature that also happens on
 plain RSMods belongs [upstream](https://github.com/Lovrom8/RSMods/issues).
 

@@ -1,24 +1,25 @@
-# Rocksmith Audio Bridge 4.2 release notes (draft)
+# Rocksmith Audio Bridge 4.2 beta release notes
 
 Two big additions: the **Tone designer**, which plays your guitar through your own VST3 plugins (amp sims, pedals, NAM captures) inside Rocksmith, and **live audio routing**, which lets you pick any interface and channel for each player while the game runs. Real Tone Cable players get both, plus much lower latency. To update, run the installer over your existing install; your `RSMods.ini` settings and key bindings are kept.
 
 ## RS_ASIO
-ASIO users need [RS_ASIO](https://github.com/mdias/rs_asio/releases) 0.6.1 or newer; 0.7.2 or newer is recommended. The new Audit tab in the settings app checks this for you.
+ASIO users need [RS_ASIO](https://github.com/mdias/rs_asio/releases) 0.6.1 or newer; 0.7.2 or newer is recommended. The settings app's new Audit tab checks this for you.
 
 ## New
 
 ### Tone designer (VST3 amp sims and pedals)
-Open it from the overlay's **Amp sim** page (`\` in game). Your plugins run in a separate 64-bit program, so modern 64-bit plugins work in 32-bit Rocksmith, and a plugin that crashes never takes the game with it.
+Open it from the overlay's **Amp sim** page (`\` in game). Your plugins run in a separate 64-bit program, so modern 64-bit plugins work in 32-bit Rocksmith, and a plugin that crashes does not take the game down with it.
 - **Pedalboard:** up to 8 plugins in a chain. Drag plugins from the browser onto the board, drag pedals to reorder or replace, click a footswitch to bypass, double-click to open the plugin's window. Each plugin has its own window and remembers where you put it. Scroll wheel or middle-drag moves along a long chain.
 - **Tones:** save the whole chain with every plugin's settings as a tone. Tones can sit in folders, be favourited, and be renamed, moved or deleted several at a time. Previous / next arrows step through them.
 - **Song tones:** give a song its own tone and it loads when the song starts. Pick a default tone for songs without one. A **Songs** pane lists your whole library with each song's tone and how long it took to load; drag a tone onto songs to assign it.
 - **The game names your tone:** Rocksmith's own TONE SWITCH readout appears when a Tone designer tone switches in, with your tone's name.
 - **Fast tone changes:** plugins that leave the chain stay loaded for a while, the plugins a highlighted song needs are loaded in the background before you start it, and any plugin can be set to **Always keep loaded** from its right-click menu. Tones that share plugins switch without reloading them.
+- **Reload a plugin:** right-click it in the plugin browser and pick **Reload**, or right-click a pedal and pick **Reload plugin**. Every copy of that plugin is unloaded and loaded again from scratch with its settings kept, for plugins that only see new content, such as tones you imported into them, when they start. The rest of the chain keeps playing meanwhile.
 - **Standby:** the power button switches the Tone designer off (the game's amp comes back) but keeps the plugins loaded, so switching it on again is instant.
 - **Compare with the game's amp** for quick A/B, input and output trims with meters that stay the same for every tone, and **Start with the game**.
 - **Backups:** File > Backups zips your tones, song tones and plugin settings. One is made each day on its own (the newest 7 are kept) and any of them can be restored.
-- **Crash recovery:** if a plugin crashes, the Tone designer names it, restarts, and loads your tone and the song's tone again. After three crashes in five minutes it stays off and says so.
-- **Works with the Real Tone Cable** as well as with an ASIO interface. With the cable, the Amp sim page has a **Block size** setting (Automatic, 64, 128, 256).
+- **Crash recovery:** if a plugin crashes, the Tone designer names it, restarts, and loads your tone and the song's tone again. It restarts up to three times in five minutes; after that a crash leaves it off and it says so.
+- **Works with the Real Tone Cable** as well as with an ASIO interface. With the cable, the Amp sim page has an **Amp sim block** setting (Automatic, 64, 128, 256).
 
 The VST host is built on JUCE and licensed AGPLv3; the rest of the mod stays MIT.
 
@@ -29,24 +30,25 @@ The External amp and Tone designer pages are now one **Amp sim** page: an Amp li
 With `RS_ASIO.ini` pointed at the Audio Bridge you used to lose RS_ASIO's per-section devices and channels. The bridge now does that routing itself, and every change applies while you play:
 - **Output page, Routing card:** pick the output pair, and for Player 1, Player 2 and the mic the interface, input channel and clock. Each input can come from a different ASIO interface; the bridge keeps it in sync with the output's clock.
 - **Switch output** lists every ASIO interface and Windows device, grouped. ASIO4ALL and other wrapper drivers no longer block switching.
-- The settings app's Audio Bridge tab has the same **ASIO interface** and **Input interface** pickers, live while the game runs.
+- The settings app's Rocksmith Audio Bridge tab has the same **ASIO interface** and **Input interface** pickers, live while the game runs.
 
-### Real Tone Cable: lower latency (in testing)
-- **Smaller game engine blocks:** the game's own amps now run at a small block size in Cable mode (Automatic follows your output; Overlay **Game engine** card; needs a restart), instead of 10 ms blocks.
-- **Play through an ASIO interface or exclusive mode:** in Cable mode the Output page can play the game through an ASIO interface's own driver (the guitar stays on the cable), or a Windows device in **Exclusive mode** for its smallest buffer. Either cuts most of the Windows mixer's delay. While the game runs, other programs cannot play on that device.
-- **Direct USB read (advanced, opt-in):** a Real Tone Cable switched to Windows' WinUSB driver is read directly every millisecond instead of in 10 ms packets, about 10 ms sooner. Without that switch nothing changes.
-- **Guitar to ear readout:** the overlay header shows the measured delay from the cable to your ears, for the Tone designer and for the game's own tones.
+### Real Tone Cable: lower latency
+- **Smaller game engine blocks:** the game's own amps now run at a small block size in Cable mode instead of 10 ms blocks. Pick it on the Output page's **Game engine** card: Automatic (follows your output), 64, 128, 256 or 512. **Apply now** switches without a restart; otherwise it applies at the next game start.
+- **Play through an ASIO interface or exclusive mode:** in Cable mode the Output page can play the game through an ASIO interface's own driver (the guitar stays on the cable), or a Windows device in **Exclusive mode** for its smallest buffer. Either cuts most of the Windows mixer's delay. Other programs cannot open that device while the game runs, so **Hear other apps here** (on by default) mixes YouTube, Discord and the rest into it for you.
+- **Direct USB read:** the bridge reads the cable straight over USB every millisecond instead of in Windows' 10 ms packets, so your guitar reaches the Tone designer about 10 ms sooner. It uses UsbDk (Apache 2.0, by Red Hat and Daynix), which the bridge driver install adds to Windows. **Restart your PC after installing:** UsbDk only starts after a restart, and the installer asks you to. Until then the cable works through Windows as before, with its usual delay. It is tried first; when UsbDk is missing or does not see the cable, the bridge uses the Windows cable input as before. Outside the game the cable keeps its normal Windows driver. Uninstall asks whether to remove UsbDk too (Yes by default when the installer put it there). If UsbDk cannot be installed, the install still finishes with a warning, and only the direct USB read is unavailable.
+- **Guitar to ear readout:** the overlay header estimates the delay from the cable to your ears: for the Tone designer from its audio timing, and for the game's own tones from your picks (the rougher of the two). Treat both as a guide, not a calibrated measurement. General > Display > **Latency readout** shows a compact one on the game screen (it needs the Audio diagnostics HUD).
 - **Device volume** on the Output page, and a warning when Windows has the device muted or at 0.
 
 ### Settings app
-- **RS_ASIO tab is back** (it was hidden in 4.0 and 4.1), with **Set up for me**: it points `RS_ASIO.ini` at the Audio Bridge, carries your interfaces and channels over, and backs up your original first. **Restore original** puts it back, and uninstalling restores it too.
 - **Audit tab:** checks the basics for your input mode. Both modes: Rocksmith's own audio settings against the recommended values, with **Use recommended**. ASIO: RS_ASIO installed and set up, the bridge's interface, and why it failed last launch. Cable: the cable is visible to Windows, and microphone privacy allows the game.
-- **Make bug report** on the Audio Bridge tab: zips the logs and settings that explain a bad launch, removes your Windows user name from them, and opens a pre-filled email.
+- **Set up for me** (on the Audit tab, ASIO): points `RS_ASIO.ini` at the Audio Bridge, carries your interfaces and channels over, and backs up your original first. **Restore** puts your original back, and uninstalling restores it too.
+- **Make bug report** on the Rocksmith Audio Bridge tab: zips the logs and settings that explain a bad launch, removes your Windows user name from them, and opens an email to the developer.
 
 ### Safer audio setup
 - **Never boots twice into a setup that crashed the game.** Some ASIO drivers crash the whole game (Realtek ASIO used as an input is one). The bridge remembers the last setup that worked; after a crash it goes back to it, or opens no interface until you pick one, and the Output page says what happened.
 - **Says why the guitar is silent:** when your interface will not open (most often because another app holds it: its control app, a DAW, OBS), the Output page shows "Not open" with the reason and what to close, and the settings app shows it after the game closes.
 - **Silence guitar while tuning** (General page, off by default) mutes the game's amp, the Tone designer and external amp apps in the tuner screens.
+- **One log:** the bridge driver now writes into `RSMods_debug.txt`, so one log holds the whole audio story.
 
 ## Fixes
 - **No silence after changing an interface's setup.** Switching a device on or off in ASIO4ALL, or changing the buffer size in an interface's control panel, left the game playing into a stale channel list. The bridge now reopens the interface by itself.
@@ -55,18 +57,24 @@ With `RS_ASIO.ini` pointed at the Audio Bridge you used to lose RS_ASIO's per-se
 - **The overlay no longer opens and shuts in one press**, or reopens right after closing.
 - **The settings app no longer reverts changes made in the in-game overlay** (Note by Note, HUD layout, Drop Pedal and audio settings) when you change something with it open.
 - **The settings app finds the game folder by itself again** instead of sometimes asking where Rocksmith is.
-- Typing in an overlay text field no longer moves the song list behind it.
+- **The RS_ASIO Settings tab shows again.** 4.0 and 4.1 hid it by mistake. It appears whenever `RS_ASIO.ini` exists, now with a small Audit card that shows the result and opens the audit.
 - Slider hints open above the slider, not over the value you are setting.
-- The bridge driver now writes into `RSMods_debug.txt`, so one log holds the whole audio story.
 
 ## Known issues
 - Rocksmith can crash on PCs where Windows forces **Mandatory ASLR** on every program (it moves the game in memory, so no mod can patch it safely). Turn it off for `Rocksmith2014.exe` in Windows Security > App & browser control > Exploit protection > Program settings.
 - Speaker Mode: on a heavily loaded PC, a short high-pitched tone can play while a song loads. Starting at a moderate volume is a good habit.
 - Two-player Drop Pedal works when both players use the same kind of input, both ASIO or both Real Tone Cable.
+- The Tone designer plays one guitar (Player 1). For two-player songs, use the game's amp.
 - With auto-tuning on, the Drop Pedal / Speaker Mode shift is sometimes applied when the song loads rather than while you browse the song list.
 - Note by Note is in beta. Some visuals are still being polished: note markers during holds, bends and loop restarts, and the section colour on the Riff Repeater timeline.
 
-Report problems with the **Make bug report** button on the settings app's Audio Bridge tab, or on [this repository](https://github.com/Cheesewizard/RocksmithAudioBridge/issues).
+## Troubleshooting
+- **Real Tone Cable feels as slow as before, or the game shows "Restart Windows to finish installing the Real Tone Cable's low-latency driver (UsbDk)".** The direct USB read needs UsbDk, which only starts after Windows restarts. Restart your PC and start the game again. Until then the cable still works, through Windows, with about 10 ms more delay. `RSMods_debug.txt` says which case you are in: a line starting `(PERSISTENT INPUT) Direct USB is not active` gives the reason (restart needed, or UsbDk not installed: run the installer again, then restart), and `Real Tone Cable opened directly over USB` means it is working.
+
+## Coming next
+The next update brings stability fixes from this beta's reports and support for Rocksmith's **Learn to Play** update.
+
+Report problems with the **Make bug report** button on the settings app's Rocksmith Audio Bridge tab, or on [this repository](https://github.com/Cheesewizard/RocksmithAudioBridge/issues).
 
 ---
 
