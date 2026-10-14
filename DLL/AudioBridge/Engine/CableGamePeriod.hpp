@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <atomic>
 
-// The block size the game's own audio engine runs at in Cable mode (2026-10-12).
+// The block size the game's own audio engine runs at in Cable mode.
 //
 // The game sizes its engine (Wwise, the in-game amps and pedals, note detection) from the period its devices report.
 // Our virtual cable input and game output used to report 10 ms, so the game ran 480-frame blocks and every in-game
@@ -60,7 +60,7 @@ namespace Audio::CableGamePeriod
 		const DWORD buffer = Detail::Read(L"CableOutputBufferFrames", 0);
 		if (!buffer) return 128;
 		// Windows outputs: at most 144 (3 ms, the bridge's own Windows default). 256 on a 336-frame headphone device only
-		// added delay to every game tone (2026-10-13).
+		// added delay to every game tone.
 		return Detail::Clamp(Detail::Read(L"CableOutputIsAsio", 0) ? buffer : (std::min)(buffer, DWORD{ 144 }));
 	}
 

@@ -20,7 +20,7 @@
 // There is no fallback inside this class: UsbDk owns the redirected function while capture is active, and the normal
 // WASAPI path remains the separate CaptureSession producer when UsbDk is unavailable.
 //
-// Contract with the device (verified on the cable 2026-10-12 with a standalone capture test): VID 12BA PID 00FF,
+// Contract with the device (verified on the cable with a standalone capture test): VID 12BA PID 00FF,
 // full speed, audio streaming interface 1 alternate setting 1, isochronous IN endpoint 0x82, at most 100 bytes per
 // 1 ms frame, 16-bit mono PCM, sample rate set with UAC 1 SET_CUR on the endpoint. Anything else is refused.
 namespace Audio::PersistentInput
@@ -34,6 +34,8 @@ namespace Audio::PersistentInput
 
 		// Serialized UsbDk device identities, sorted (the same player-to-cable rule as the WASAPI cables).
 		static std::vector<std::wstring> FindCables();
+		// UsbDk's runtime library is installed (its driver may still need a Windows restart to see a cable).
+		static bool IsRuntimeInstalled();
 
 		UsbCableCapture() = default;
 		~UsbCableCapture();

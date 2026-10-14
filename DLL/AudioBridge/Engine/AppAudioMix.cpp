@@ -80,10 +80,10 @@ namespace Audio::AppAudioMix
 			variant.blob.cbSize = sizeof(params);
 			variant.blob.pBlobData = reinterpret_cast<BYTE*>(&params);
 			// Looked up at run time, not linked: this DLL loads with the game, and a missing import would stop it loading at
-			// all on a Windows without it.
+			// all on a Windows without it. Loaded once and kept: Run retries a capture every second.
 			using ActivateFunction = HRESULT(WINAPI*)(LPCWSTR, REFIID, PROPVARIANT*, IActivateAudioInterfaceCompletionHandler*, IActivateAudioInterfaceAsyncOperation**);
-			HMODULE mmdevapi = LoadLibraryW(L"Mmdevapi.dll");
-			const auto activate = mmdevapi ? reinterpret_cast<ActivateFunction>(GetProcAddress(mmdevapi, "ActivateAudioInterfaceAsync")) : nullptr;
+			static const HMODULE mmdevapi = LoadLibraryW(L"Mmdevapi.dll");
+			static const auto activate = mmdevapi ? reinterpret_cast<ActivateFunction>(GetProcAddress(mmdevapi, "ActivateAudioInterfaceAsync")) : nullptr;
 			auto completion = Microsoft::WRL::Make<Completion>();
 			Microsoft::WRL::ComPtr<IActivateAudioInterfaceAsyncOperation> operation;
 			HRESULT result = !activate ? E_NOTIMPL : completion ? activate(VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, __uuidof(IAudioClient), &variant, completion.Get(), &operation) : E_OUTOFMEMORY;
@@ -151,12 +151,6 @@ namespace Audio::AppAudioMix
 			}
 			if (SUCCEEDED(com)) CoUninitialize();
 		}
-
-		void Start()
-		{
-			bool expected = false;
-			if (g_started.compare_exchange_strong(expected, true)) std::thread(Run).detach();
-		}
 	}
 
 	bool Enabled()
@@ -179,10 +173,18 @@ namespace Audio::AppAudioMix
 		RegSetKeyValueW(HKEY_CURRENT_USER, kKey, L"MixAppAudio", REG_DWORD, &value, sizeof(value));
 	}
 
+	void Start()
+	{
+		Enabled();   // the registry read happens here, so Mix only loads the atomic
+		bool expected = false;
+		if (!g_started.compare_exchange_strong(expected, true)) return;
+		try { std::thread(Run).detach(); }
+		catch (...) { g_started.store(false); }
+	}
+
 	void Mix(float* stereo, uint32_t frames) noexcept
 	{
-		if (!stereo || !frames || frames > 4096 || !Enabled()) return;
-		Start();   // once; the capture thread does the rest
+		if (!stereo || !frames || frames > 4096 || g_enabled.load(std::memory_order_relaxed) != 1) return;
 		std::unique_lock<std::mutex> lock(g_mutex, std::try_to_lock);
 		if (!lock.owns_lock()) return;
 		if (!g_primed)

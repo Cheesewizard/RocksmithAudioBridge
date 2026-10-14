@@ -2,10 +2,10 @@
 
 #include <string>
 
-// The Windows volume of the device the game plays to, for the overlay's Output page (2026-10-13).
+// The Windows volume of the device the game plays to, for the overlay's Output page.
 //
 // Why: the bridge plays to whichever device is picked on the Output page, but that device's volume and mute stay in
-// Windows. A player whose laptop speakers sat at 0 heard nothing and had to leave the game, make the speakers the
+// Windows. A player whose speakers sit at 0 hears nothing and has to leave the game, make the speakers the
 // Windows default and raise them there; with exclusive mode on, Windows will not even switch to the device.
 //
 // A background thread (COM never runs on the game's render thread) watches the device named by Watch, reads its

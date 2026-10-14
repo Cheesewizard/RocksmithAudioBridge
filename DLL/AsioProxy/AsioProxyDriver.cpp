@@ -313,7 +313,7 @@ namespace
 		RegCloseKey(key);
 	}
 
-	// Channel routing (ticket #109). RS_ASIO asks the bridge for fixed channel numbers (RS_ASIO.ini Channel= /
+	// Channel routing. RS_ASIO asks the bridge for fixed channel numbers (RS_ASIO.ini Channel= /
 	// BaseChannel=); the player picks the real channel per role in the overlay, and the bridge maps one onto the
 	// other when it creates the real device's buffers. A change re-creates only those buffers (no driver reload)
 	// and never touches RS_ASIO.ini. Saved per device under HKCU\Software\RSMods\AsioProxy\Routes\<driver>, one
@@ -435,14 +435,10 @@ namespace
 
 	std::wstring ReadRegistryString(const wchar_t* name)
 	{
-		HKEY key = nullptr;
+		// RRF_RT_REG_SZ: only a string, always terminated; anything else (missing, another type, too long) reads as empty.
 		wchar_t buffer[512]{};
 		DWORD size = sizeof(buffer);
-		if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\RSMods\\AsioProxy", 0, KEY_READ, &key) == ERROR_SUCCESS)
-		{
-			RegQueryValueExW(key, name, nullptr, nullptr, reinterpret_cast<BYTE*>(buffer), &size);
-			RegCloseKey(key);
-		}
+		if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\RSMods\\AsioProxy", name, RRF_RT_REG_SZ, nullptr, buffer, &size) != ERROR_SUCCESS) return std::wstring();
 		return buffer;
 	}
 
@@ -500,7 +496,7 @@ namespace
 	std::string g_inputError;
 	void SetInputError(const std::string& text) { std::lock_guard<std::mutex> lock(g_inputErrorMutex); g_inputError = text; }
 
-	// ---- Last known good setup (2026-10-11) ------------------------------------------------------------------
+	// ---- Last known good setup ------------------------------------------------------------------
 	// A broken ASIO driver can take the whole game down (Realtek ASIO corrupts the heap when opened input-only, proven
 	// outside the game), and nothing in-process can catch that. So the bridge never boots twice into a setup that
 	// crashed: before any interface opens it saves the exact setup it is trying as "Pending"; ten seconds of clean
@@ -683,8 +679,12 @@ public:
 					begun = g_attemptTick;
 				}
 				if (!begun || GetTickCount64() - begun < 10000) continue;
+				// Held while asked, as the RSModsAsio_Try* exports do: the host may release the driver meanwhile.
 				AsioProxyDriver* active = s_active;
-				FinishSetupAttempt(active && active->RunningReal());
+				if (active) active->AddRef();
+				const bool running = active && active->RunningReal();
+				if (active) active->Release();
+				FinishSetupAttempt(running);
 			}
 		}).detach();
 	}
@@ -1423,7 +1423,7 @@ private:
 		const std::string reason = m_bindFailure.empty() ? std::string("it would not start") : m_bindFailure;
 		m_bindFailure.clear();
 		// It refused without taking the game down: not a crash, so the next launch must not hold this setup back
-		// (2026-10-11: a refusal 7 s before the game was closed left Pending set, and the next boot opened nothing).
+		// (a refusal shortly before the game was closed would leave Pending set, and the next boot would open nothing).
 		FinishSetupAttempt(false);
 		if (driver.empty()) return;   // no Target set: the settings app already reports "not set up"
 		ProxyLog("ERROR: guitar input and output are silent because '%ls' would not open: %s", driver.c_str(), reason.c_str());
@@ -1512,7 +1512,8 @@ private:
 			if (infos[i].isInput)
 			{
 				++m_inputCount;
-				m_inputTypes[i] = ASIOSTInt32LSB;
+				// By buffer index, as CacheInputChannels: past the table when outputs come first in the list.
+				if (i < static_cast<long>(m_inputTypes.size())) m_inputTypes[i] = ASIOSTInt32LSB;
 			}
 			else m_outputs[m_outputCount++] = { i, ASIOSTInt32LSB };
 		}
@@ -1641,7 +1642,7 @@ private:
 		if (m_real->start() == 0)
 		{
 			// Up to a second for the first callback: ASIO4ALL (kernel streaming) and some USB drivers take a few hundred
-			// ms to start, and 50 ms rejected ASIO4ALL as "never started playing" (2026-10-11).
+			// ms to start, and 50 ms rejected ASIO4ALL as "never started playing".
 			for (int attempt = 0; attempt < 100 && !m_callbackSeen.load(std::memory_order_acquire); ++attempt)
 				std::this_thread::sleep_for(std::chrono::milliseconds(10));
 			if (m_callbackSeen.load(std::memory_order_acquire)) { ProxyLog("TryPromote: real device running; mode Real"); return true; }
@@ -1735,9 +1736,9 @@ private:
 		return false;
 	}
 
-	// The output stalled. If an input interface opened just before, it most likely stopped the output (2026-10-11:
-	// Realtek ASIO opened as Player 1's input took the sound chip ASIO4ALL was playing through; the output went quiet
-	// 3.5 s later). Its players go back to the output interface, saved, so the next launch does not repeat the clash, and
+	// The output stalled. If an input interface opened just before, it most likely stopped the output (Realtek ASIO
+	// opened as Player 1's input can take the sound chip ASIO4ALL is playing through, and the output goes quiet
+	// seconds later). Its players go back to the output interface, saved, so the next launch does not repeat the clash, and
 	// the overlay says why.
 	void BlameRecentInputInterface()
 	{
@@ -1821,8 +1822,8 @@ private:
 		}
 		m_realModule = LoadLibraryW(dllPath.c_str());
 		// Pinned: an ASIO driver's own threads can outlive Release() (a USB worker waking late), and once its DLL is
-		// unmapped they run into freed code and take the game down (2026-10-11: M-Track driver +0x6E10, execute fault,
-		// after switching interfaces live). Pinned, every FreeLibrary below is only a reference count; the code stays
+		// unmapped they run into freed code and take the game down (an execute fault after switching interfaces live).
+		// Pinned, every FreeLibrary below is only a reference count; the code stays
 		// mapped until the game exits. A driver loaded again reuses the same mapping.
 		HMODULE pinned = nullptr;
 		if (m_realModule) GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, reinterpret_cast<LPCWSTR>(m_realModule), &pinned);
@@ -2192,7 +2193,7 @@ private:
 			if (!active || active->m_mode.load(std::memory_order_acquire) != OutputMode::Real) return 0;
 			// kAsioResetRequest: the interface changed under us (ASIO4ALL after a device is switched on or off in its
 			// panel, a buffer size changed in a control panel). RS_ASIO does not reopen anything for it, so the bridge
-			// kept playing into the old channel list ("Not Connected 1 / 2", silence; 2026-10-11). The bridge reopens
+			// kept playing into the old channel list ("Not Connected 1 / 2", silence). The bridge reopens
 			// the same interface itself, the live switch path, off this driver thread.
 			if (selector == 3) { ScheduleResetRebind(); return 1; }
 		}
@@ -2212,8 +2213,8 @@ private:
 			active->AddRef();
 			const std::wstring target = active->BoundTarget();
 			ProxyLog("Reset request from '%ls': reopening it with its new settings", target.c_str());
-			// A driver is often still resetting when asked to open again (2026-10-11: the M-Track refused to start
-			// 0.7 s after its own reset request): try again after 1 s and 3 s before leaving it to the player.
+			// A driver is often still resetting when asked to open again (some refuse to start right after their own
+			// reset request): try again after 1 s and 3 s before leaving it to the player.
 			bool reopened = !target.empty() && active->TryRebind(target.c_str()) != 0;
 			for (int wait : { 1000, 3000 })
 			{
@@ -2384,7 +2385,7 @@ extern "C" __declspec(dllexport) int RSModsAsio_GetBindError(wchar_t* buffer, in
 	return 1;
 }
 
-// Channel routing (ticket #109), for the overlay's per-role channel pickers. Roles: 0 output (the first channel
+// Channel routing, for the overlay's per-role channel pickers. Roles: 0 output (the first channel
 // of its stereo pair), 1 Player 1, 2 Player 2, 3 Mic. Channels are 0-based device channels.
 
 // Returns 1 when RS_ASIO.ini sends the role through the bridge, else 0. Fills the channel RS_ASIO asks for and the

@@ -7,7 +7,7 @@
 #include <thread>
 
 // ShellExecuteW off the calling thread. The overlay's buttons and the Tone designer's auto-start run on the game's
-// render thread, and one ShellExecuteW there took 401 ms (2026-10-12, starting the VST host at the main menu: shell
+// render thread, and one ShellExecuteW there can take 400 ms (starting the VST host at the main menu: shell
 // COM start-up plus the anti-virus scan of the launched exe), a visible freeze. Nothing that calls this needs the
 // result, so it runs on a short-lived thread of its own, with the single-threaded COM the shell expects.
 namespace ShellOpenAsync

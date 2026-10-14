@@ -44,7 +44,7 @@ namespace Audio::OutputTap
 	bool TryDemoteProxyOutput();
 	// Explicit re-bind of the named real ASIO driver even when the proxy already reports it bound.
 	bool TryRebindProxyOutput(const std::wstring& driverName);
-	// Channel routing (ticket #109). Roles: 0 output (first channel of its stereo pair), 1 Player 1, 2 Player 2,
+	// Channel routing. Roles: 0 output (first channel of its stereo pair), 1 Player 1, 2 Player 2,
 	// 3 Mic; channels are 0-based device channels. ProxyRoute is false when RS_ASIO.ini does not send the role
 	// through the bridge (or the proxy is not loaded); hostChannel is the channel RS_ASIO.ini asks for.
 	bool ProxyRoute(int role, long& hostChannel, long& deviceChannel);

@@ -44,7 +44,7 @@ namespace Audio::SharedOutput
 		// nothing to RSMods.ini (the overlay's sliders preview every drag step and save once on release).
 		thread_local bool previewOnly = false;
 
-		// NotifyCableInputBlock -> OutputSession: game blocks of cable input not yet answered with an output wake, when
+		// NotifyCableInputFrames -> OutputSession: game blocks of cable input not yet answered with an output wake, when
 		// the last one came, and an event to wake the session's worker (auto-reset, made once for the process).
 		// Counted in frames, not blocks: after a live game block change (ResetGameOutput) the game's output block may
 		// differ from its input block (the input stream is not reopened), and one wake per input block would then pace
@@ -116,7 +116,7 @@ namespace Audio::SharedOutput
 		GetModuleFileNameW(nullptr, executable, MAX_PATH);
 		const auto path = std::filesystem::path(executable).parent_path() / L"RSMods.ini";
 		// A per-device buffer (the old routing window, or a hand edit) wins; otherwise the one global setting,
-		// [Audio Bridge] OutputPeriodFrames (once set on the GUI tab, removed 2026-10-13; the overlay Device buffer card
+		// [Audio Bridge] OutputPeriodFrames (once set on the GUI tab; the overlay Device buffer card
 		// is the control now, saving per device). 0 = Automatic (OutputBackend::AutomaticPeriod).
 		const UINT32 perDevice = GetPrivateProfileIntW((L"Audio Bridge Output Buffer " + endpointId).c_str(), L"PeriodFrames", 0, path.c_str());
 		return perDevice ? perDevice : GetPrivateProfileIntW(L"Audio Bridge", L"OutputPeriodFrames", 0, path.c_str());
@@ -209,7 +209,7 @@ namespace Audio::SharedOutput
 
 	// Control ops whose handling is the same whether or not an owned output session exists. They are
 	// parsed and dispatched ONCE here; OutputSession::HandleControl and PassthroughStatus only add the
-	// ops that genuinely differ (recording 2/3/14, switching the game's own output 4/6, alternate-device
+	// ops that do differ (recording 2/3/14, switching the game's own output 4/6, alternate-device
 	// routing 21/22). The single shared op whose TARGET differs is the loudness guard (16): the session
 	// applies it in its owned backend, passthrough in the proxy driver, so the caller passes that in.
 	// Returns true when the op was recognised and response.result is set.
@@ -907,7 +907,7 @@ namespace Audio::SharedOutput
 			// game, instead of on the timer below. Under RS_ASIO one interface callback hands the game its input and
 			// takes its output, so the two never drift; with input on the cable's clock and output on a timer they did,
 			// and at 128-frame blocks an input block landing just after the game's turn left a gap in the game's own
-			// tones only (Tone designer, fed directly, stayed clean; 2026-10-12). The cable is now the game's clock;
+			// tones only (Tone designer, fed directly, stayed clean). The cable is now the game's clock;
 			// the output backend already matches that to the device's.
 			if (GetTickCount64() - g_lastInputBlock.load() < 50)
 			{
@@ -958,7 +958,7 @@ namespace Audio::SharedOutput
 			clockSequence.fetch_add(1);
 		}
 
-		// Cable-mode output delay, logged every 30 s (2026-10-12): the game-facing side (blocks the game writes, how many
+		// Cable-mode output delay, logged every 30 s: the game-facing side (blocks the game writes, how many
 		// wait in the queue) and the Windows side (its period, what it still holds, the backend FIFO), so a fix for
 		// the delay players hear after each note is sized from measurements, not guesses.
 		void SampleLatency()
@@ -978,6 +978,9 @@ namespace Audio::SharedOutput
 				latencyEmpty = status.emptyObservations;
 				latencyExpired = status.expiredFrames;
 				latencyCushion = status.cushionFrames;
+				latencyTrimmed = status.trimmedFrames;
+				latencyReserve = status.reserveOn;
+				latencyGameGap = (std::max)(latencyGameGap, physical->TakeLongestGameGapMs());
 				// The output's buffer, for the next start's Automatic game block size (CableGamePeriod.hpp).
 				if (status.state == BackendState::Running)
 					CableGamePeriod::Remember(status.period, AsioOutputDevice::IsAsioEndpoint(status.activeEndpoint));
@@ -993,12 +996,15 @@ namespace Audio::SharedOutput
 				<< "), game queue avg " << std::fixed << std::setprecision(2) << queueBlocks << " blocks = " << std::setprecision(1) << gameMs
 				<< " ms; Windows period " << latencyPeriod << " frames, device holds " << static_cast<int>(padding) << " + backend FIFO "
 				<< static_cast<int>(fifo) << " frames = " << windowsMs << " ms; output delay about " << gameMs + windowsMs << " ms; backlog trims so far "
-				<< latencyTrims << ", device found empty " << latencyEmpty << ", frames expired " << latencyExpired << ", extra cushion " << latencyCushion << " frames"
+				<< latencyTrims << " (" << latencyTrimmed << " frames), device found empty " << latencyEmpty << ", frames expired " << latencyExpired
+				<< ", extra cushion " << latencyCushion << " frames, loading reserve " << (latencyReserve ? "on" : "off")
+				<< ", longest game gap " << latencyGameGap << " ms"
 				<< (GetTickCount64() - g_lastInputBlock.load() < 50 ? "; game clocked by the cable, waiting wakes " + std::to_string(g_inputBlocks.load())
 					+ ", dropped " + std::to_string(g_inputBlocksDropped.load()) : std::string("; game clocked by a timer")) << std::endl);
 			latencySince = now;
 			latencyQueueSum = latencyQueueSamples = latencyPaddingSum = latencyFifoSum = latencyBackendSamples = 0;
 			latencyPackets = latencyPacketFrames = 0;
+			latencyGameGap = 0;
 			latencyMinPacket = UINT32_MAX;
 			latencyMaxPacket = 0;
 		}
@@ -1106,6 +1112,8 @@ namespace Audio::SharedOutput
 		UINT32 latencyMinPacket = UINT32_MAX, latencyMaxPacket = 0, latencyPeriod = 0;
 		uint64_t latencyTrims = 0, latencyEmpty = 0, latencyExpired = 0;
 		UINT32 latencyCushion = 0;
+		uint64_t latencyTrimmed = 0, latencyGameGap = 0;   // trims' frames; longest gap between game packets this window
+		bool latencyReserve = false;
 		std::array<BYTE, 1024> diagnosticBlock{}, previousBlock{};
 		UINT32 diagnosticBytes = 0;
 		bool havePreviousBlock = false;
@@ -1559,7 +1567,7 @@ namespace Audio::SharedOutput
 	// RS_ASIO opens its host once at launch and cannot re-bind a device, so the callback never resumes and
 	// the still-open WASAPI backend renders silence. A start grace covers backend spin-up. Continuous silence
 	// does NOT count as stalled (the callback keeps firing with zero-filled buffers, refreshing the feed tick),
-	// so only a genuinely stopped callback trips this. The proxy recovery loop replaces a stalled
+	// so only a callback that has really stopped trips this. The proxy recovery loop replaces a stalled
 	// real callback source with its virtual clock.
 	bool RouteFeedStalled()
 	{
@@ -1597,7 +1605,7 @@ namespace Audio::SharedOutput
 
 	// Status returned while nothing is routed. The playback mixer is the game's own bus volumes,
 	// set through VolumeControl (game code), so it works with or without routing and stays live here.
-	// Only the features that genuinely need an owned output, recording (2, 3) and switching the
+	// Only the features that need an owned output, recording (2, 3) and switching the
 	// physical output device (4, 6), are refused with a clear code so the GUI can say routing is
 	// required. A sentinel endpoint lets the GUI show "passthrough" without changing the wire layout.
 	ControlResponse PassthroughStatus(const ControlRequest& request)
@@ -1735,7 +1743,7 @@ namespace Audio::SharedOutput
 		// arrives, so a wake thrown away leaves a block queued inside the game for good and every note that much later.
 		// The first version kept two; each game audio stall longer than that (frame hitches of 40-220 ms in the log)
 		// added a block, and the game's amp drifted from ~20 to ~46 ms behind the guitar in 20 s, heard as an echo
-		// against the strings (recording 2026-10-13). Past ~100 ms behind, the rest is dropped and counted.
+		// against the strings. Past ~100 ms behind, the rest is dropped and counted.
 		uint32_t owed = g_inputBlocks.load();
 		while (!g_inputBlocks.compare_exchange_weak(owed, (std::min)(kInputFrameLimit, owed + frames))) {}
 		if (owed + frames > kInputFrameLimit) g_inputBlocksDropped.fetch_add(1);

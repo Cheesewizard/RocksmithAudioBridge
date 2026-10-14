@@ -12,6 +12,7 @@
 #include "AppAudioMix.hpp"
 #include "ExternalAmp/CableAmpLink.hpp"
 #include "OutputRateMatcher.hpp"
+#include "OutputReserve.hpp"
 #include "Recorder/GameAudioRecorder.hpp"
 
 namespace Audio::SharedOutput
@@ -46,9 +47,11 @@ namespace Audio::SharedOutput
 		UINT32 outputMode = 0; // 0 unknown, 1 shared, 2 exclusive event, 3 exclusive polling, 4 ASIO
 		UINT32 outputBufferFrames = 0;
 		UINT32 padding = 0, queuedFrames = 0;
-		uint64_t expiredFrames = 0, overruns = 0, emptyObservations = 0, trims = 0;   // trims: backlogs dropped at once (Pump)
+		uint64_t expiredFrames = 0, overruns = 0, emptyObservations = 0, trims = 0;   // trims: backlogs dropped at once
+		uint64_t trimmedFrames = 0;   // frames the trims dropped (expiredFrames: frames that waited past the age limit)
 		uint64_t longestPumpGapMs = 0;
 		UINT32 cushionFrames = 0;   // AsioFill's extra reserve after the game was late (0 = the lean minimum)
+		bool reserveOn = false;     // AsioFill holds the loading reserve (OutputReserve)
 		double clockPpm = 0, correctionPpm = 0;
 		bool clockMeasured = false;
 	};
@@ -119,6 +122,7 @@ namespace Audio::SharedOutput
 			count = 0;
 			status.queuedFrames = 0;
 			cushion = status.cushionFrames = 0;
+			ResetReserve();
 			SetEvent(wake);
 		}
 
@@ -152,6 +156,7 @@ namespace Audio::SharedOutput
 			status.error = E_PENDING;
 			count = status.queuedFrames = 0;
 			cushion = status.cushionFrames = 0;
+			ResetReserve();
 			SetEvent(wake);
 		}
 
@@ -174,6 +179,9 @@ namespace Audio::SharedOutput
 		{
 			std::lock_guard<std::mutex> guard(mutex);
 			if (status.state != BackendState::Running && status.state != BackendState::Priming) return;
+			// The longest pause in the game's own writing: how long its audio thread stalled (sizes OutputReserve).
+			if (lastSubmittedAt && submittedAt > lastSubmittedAt) longestGameGapMs = (std::max)(longestGameGapMs, submittedAt - lastSubmittedAt);
+			lastSubmittedAt = submittedAt;
 			Expire(GetTickCount64());
 			if (GetTickCount64() - submittedAt > 40)
 			{
@@ -208,8 +216,17 @@ namespace Audio::SharedOutput
 
 		void SetGamePacketFrames(UINT32 frames) { if (frames) gamePacketFrames.store(frames); }
 
+		// The longest gap between two game packets since the last call (the CABLE LATENCY line, every second).
+		ULONGLONG TakeLongestGameGapMs()
+		{
+			std::lock_guard<std::mutex> guard(mutex);
+			const ULONGLONG gap = longestGameGapMs;
+			longestGameGapMs = 0;
+			return gap;
+		}
+
 		// The recorder's game track, taken as the device is filled: the game plus the Tone designer's guitar, which is
-		// mixed in here and so was missing from a track taken where the game hands its sound over (2026-10-13). Other
+		// mixed in here and so was missing from a track taken where the game hands its sound over. Other
 		// programs' sound (AppAudioMix) is added after this, so a take does not record YouTube or Discord.
 		void SetRecorder(std::shared_ptr<RecordingSession> session) { std::atomic_store(&recordTap, std::move(session)); }
 		// Frames between a game packet handed over now and the speaker: the FIFO plus what the device holds (Windows'
@@ -230,16 +247,45 @@ namespace Audio::SharedOutput
 		}
 
 	private:
+		// Frames older than ageLimitMs are dropped: 40 ms, plus the loading reserve while AsioFill holds one (its
+		// frames wait ~50 ms by design).
 		void Expire(ULONGLONG now)
 		{
-			if (count && now - ages[head] > 40) rateMatcher.Reseed();
-			while (count && now - ages[head] > 40)
+			if (count && now - ages[head] > ageLimitMs) rateMatcher.Reseed();
+			while (count && now - ages[head] > ageLimitMs)
 			{
 				head = (head + 1) % CAPACITY;
 				--count;
 				++status.expiredFrames;
 			}
 			status.queuedFrames = count;
+		}
+
+		// Under mutex: back to the lean queue with no reserve (a new output, or the same one reopened).
+		void ResetReserve()
+		{
+			reserveOn = status.reserveOn = false;
+			ageLimitMs = 40;
+			leanAskedAt = quietSince = 0;
+			lastSubmittedAt = 0;
+		}
+
+		// Under mutex: drop the oldest `excess` frames, blending the ~2 ms after the cut with the frames that would have
+		// played there, so the cut is not a click (the boot's backlog cuts were audible).
+		void DropOldest(UINT32 excess)
+		{
+			const UINT32 fade = (std::min)(96u, count - excess);
+			for (UINT32 frame = 0; frame < fade; ++frame)
+			{
+				const float in = float(frame + 1) / float(fade + 1);
+				const UINT32 kept = ((head + excess + frame) % CAPACITY) * 2, dropped = ((head + frame) % CAPACITY) * 2;
+				fifo[kept] = fifo[kept] * in + fifo[dropped] * (1.0f - in);
+				fifo[kept + 1] = fifo[kept + 1] * in + fifo[dropped + 1] * (1.0f - in);
+			}
+			head = (head + excess) % CAPACITY;
+			count -= excess;
+			status.trimmedFrames += excess;
+			++status.trims;
 		}
 
 		void Close()
@@ -333,7 +379,7 @@ namespace Audio::SharedOutput
 		}
 
 		// No saved buffer ("Automatic"): about 3 ms instead of Windows' default ~10 ms period. The default period was
-		// most of the delay cable players heard after each note (a player measured it 2026-10-11), and nearly every
+		// most of the delay cable players heard after each note, and nearly every
 		// device takes 144 frames. Rounded up to the device's step and never below its minimum or above its default,
 		// so a device without small periods keeps the default. Requires GetSharedModeEnginePeriod's limits.
 		UINT32 AutomaticPeriod(UINT32 normal) const
@@ -377,6 +423,7 @@ namespace Audio::SharedOutput
 				return HRESULT_FROM_WIN32(ERROR_DEVICE_NOT_AVAILABLE);
 			}
 			asio = std::move(device);
+			AppAudioMix::Start();   // here, not in AsioFill: it reads the registry and starts a thread
 			period = bufferFrames = asio->BufferFrames();
 			// What this buffer waits before it is heard: the driver's own output latency (the ASIO convention includes the
 			// buffer), or one buffer when it reports none.
@@ -428,6 +475,7 @@ namespace Audio::SharedOutput
 			}
 			exclusiveFailure.clear();
 			exclusive = std::move(device);
+			AppAudioMix::Start();   // here, not in AsioFill: it reads the registry and starts a thread
 			period = bufferFrames = exclusive->BufferFrames();
 			asioDeviceDelay = exclusive->OutputLatencyFrames();
 			minimum = fundamental = maximum = 0;
@@ -477,22 +525,47 @@ namespace Audio::SharedOutput
 				// `frames` at a time, so the FIFO swings by a game packet: keep a packet plus two buffers in hand, and drop
 				// a backlog above that at once.
 				const UINT32 gamePacket = gamePacketFrames.load(std::memory_order_relaxed);
-				// A packet, one buffer and 1 ms of slack (was two buffers: 6-7 ms queued here on a 3 ms exclusive device,
-				// 2026-10-13). The game is clocked by the cable 1 ms at a time, so a second buffer of reserve was idle delay;
+				// A packet, one buffer and 1 ms of slack (two buffers queued 6-7 ms here on a 3 ms exclusive device).
+				// The game is clocked by the cable 1 ms at a time, so a second buffer of reserve was idle delay;
 				// "device found empty" in the 30 s (CABLE LATENCY) line shows whether this one is enough.
-				// Plus a cushion that adapts (2026-10-13): while the game loads its menus it is late and the lean minimum
+				// Plus a cushion that adapts: while the game loads its menus it is late and the lean minimum
 				// ran dry ~400-600 times in the first 80 s of every boot (clicks), then never again. A run dry while the
 				// game is delivering adds a game packet (at most once a second, up to 10 ms); 30 s without one takes a
 				// packet back every 10 s. Shrinking only lowers the servo's centre, so the queue drains without a cut.
 				if (count) cushionFedAt = now;
-				const UINT32 target = (std::min)(CAPACITY, gamePacket + frames + 48 + cushion);
-				if (count > target + (std::max)(gamePacket, frames))
+				const UINT32 lean = (std::min)(CAPACITY, gamePacket + frames + 48 + cushion);
+				// The loading reserve (OutputReserve): ~50 ms in hand while the game boots and sits in menus,
+				// where its audio thread stalls for tens of ms. Switched on at once (the queue fills from the game's
+				// catch-up after a stall, or from silence slipped in while the output is quiet); switched off at a quiet
+				// moment, or after 1 s anyway, with one crossfaded cut down to the lean queue.
+				if (OutputReserve::Wanted())
 				{
-					const UINT32 excess = count - target;
-					head = (head + excess) % CAPACITY;
-					count -= excess;
-					status.expiredFrames += excess;
-					++status.trims;
+					leanAskedAt = 0;
+					if (!reserveOn) { reserveOn = true; ageLimitMs = 40 + OutputReserve::kFrames / 48; }
+				}
+				else if (reserveOn)
+				{
+					if (!leanAskedAt) leanAskedAt = now;
+					if ((quietSince && now - quietSince >= 20) || now - leanAskedAt >= 1000) { reserveOn = false; ageLimitMs = 40; leanAskedAt = 0; }
+				}
+				status.reserveOn = reserveOn;
+				const UINT32 headroom = (std::max)(gamePacket, frames);
+				// Room left for the reserve: none for a buffer over half the FIFO, where it stays at the lean queue.
+				const UINT32 room = headroom * 2 < CAPACITY ? CAPACITY - headroom * 2 : 0;
+				const UINT32 target = reserveOn ? (std::max)(lean, (std::min)(room, OutputReserve::kFrames)) : lean;
+				if (count > target + headroom) DropOldest(count - target);
+				// Quiet for 20 ms with the reserve under half (and the game delivering): slip silence in ahead of what is queued.
+				if (reserveOn && count && quietSince && now - quietSince >= 20 && count * 2 < target)
+				{
+					const UINT32 add = target - count;
+					head = (head + CAPACITY - add) % CAPACITY;
+					for (UINT32 frame = 0; frame < add; ++frame)
+					{
+						const UINT32 index = (head + frame) % CAPACITY;
+						fifo[index * 2] = fifo[index * 2 + 1] = 0.0f;
+						ages[index] = now;
+					}
+					count += add;
 				}
 				const ULONGLONG oldestFrame = count ? ages[head] : now;
 				unsigned consumed = 0;
@@ -504,7 +577,9 @@ namespace Audio::SharedOutput
 				if (produced < frames)
 				{
 					++status.emptyObservations;
-					if (now - cushionFedAt <= 100)   // the game is running, just late (not stopped or not started yet)
+					// The game is running, just late (not stopped or not started yet). Not while the reserve is held: what
+					// the game does while loading says nothing about the queue a song needs.
+					if (now - cushionFedAt <= 100 && !reserveOn)
 					{
 						cushionEmptyAt = now;
 						if (now - cushionChangedAt >= 1000 && cushion + gamePacket <= 480) { cushion += gamePacket; cushionChangedAt = now; }
@@ -516,7 +591,12 @@ namespace Audio::SharedOutput
 					cushionChangedAt = now;
 				}
 				status.cushionFrames = cushion;
-				current = produced && now - oldestFrame <= 40;
+				current = produced && now - oldestFrame <= ageLimitMs;
+				// The game's own sound in this buffer (before Tone designer and other apps): below -60 dBFS is quiet.
+				float peak = 0.0f;
+				if (current) for (unsigned i = 0; i < produced * 2; ++i) peak = (std::max)(peak, std::abs(staging[i]));
+				if (peak >= 0.001f) quietSince = 0;
+				else if (!quietSince) quietSince = now;
 				// The interface's clock against QPC over 2 s windows (callback jitter averages out), then the same servo as
 				// the Windows path, centred on the target fill.
 				LARGE_INTEGER qpc{};
@@ -626,14 +706,14 @@ namespace Audio::SharedOutput
 				const UINT32 target = std::min(bufferFrames, period * 2);
 				// A backlog more than a period over the target is dropped at once (oldest first). The rate servo below
 				// only slews a few hundred ppm, so a cold start that queued ~800 frames too many took two minutes to drain
-				// and every note in that time came out 15-20 ms late (cable session 2026-10-12: 1074 FIFO frames falling
-				// to 92 over 120 s). At start that excess is silence; in steady play the servo keeps it from building.
+				// and every note in that time came out 15-20 ms late (about 1000 FIFO frames falling
+				// to under 100 over two minutes). At start that excess is silence; in steady play the servo keeps it from building.
 				if (count && count + padding > target + period)
 				{
 					const UINT32 excess = std::min(count, count + padding - target);
 					head = (head + excess) % CAPACITY;
 					count -= excess;
-					status.expiredFrames += excess;
+					status.trimmedFrames += excess;
 					++status.trims;
 				}
 				const UINT32 capacity = std::min(CAPACITY, target > padding ? target - padding : 0);
@@ -899,6 +979,10 @@ namespace Audio::SharedOutput
 		UINT64 asioClockQpc = 0, asioClockFrames = 0;            // under mutex: AsioFill's clock window
 		UINT32 cushion = 0;                                      // under mutex: AsioFill's adaptive extra reserve, frames
 		ULONGLONG cushionFedAt = 0, cushionEmptyAt = 0, cushionChangedAt = 0;   // under mutex: AsioFill
+		bool reserveOn = false;                                  // under mutex: AsioFill holds the loading reserve
+		UINT32 ageLimitMs = 40;                                  // under mutex: Expire's limit (ResetReserve)
+		ULONGLONG leanAskedAt = 0, quietSince = 0;               // under mutex: AsioFill's switch to lean
+		ULONGLONG lastSubmittedAt = 0, longestGameGapMs = 0;     // under mutex: Submit's gap between game packets
 		ULONGLONG asioStartedAt = 0;                             // backend thread
 		uint32_t asioDeviceDelay = 0;                            // frames until a filled ASIO buffer is heard (latency log)
 		EndpointFactory factory;

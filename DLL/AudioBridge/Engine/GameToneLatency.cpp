@@ -14,15 +14,11 @@ namespace Audio::GameToneLatency
 {
 	namespace
 	{
-		// Both sides as 1 ms level envelopes on one clock: slot = time in ms, modulo the ring. The output's slots are by
-		// when it will be heard. Every second the last 2 s are compared: how strongly each rise in the input's level is
-		// followed, L ms later, by a rise in the output's, for L from 2 to 150 ms. The best L is the delay.
-		// (The first version matched single attacks with a fixed 15 dB rise; the game's amp compresses its attacks
-		// below that, so it never measured anything, 2026-10-13. Matching the rhythm of the playing is what worked on a
-		// recording by hand, and compression does not hide it.)
+		// Both sides as 1 kHz high-passed 1 ms peaks (dBFS) on one clock: slot = time in ms, modulo the ring. The output's
+		// slots are by when it will be heard, so a pick in the input and the game's answer to it sit their delay apart.
+		// Analyse, once a second, times each clear pick to the first sharp rise in the output after it.
 		constexpr uint32_t kChunk = 48;             // 1 ms at 48 kHz
 		constexpr size_t kRing = 4096;              // ms of history
-		constexpr int kWindow = 2000;               // ms compared each time
 		constexpr int kMinLag = 2, kMaxLag = 150;   // ms
 		constexpr float kSilentDb = -60.0f;
 
@@ -62,14 +58,6 @@ namespace Audio::GameToneLatency
 				const size_t slot = static_cast<size_t>(ms % kRing);
 				return stamp[slot] == ms ? db[slot] : kSilentDb;
 			}
-
-			// Rise in level over 3 ms at ms (0 when falling or not written).
-			float Rise(int64_t ms) const
-			{
-				const size_t now = static_cast<size_t>(ms % kRing), before = static_cast<size_t>((ms - 3) % kRing);
-				if (stamp[now] != ms || stamp[before] != ms - 3) return 0.0f;
-				return (std::max)(0.0f, db[now] - db[before]);
-			}
 		};
 
 		std::mutex g_mutex;
@@ -87,7 +75,7 @@ namespace Audio::GameToneLatency
 		{
 			const UINT32 running = SharedOutput::GameOutputBlockFrames();
 			// "4": values from the first three estimators (repeats, then cable noise, taken for the delay) are never read again. They could not be
-			// deleted from outside reliably (the packaged Claude app sees its own copy of HKCU).
+			// deleted from outside reliably (a packaged (MSIX) app sees its own copy of HKCU).
 			return L"GameToneInternal4_" + std::to_wstring(running ? running : CableGamePeriod::Frames());
 		}
 
@@ -105,7 +93,7 @@ namespace Audio::GameToneLatency
 
 		int64_t g_examined = -1;   // input ms already searched for picks
 
-		// One measurement per clear pick, timed like the hand measurements on recordings (2026-10-13): the first sharp rise
+		// One measurement per clear pick, timed like hand measurements on recordings: the first sharp rise
 		// in the game's output after the pick. Both sides are 1 kHz high-passed 1 ms peaks. A pick: a 15 dB rise over the
 		// loudest of the previous 40 ms, to above -35 dBFS (noise and a backing track do not make those on the cable). Its
 		// answer: the first ms, 3 to 150 ms later, where the output is 8 dB above its loudest of the 20 ms before the pick

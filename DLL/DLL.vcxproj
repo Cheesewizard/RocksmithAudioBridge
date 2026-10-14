@@ -937,5 +937,6 @@ if exist "$(OutDir)$(TargetName).map" copy /Y "$(OutDir)$(TargetName).map" "$(Bu
     <ClInclude Include="AudioBridge\Engine\OutputBackend.hpp" />
     <ClInclude Include="AudioBridge\Engine\OutputRateMatcher.hpp" />
     <ClInclude Include="AudioBridge\Engine\CableGamePeriod.hpp" />
+    <ClInclude Include="AudioBridge\Engine\OutputReserve.hpp" />
   </ItemGroup>
 </Project>

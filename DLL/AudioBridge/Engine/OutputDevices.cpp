@@ -162,7 +162,7 @@ namespace Audio::OutputDevices
 		// Marks protected endpoints. Returns false when some bound driver matched nothing (unidentified).
 		// Wrapper drivers are not hardware: ASIO4ALL, FlexASIO, ASIO2WASAPI and ASIO2KS open ordinary Windows devices
 		// (whichever their own panel picks), so no endpoint "is" them. Treating one as an unidentified interface switched
-		// every Windows device off for no reason (2026-10-11); a device the wrapper really holds just fails to open,
+		// every Windows device off for no reason; a device the wrapper really holds just fails to open,
 		// which the route reports as stalled.
 		bool IsWrapperDriver(const std::wstring& driver)
 		{

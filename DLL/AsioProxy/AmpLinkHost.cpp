@@ -215,8 +215,8 @@ namespace AmpLink
 	{
 		if (!m_shared || !left || !right || frames != m_frames) return Return::NoGuest;
 		// Connected is judged against the newest published block, not `seq`: the guest is normally already past the block
-		// being read back, which GuestConnected(seq) would take for a guest that went away (2026-10-12: every block then
-		// counted late and the Tone designer went silent for good).
+		// being read back, which GuestConnected(seq) would take for a guest that went away (every block would then
+		// count late and the Tone designer would go silent for good).
 		if (!GuestConnected(m_publishedSeq.load(std::memory_order_acquire))) { m_mixLevel = 0.0f; return Return::NoGuest; }
 		const LONG slot = SlotOf(seq);
 		// The slot's tag says which block it holds: an older one = ours is not written yet, a newer one = ours was

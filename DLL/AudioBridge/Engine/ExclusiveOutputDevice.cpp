@@ -85,7 +85,6 @@ namespace Audio::SharedOutput
 			if (m_client->IsFormatSupported(AUDCLNT_SHAREMODE_EXCLUSIVE, &format.Format, nullptr) != S_OK) continue;
 			m_sample = candidate.sample;
 			m_formatName = candidate.name;
-			m_blockAlign = format.Format.nBlockAlign;
 			found = true;
 			break;
 		}
@@ -216,6 +215,8 @@ namespace Audio::SharedOutput
 	{
 		BYTE* data = nullptr;
 		if (FAILED(m_render->GetBuffer(frames, &data))) return false;
+		// Silence unless the fill writes: it returns early while the output switches, which would replay the last period.
+		std::fill(m_stereo.begin(), m_stereo.end(), 0.0f);
 		m_fill(m_stereo.data(), frames);
 		const size_t samples = static_cast<size_t>(frames) * 2;
 		for (size_t i = 0; i < samples; ++i)
