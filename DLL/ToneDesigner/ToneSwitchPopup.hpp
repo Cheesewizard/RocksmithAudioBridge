@@ -6,8 +6,7 @@
 // the Tone designer's tone while the player hears it, instead of the game's song name and tone descriptors.
 //
 // Every producer of that readout ends in one generic notification function with type 7 (tone change); a detour there
-// swaps the body text when a name is set and leaves every other notification untouched. Reverse engineering and
-// addresses: atlas docs/investigations/tone-change-notification.md (2026-10-11).
+// swaps the body text when a name is set and leaves every other notification untouched.
 namespace ToneSwitchPopup
 {
 	void Initialize();                         // installs the detour once; refuses on an unknown game build

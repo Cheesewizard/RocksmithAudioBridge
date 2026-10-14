@@ -59,8 +59,8 @@ namespace VstHostLink
 		constexpr size_t kMaxCrashRestarts = 3;      // within kCrashWindowMs; then it stays off and says so
 		constexpr ULONGLONG kCrashWindowMs = 5 * 60 * 1000;
 		// After a crash restart: what crashed, and since when the restarted host has been reloading. The note says
-		// "loading again" until the host is idle, then whether the tone came back complete (2026-10-11: a crash while
-		// AmpliTube 5 loaded left the note up long after the reload had finished, reading as a broken tone).
+		// "loading again" until the host is idle, then whether the tone came back complete (otherwise a crash while
+		// a big plugin loads leaves the note up long after the reload has finished, reading as a broken tone).
 		std::string g_recoveringWhat;
 		ULONGLONG g_recoveringSince = 0;
 
@@ -634,7 +634,7 @@ namespace VstHostLink
 
 		// Entering a song: the switch waits for the song to be playing (the highway moving), the moment the game's own
 		// tone readout can show, instead of the game's "in song" flag, which comes while the song is still loading
-		// (2026-10-12: the tone changed at load and the readout came seconds later).
+		// (the tone would change at load and the readout come seconds later).
 		void SwitchAtSongStart(const std::string& tone, bool watch)
 		{
 			g_startTone = tone;
@@ -705,8 +705,8 @@ namespace VstHostLink
 			char current[sizeof(shared->toneName) + 1]{};
 			memcpy(current, shared->toneName, sizeof(shared->toneName));
 			// A chain with unsaved changes is work in progress: it keeps playing through the song instead of the song's
-			// tone or the default tone (2026-10-12: a song start loaded over it, skipping the page's "Discard changes?",
-			// and the edits were gone; restoring afterwards only knew the tone's name). The readout names the chain.
+			// tone or the default tone (a song start would load over it, skipping the page's "Discard changes?",
+			// and the edits would be gone; restoring afterwards only knows the tone's name). The readout names the chain.
 			if (shared->toneModified != 0 && shared->slotCount > 0)
 			{
 				const std::string skipped = !tone.empty() ? tone : ReadSlow([](SlowState& slow) { return slow.defaultTone; });
@@ -787,8 +787,8 @@ namespace VstHostLink
 
 		// A plugin that crashes takes the host with it. The host leaves a note as it goes (LastCrash = the module,
 		// LastCrashAt = seconds since boot, Main.cpp OnCrash); seeing the host gone with a fresh note, the overlay
-		// starts it again with the last autosaved chain and tells the player which plugin it was. Three crashes
-		// within five minutes and it stays off, so a plugin that crashes on load cannot loop.
+		// starts it again with the last autosaved chain and tells the player which plugin it was. After three
+		// restarts within five minutes the next crash leaves it off, so a plugin that crashes on load cannot loop.
 		void FollowCrashes(VstHostControl::Shared* shared, bool hostRunning)
 		{
 			if (g_recoveringSince && shared)
@@ -839,8 +839,8 @@ namespace VstHostLink
 			else what = "Tone designer crashed (in " + (module.empty() ? std::string("an unknown module") : module) + ")";
 			while (!g_crashRestarts.empty() && now - g_crashRestarts.front() > kCrashWindowMs) g_crashRestarts.pop_front();
 			if (g_crashRestarts.size() >= kMaxCrashRestarts) {
-				g_crashNote = what + ", for the third time in five minutes, so Tone designer stays off. Start it again when ready; if one plugin keeps crashing, remove or replace it.";
-				LOG_WARNING("(VST HOST) " << what << "; third crash in five minutes, not restarting" << std::endl);
+				g_crashNote = what + ", for the fourth time in five minutes, so Tone designer stays off. Start it again when ready; if one plugin keeps crashing, remove or replace it.";
+				LOG_WARNING("(VST HOST) " << what << "; fourth crash in five minutes, not restarting" << std::endl);
 				return;
 			}
 			g_crashRestarts.push_back(now);
@@ -1072,13 +1072,9 @@ namespace VstHostLink
 	std::vector<std::string> SongsUsingTone(const std::string& tone)
 	{
 		std::vector<std::string> songs;
-		std::vector<wchar_t> section(32768);
-		const DWORD size = GetPrivateProfileSectionW(L"Songs", section.data(), static_cast<DWORD>(section.size()), SongTonesFile().c_str());
-		for (const wchar_t* line = section.data(); line < section.data() + size && *line; line += wcslen(line) + 1)
-		{
-			const wchar_t* equals = wcschr(line, L'=');
-			if (equals && _wcsicmp(equals + 1, Wide(tone).c_str()) == 0) songs.push_back(Utf8(std::wstring(line, equals)));
-		}
+		const std::wstring wanted = Wide(tone);
+		for (const auto& line : ReadSection(SongTonesFile(), L"Songs"))
+			if (_wcsicmp(line.second.c_str(), wanted.c_str()) == 0) songs.push_back(Utf8(line.first));
 		return songs;
 	}
 
@@ -1157,7 +1153,7 @@ namespace VstHostLink
 				if (SUCCEEDED(dialog->Show(nullptr)) && SUCCEEDED(dialog->GetResult(&item)) && SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)))
 				{
 					std::wstring list = ReadString(L"ScanFolders");
-					if (list.find(path) == std::wstring::npos) WriteString(L"ScanFolders", list.empty() ? path : list + L";" + path);
+					if (!ListHas(ExtraFolders(), path)) WriteString(L"ScanFolders", list.empty() ? path : list + L";" + path);
 					CoTaskMemFree(path);
 					g_rescanWanted = true;
 					KickSlow();
@@ -1254,7 +1250,8 @@ namespace VstHostLink
 	{
 		SetListed(L"KeepLoadedPlugins", path, on);
 		SetListed(L"PreloadFailed", path, false);
-		if (on && HostAlive(Shared())) Queue(Command::LoadSpare, 0, 0, path);   // now, not at the next quiet moment
+		VstHostControl::Shared* shared = Shared();
+		if (on && shared && HostAlive(shared)) Queue(Command::LoadSpare, 0, 0, path);   // now, not at the next quiet moment
 		KickSlow();
 		g_snapshotAt = 0;
 	}
@@ -1263,6 +1260,14 @@ namespace VstHostLink
 	{
 		SetListed(L"KeepLoadedPlugins", path, false);
 		Queue(Command::UnloadSpare, 0, 0, path);
+		KickSlow();
+		g_snapshotAt = 0;
+	}
+
+	void Reload(const std::wstring& path)
+	{
+		SetListed(L"PreloadFailed", path, false);   // the player asked for it: a failed mark from before is cleared
+		Queue(Command::ReloadPlugin, 0, 0, path);
 		KickSlow();
 		g_snapshotAt = 0;
 	}

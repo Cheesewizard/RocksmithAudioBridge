@@ -36,6 +36,12 @@ namespace VstHost
 		void Move(int index, int delta);
 		void SetBypass(int index, bool bypass);
 		bool Duplicate(int index, std::string& error);   // the copy, with the same settings, goes right after it
+		// Unloads every copy of a plugin file (chain and spares), so JUCE releases its module (ExitDll, FreeLibrary),
+		// then loads the chain's copies from scratch with their settings. For a plugin that only sees something new
+		// (tones imported into it, a changed library) when it starts. The rest of the chain plays on without them
+		// meanwhile. A copy that does not load again leaves the chain (`error`). `sparesDropped`: how many spares of
+		// it were unloaded. `slots`: each copy's slot now, in chain order, -1 for one that left.
+		bool Reload(const std::wstring& path, std::string& error, int& sparesDropped, std::vector<int>& slots);
 		void Clear();         // the plugins stay loaded as spares
 		void ReleaseAll();    // the chain and the spares, for shutdown (each plugin's settings saved)
 
@@ -117,6 +123,7 @@ namespace VstHost
 		std::atomic<bool> m_running{ false };
 		std::atomic<bool> m_inProcess{ false };
 		bool m_structureDirty = false;
+		bool m_reloading = false;   // Reload has copies out of the chain
 
 		int m_inputTenths = 0;
 		int m_outputTenths = 0;

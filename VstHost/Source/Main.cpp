@@ -70,6 +70,9 @@ namespace
 	wchar_t g_loadingNow[128] = {};   // the plugin loading now, for a crash report (plain buffer: read in OnCrash)
 	wchar_t g_openWindowNames[256] = {};   // plugins whose windows are open, for a crash report (OnCrash)
 	ULONGLONG g_lastCommandAt = 0;    // the page's last command (background loading waits for a quiet moment)
+	// A command is running. A plugin that pumps messages while it loads (a licence dialog) lets the timers run
+	// meanwhile; the page's next command, and background loading, wait until the first is done.
+	bool g_inCommand = false;
 	// Standby: Tone designer is off, but the host stays running with its plugins loaded, so turning it on is instant
 	// and starred plugins keep loading in the background. The audio link is released (the game's amp plays), the
 	// chain processes nothing and the plugin windows are hidden. Started with --standby, or SetStandby from the page.
@@ -541,9 +544,12 @@ namespace
 		RememberOpenWindows();
 	}
 
+	// A slot number comes from the page through shared memory: out of the mask's range means no window.
+	bool InMask(unsigned mask, int slot) { return slot >= 0 && slot < 32 && (mask & (1u << slot)) != 0; }
+
 	void ReopenWindows(unsigned mask)
 	{
-		for (int i = 0; i < g_chain.Count() && i < 32; ++i) if (mask & (1u << i)) OpenWindow(i);
+		for (int i = 0; i < g_chain.Count() && i < 32; ++i) if (InMask(mask, i)) OpenWindow(i);
 	}
 
 	void CloseAllWindows()
@@ -764,7 +770,7 @@ namespace
 	// so it never gets in the way of the player. One per call; the call comes again.
 	void PreloadStep()
 	{
-		if (g_alwaysLoaded.empty() || !g_control || !g_control->preloadAllowed) return;
+		if (g_alwaysLoaded.empty() || !g_control || !g_control->preloadAllowed || g_inCommand) return;
 		if (g_control->commandSeq != g_handledCommand || GetTickCount64() - g_lastCommandAt < 4000) return;
 		for (const std::wstring& path : g_alwaysLoaded)
 		{
@@ -805,7 +811,7 @@ namespace
 			if (PluginHost* old = g_chain.Plugin(arg)) CloseWindow(old);   // before the plugin goes
 			if (g_chain.Replace(arg, text, error)) MarkModified();
 			else { SetLoadError(error.empty() ? "That plugin did not load." : error); SetFailedPath(text); }
-			if (openBefore & (1u << arg)) OpenWindow(arg);   // the new pedal gets the old one's window
+			if (InMask(openBefore, arg)) OpenWindow(arg);   // the new pedal gets the old one's window
 			EndLoading();
 			break;
 		case Command::RemoveSlot:
@@ -893,7 +899,7 @@ namespace
 			break;
 		case Command::DuplicateSlot:
 			BeginLoading();
-			if (g_chain.Duplicate(arg, error)) { MarkModified(); if (openBefore & (1u << arg)) OpenWindow(arg + 1); }
+			if (g_chain.Duplicate(arg, error)) { MarkModified(); if (InMask(openBefore, arg)) OpenWindow(arg + 1); }
 			else SetLoadError(error.empty() ? "That plugin did not load a second time." : error);
 			EndLoading();
 			break;
@@ -950,6 +956,34 @@ namespace
 		case Command::SetStandby:
 			SetStandby(arg != 0);
 			break;
+		case Command::ReloadPlugin:
+		{
+			// The plugin browser's or a pedal's Reload: its windows close before the plugin goes and reopen after.
+			// They are matched by copy, not slot number: a copy that does not come back moves the ones after it up.
+			// Other plugins' windows stay open.
+			std::vector<bool> hadWindow;   // per copy in the chain, in chain order
+			for (int i = 0; i < g_chain.Count(); ++i)
+				if (_wcsicmp(g_chain.Path(i).c_str(), text.c_str()) == 0)
+				{
+					hadWindow.push_back(WindowForPlugin(g_chain.Plugin(i)) != nullptr);
+					CloseWindow(g_chain.Plugin(i));
+				}
+			BeginLoading();
+			int sparesDropped = 0;
+			std::vector<int> slots;
+			const int countBefore = g_chain.Count();
+			const bool reloaded = g_chain.Reload(text, error, sparesDropped, slots);
+			if (!reloaded) { SetLoadError(error); SetFailedPath(text); }
+			// A spare (Always keep loaded, Load in the background, or a recent one) comes back as a spare, unless the
+			// chain's copy now covers it. Not after a failed reload: it would only fail again.
+			else if (sparesDropped > 0 && slots.empty()) LoadSpareNow(text, "reloaded", true);
+			for (size_t k = 0; k < slots.size() && k < hadWindow.size(); ++k)
+				if (hadWindow[k] && slots[k] >= 0) OpenWindow(slots[k]);
+			if (g_chain.Count() != countBefore) MarkModified();
+			if (g_shown >= g_chain.Count()) g_shown = g_chain.Count() - 1;
+			EndLoading();
+			break;
+		}
 		case Command::ClearChain:
 			CloseAllWindows();
 			g_chain.Clear();
@@ -966,12 +1000,14 @@ namespace
 
 	void PollCommand()
 	{
-		if (!g_control || g_control->commandSeq == g_handledCommand) return;
+		if (!g_control || g_inCommand || g_control->commandSeq == g_handledCommand) return;
 		g_handledCommand = g_control->commandSeq;
 		g_lastCommandAt = GetTickCount64();
 		wchar_t text[VstHostControl::kPathChars]{};
 		memcpy(text, const_cast<const wchar_t*>(g_control->commandText), sizeof(text) - sizeof(wchar_t));
+		g_inCommand = true;
 		RunCommand(static_cast<VstHostControl::Command>(g_control->commandOp), g_control->commandArg, g_control->commandArg2, text);
+		g_inCommand = false;
 		InterlockedExchange(&g_control->commandDone, g_handledCommand);
 	}
 

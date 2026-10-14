@@ -36,7 +36,7 @@ namespace
 	// Showing the readout on demand. The Tone designer loads its chain without the game knowing, so the game never
 	// shows its tone readout for it (it does only when its own tone slot changes, e.g. the 1-4 hotkeys). Its song
 	// object has a 0.5 s countdown that, on reaching zero, shows the readout for the current tone on the game thread
-	// (atlas: GamePlaysongLAS+0x500, producer B 0x7E8040); setting it brings the native readout up, and the detour
+	// (GamePlaysongLAS+0x500, read by the readout producer at 0x7E8040); setting it brings the native readout up, and the detour
 	// above names our tone in it. The song object is reached through the per-frame tone component, captured by a
 	// one-instruction detour on its Update (component+0x0C = song object).
 	constexpr uintptr_t TONES_UPDATE_RVA = 0x000649E0;          // GameComponentTones::Update, VA 0x4649E0
@@ -139,8 +139,8 @@ namespace
 		else if (!ReadGuarded(component, componentVtable) || componentVtable != base + TONES_COMPONENT_VTABLE_RVA) missing = "the tone component is gone";
 		else if (!ReadGuarded(component + COMPONENT_OWNER, owner) || !owner) missing = "the tone component has no song object";
 		else if (!ReadGuarded(owner, ownerVtable) || ownerVtable != base + PLAYSONG_VTABLE_RVA) missing = "its owner is not the song object";
-		// Shown while the song is still loading (just after the tuner), the readout is cleared within half a second
-		// (2026-10-11): wait until the song has played a second (song clock, the float Note by Note also reads).
+		// Shown while the song is still loading (just after the tuner), the readout is cleared within half a second:
+		// wait until the song has played a second (song clock, the float Note by Note also reads).
 		float clock = 0.0f;
 		if (!missing && (!ReadGuarded(owner + SONG_CLOCK, clock) || !(clock >= 1.0f))) missing = "the song is not playing yet";
 		if (missing)

@@ -113,6 +113,9 @@ namespace VstHostLink
 	void LoadInBackground(const std::wstring& path);              // now, until the game closes (host running)
 	void SetAlwaysLoaded(const std::wstring& path, bool on);      // every session, loaded in the background
 	void Unload(const std::wstring& path);                        // its spares go, and Always is cleared
+	// Every loaded copy (chain and spares) unloaded and loaded again from scratch, settings kept: for a plugin that
+	// only sees new content (imported tones, a changed library) when it starts. Sound stops while it loads.
+	void Reload(const std::wstring& path);
 	void DismissCrashNote();
 
 	// Chain commands (queued; the host handles them in order). AddPlugin starts the host when it is not running.
