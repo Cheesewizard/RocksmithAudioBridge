@@ -137,8 +137,8 @@ namespace AsioProxy
 				std::this_thread::sleep_for(std::chrono::milliseconds(1));
 			if (m_callbacksInFlight.load(std::memory_order_seq_cst) != 0)
 			{
-				// Wedged inside its callback (2026-10-11: Realtek ASIO and ASIO4ALL fighting over one sound chip ended in
-				// heap corruption when the rings were freed under a running callback). Quarantine like the output
+				// Wedged inside its callback (two drivers fighting over one sound chip can end in heap corruption when the
+				// rings are freed under a running callback). Quarantine like the output
 				// driver: leave the driver, its buffers and the rings allocated for good and only detach this object.
 				if (m_log) m_log("SplitInput: '%ls' did not leave its callback; left running detached", m_driverName.c_str());
 				Quarantine();

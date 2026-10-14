@@ -243,6 +243,85 @@ namespace VstHost
 		return true;
 	}
 
+	bool Chain::Reload(const std::wstring& path, std::string& error, int& sparesDropped, std::vector<int>& slots)
+	{
+		sparesDropped = 0;
+		slots.clear();
+		if (!IsLoaded(path)) return true;
+
+		// The copies leave the chain while they reload, and the rest of it plays on. No instance may be left, or the
+		// module stays loaded. They are reloaded off to the side, like Add and Replace do, because the chain must
+		// never hold a slot without a plugin: a plugin that pumps messages while it loads (a licence dialog, COM)
+		// lets the host's timers, autosave, an audio reset and the page's next command run meanwhile, and they all
+		// use every slot's plugin.
+		std::vector<std::unique_ptr<Slot>> copies, others;
+		std::vector<size_t> positions;
+		Pause();
+		for (size_t i = 0; i < m_slots.size(); ++i)
+		{
+			if (_wcsicmp(m_slots[i]->path.c_str(), path.c_str()) == 0) { positions.push_back(i); copies.push_back(std::move(m_slots[i])); }
+			else others.push_back(std::move(m_slots[i]));
+		}
+		m_slots.swap(others);
+		m_reloading = !copies.empty();
+		Resume();
+
+		std::vector<std::vector<char>> states(copies.size());
+		for (size_t m = 0; m < copies.size(); ++m)
+		{
+			PluginHost& plugin = *copies[m]->plugin;
+			plugin.GetState(states[m]);
+			plugin.SaveState();   // its starting point next time it is added
+			plugin.Suspend();
+			copies[m]->plugin.reset();
+		}
+		const size_t sparesBefore = m_spares.size();
+		DropSpares(path);
+		sparesDropped = static_cast<int>(sparesBefore - m_spares.size());
+		Log("reload: %ls unloaded (%zu in the chain, %d spare(s))", path.c_str(), copies.size(), sparesDropped);
+
+		bool ok = true;
+		auto fail = [&](const std::string& why) { ok = false; if (error.empty()) error = why.empty() ? "The plugin did not load again." : why; };
+		std::vector<int> preparedFor(copies.size(), 0);
+		m_loadTotal = std::max(1, static_cast<int>(copies.size()));
+		for (size_t m = 0; m < copies.size(); ++m)
+		{
+			m_loadStep = static_cast<int>(m) + 1;
+			Slot& slot = *copies[m];
+			std::string slotError;
+			if (LoadSlot(slot, path, slotError)) { preparedFor[m] = m_frames; slot.plugin->SetState(states[m]); }
+			else fail(slotError);
+		}
+		m_loadStep = m_loadTotal = 1;
+		// An audio reset during a load prepared the chain for the new block size, but not the copies loaded before it.
+		for (size_t m = 0; m < copies.size(); ++m)
+		{
+			std::string slotError;
+			if (copies[m]->plugin && m_frames > 0 && preparedFor[m] != m_frames && !copies[m]->plugin->Prepare(m_frames, slotError))
+			{
+				copies[m]->plugin.reset();
+				fail(slotError);
+			}
+		}
+
+		// Back at their places, in chain order so the places stay right. A copy that did not come back leaves the
+		// chain, and the ones after it move up.
+		Pause();
+		size_t dropped = 0;
+		for (size_t m = 0; m < copies.size(); ++m)
+		{
+			if (!copies[m]->plugin) { ++dropped; slots.push_back(-1); continue; }
+			const size_t at = std::min(positions[m] - dropped, m_slots.size());
+			m_slots.insert(m_slots.begin() + static_cast<std::ptrdiff_t>(at), std::move(copies[m]));
+			slots.push_back(static_cast<int>(at));
+		}
+		if (dropped > 0) m_structureDirty = true;
+		m_reloading = false;
+		Resume();
+		Log("reload: %ls %s", path.c_str(), ok ? "loaded again" : "did NOT load again");
+		return ok;
+	}
+
 	void Chain::Clear()
 	{
 		Pause();
@@ -359,11 +438,14 @@ namespace VstHost
 	// as version 2 the next time they are saved.
 	bool Chain::SaveTone(const std::wstring& file)
 	{
+		// The reloading copies are out of the chain: a tone written now would leave them out (an autosave, or the
+		// host closing with the game). The file keeps the chain as it was until the reload is done.
+		if (m_reloading) { Log("tone: not saved while a plugin reloads (%ls)", file.c_str()); return false; }
 		const std::wstring temp = file + L".tmp";
 		FILE* out = nullptr;
 		if (_wfopen_s(&out, temp.c_str(), L"wb") != 0 || !out) { Log("tone: cannot write %ls", temp.c_str()); return false; }
 		fwrite(kToneMagic, 1, sizeof(kToneMagic), out);
-		// The trims are the player's, not the tone's (2026-10-11): a shared tone must not carry its author's input and
+		// The trims are the player's, not the tone's: a shared tone must not carry its author's input and
 		// output levels, and switching tones must not move them. Tones are written level-neutral; the fields stay
 		// for the file format; an older tone's are ignored on load.
 		const int32_t levels[2] = { 0, 0 };

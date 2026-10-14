@@ -100,6 +100,10 @@ namespace RS2014_Mod_Installer
                 WriteTextFile(Path.Combine(rootModFolder, "NOTICE.txt"), Properties.Resources.ProjectNotice);
                 // RocksmithAudioBridgeVstHost.exe is built with JUCE and is AGPLv3; its licence ships with it.
                 WriteTextFile(Path.Combine(rootModFolder, "VstHost-LICENSE.txt"), Properties.Resources.VstHostLicense);
+                // JUCE's own licence, next to the host's (NOTICE lists the libraries JUCE compiles into it).
+                WriteTextFile(Path.Combine(rootModFolder, "VstHost-JUCE-LICENSE.txt"), Properties.Resources.VstHostJuceLicense);
+                // The notices of the libraries JUCE compiles into the host (zlib, libpng, libjpeg, ...), which travel with binaries.
+                WriteTextFile(Path.Combine(rootModFolder, "VstHost-ThirdParty-Notices.txt"), Properties.Resources.VstHostThirdPartyNotices);
             }
             catch (System.UnauthorizedAccessException ex)
             {

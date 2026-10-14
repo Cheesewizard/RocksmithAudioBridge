@@ -414,7 +414,7 @@ int DropPedal::GetShiftSemitones()
 // tuning cannot be read (menus, tuner still populating) so callers can fall back rather
 // than force a spurious miss. Used to grade Note by Note against the song rather than
 // against wherever the dialed shift has detuned the input to (dialed == this when the
-// pedal is set correctly; they diverge only when the player is genuinely out of tune).
+// pedal is set correctly; they diverge only when the player is actually out of tune).
 bool DropPedal::TryGetChartMatchShiftSemitones(int& shiftSemitones)
 {
 	int stringTunings[6];

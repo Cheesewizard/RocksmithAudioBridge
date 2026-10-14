@@ -20,14 +20,15 @@ namespace CableAmpLink
 		constexpr long kMaxBlock = 256;
 		constexpr uint32_t kReturnCapacity = 8192;   // return FIFO, stereo frames
 
-		std::mutex g_controlMutex;                   // Open / Close / Configure / block size (control threads)
+		std::mutex g_controlMutex;                   // Open / Configure / block size (control threads)
 		AmpLink::Host g_host;
 		std::atomic<bool> g_open{ false };
 		std::atomic<long> g_block{ 128 };            // the block in use; changed only while closed (ApplyBlock)
 		int g_blockSetting = 0;                      // control mutex: 0 = Automatic, else 64 / 128 / 256
 		bool g_directUsb = false;                    // control mutex: the cable's last physical source was direct USB
 		std::atomic<bool> g_safety{ false };         // Extra safety buffer: one more block in the return FIFO
-		// FeedInput / Render in progress. ApplyBlock closes the link, then waits for this to reach 0 before it resizes.
+		// FeedInput / Render in progress. ApplyBlock closes the link, then waits for this to reach 0 before it resizes;
+		// Open waits for it too before OpenAt resets the state they use.
 		std::atomic<int> g_inside{ 0 };
 		struct Inside
 		{
@@ -37,7 +38,7 @@ namespace CableAmpLink
 
 		// Automatic on direct USB starts at 64 and steps up to 128 for the rest of the session once the amp misses blocks:
 		// the link keeps AmpLink::kSlots (4) blocks, 5.3 ms at 64, so a heavy chain's processing spike or a USB hiccup of
-		// that length loses blocks however much return buffer there is (harness, 2026-10-12). 128 keeps 10.7 ms.
+		// that length loses blocks however much return buffer there is (seen in simulation). 128 keeps 10.7 ms.
 		bool g_autoRaised = false;                   // control mutex
 
 		long EffectiveBlock()
@@ -65,15 +66,15 @@ namespace CableAmpLink
 		// output pulls in irregular amounts (a Windows pump that wakes late takes two periods at once). The FIFO is read
 		// through a resampler whose speed is steered so that the LOWEST fill seen in each quarter second (the trough, the
 		// one moment that decides whether the next pull runs dry) sits at a small margin above empty:
-		//   - speed, not dropped or repeated samples: a drop/repeat servo here clicked hundreds of times a minute in the
-		//     simulation harness on Windows outputs, with no clock drift at all;
+		//   - speed, not dropped or repeated samples: a drop/repeat servo here clicked hundreds of times a minute in
+		//     simulation on Windows outputs, with no clock drift at all;
 		//   - a PI controller on the trough: the integral takes up the clocks' drift, so no fill error is left over;
 		//   - a backlog (the trough far above the margin for a whole quarter second, e.g. after a device switch) is
 		//     dropped at once; a late Windows pull does not lift the trough, so it never triggers this;
 		//   - the margin adapts: every underrun adds to it; it is given back only when the deepest dip of the last 20 s
 		//     still left real room above empty, so it settles where this PC plays clean instead of learning by
-		//     underrunning again and again (the first version did, a short gap every minute in the harness).
-		// Tuned with the cable amp link harness (simulated cable, amp and outputs; exact sample-index checking).
+		//     underrunning again and again (the first version did, a short gap every minute).
+		// Tuned in simulation (simulated cable, amp and outputs; exact sample-index checking).
 		Audio::SharedOutput::OutputRateMatcher g_matcher;
 		std::array<float, kReturnCapacity * 2> g_scratch{};
 		constexpr uint32_t kLookahead = 17;           // the resampler reads 16 frames ahead
@@ -87,8 +88,8 @@ namespace CableAmpLink
 		std::atomic<uint64_t> g_underflows{ 0 };
 		// Tone designer loading a plugin or a tone (SetGuestLoading, every 100 ms, held 2 s past the end): the amp
 		// misses blocks then because it is busy, not because this PC cannot keep up. Such misses do not grow the margin,
-		// count toward Automatic's step up, or show as late buffers (2026-10-13: a background TH3-64 load and tone
-		// switches grew the margin to 24 ms and raised Automatic to 128 for the rest of the session).
+		// count toward Automatic's step up, or show as late buffers (otherwise a background plugin load and tone
+		// switches grow the margin to 24 ms and raise Automatic to 128 for the rest of the session).
 		std::atomic<bool> g_guestLoading{ false };
 		std::atomic<uint32_t> g_lateWhileLoading{ 0 };
 		uint64_t g_lastGrowAt = 0;                   // output frames at the last margin growth
@@ -96,7 +97,7 @@ namespace CableAmpLink
 		// The return FIFO (and the read-back state) is shared by two threads: the cable's capture thread collects
 		// finished blocks every time it feeds input, the output pump collects too and plays from it. The link keeps only
 		// AmpLink::kSlots (4) blocks, 10.7 ms at 128 frames, so collecting only on a 10 ms output pump lost every block
-		// the guest finished early whenever the pump ran a little late (2026-10-12: late buffers and 2.7 ms gaps even
+		// the guest finished early whenever the pump ran a little late (late buffers and 2.7 ms gaps even
 		// with a light chain). Held for microseconds; the capture thread only tries it.
 		std::atomic_flag g_fifoLock = ATOMIC_FLAG_INIT;
 		struct FifoLock
@@ -212,6 +213,7 @@ namespace CableAmpLink
 		std::lock_guard<std::mutex> lock(g_controlMutex);
 		if (g_open.load()) return;
 		const long block = EffectiveBlock();
+		while (g_inside.load() != 0) YieldProcessor();   // closed, so any FeedInput / Render in here is on its way out
 		g_margin = 0;
 		if (!OpenAt(block)) { LOG_WARNING("(CABLE AMP LINK) Could not create the amp link; Tone designer cannot play on the cable" << std::endl); return; }
 		g_open.store(true);
@@ -236,13 +238,6 @@ namespace CableAmpLink
 	int GetBlockSetting() { std::lock_guard<std::mutex> lock(g_controlMutex); return g_blockSetting; }
 	bool IsDirectUsb() { std::lock_guard<std::mutex> lock(g_controlMutex); return g_directUsb; }
 
-	void Close()
-	{
-		std::lock_guard<std::mutex> lock(g_controlMutex);
-		if (!g_open.exchange(false)) return;
-		g_host.SetRunning(false);   // not Close(): see Open
-	}
-
 	bool IsOpen() { return g_open.load(std::memory_order_acquire); }
 
 	void FeedInput(const float* mono, uint32_t frames) noexcept
@@ -260,7 +255,7 @@ namespace CableAmpLink
 			if (g_inputFill == 0) g_fillStartStamp = arrived - static_cast<UINT64>(frames - 1 - i) * 10000000 / 48000;
 			const float sample = std::isfinite(mono[i]) ? std::clamp(mono[i], -1.0f, 1.0f) : 0.0f;
 			g_inputBlock[g_inputFill++] = static_cast<int32_t>(sample * 2147483520.0f);
-			if (g_inputFill == block)
+			if (g_inputFill >= block)
 			{
 				const LONG seq = g_host.PublishedSeq() + 1;   // the seq Publish is about to use (this thread publishes alone)
 				g_blockStamp[static_cast<ULONG>(seq) % g_blockStamp.size()].store(g_fillStartStamp, std::memory_order_release);
@@ -288,8 +283,8 @@ namespace CableAmpLink
 #endif
 		const uint32_t base = kLookahead + CABLEAMPLINK_JITTER + (g_safety.load(std::memory_order_relaxed) ? static_cast<uint32_t>(block) : 0u);
 		// A different output (its period changed: a device switch, exclusive mode on or off) starts the margin afresh. What
-		// a 10 ms shared device taught it is no measure of a 3 ms exclusive one: an 8 ms margin learnt on the laptop's
-		// shared output stayed in place after switching to exclusive mode (2026-10-13), half the delay left there.
+		// a 10 ms shared device taught it is no measure of a 3 ms exclusive one: an 8 ms margin learnt on a
+		// shared output would stay in place after switching to exclusive mode, half the delay left there.
 		static uint32_t lastPeriod = 0;
 		if (periodFrames != lastPeriod)
 		{
@@ -297,7 +292,7 @@ namespace CableAmpLink
 			lastPeriod = periodFrames;
 		}
 		// The Extra safety buffer moves the margin by its block at once, both ways (it only raised the floor before, so a
-		// margin already above it did not change and the switch seemed to do nothing, 2026-10-13).
+		// margin already above it did not change and the switch seemed to do nothing).
 		static bool lastSafety = false;
 		const bool safety = g_safety.load(std::memory_order_relaxed);
 		if (safety != lastSafety)
@@ -312,8 +307,8 @@ namespace CableAmpLink
 			LOG_INFO("trace UNDERFLOW out=" << g_outputFrames << " count=" << g_count << " frames=" << frames << " margin=" << g_margin << std::endl);
 #endif
 			// Ran dry: silence until the FIFO is back up, and a block more margin from now on (a chain's spikes are about
-			// a block long; 1 ms steps left a heavy chain running dry 14 times in the harness), at most once a second: a
-			// stall runs dry again on every re-prime, and growing on each took the margin to 24 ms at 256 (2026-10-13).
+			// a block long; 1 ms steps left a heavy chain running dry over and over), at most once a second: a
+			// stall runs dry again on every re-prime, and growing on each took the margin to 24 ms at 256.
 			// Not while Tone designer is loading: that stall says nothing about what this PC needs.
 			g_primed = false;
 			if (!g_guestLoading.load(std::memory_order_relaxed) && (g_lastGrowAt == 0 || g_outputFrames - g_lastGrowAt >= 48000))
@@ -331,7 +326,7 @@ namespace CableAmpLink
 			if (g_count < g_margin + frames + kLookahead) return;   // build up first (start, or after running dry)
 			// Start exactly at the target. Nothing has played while building up, so dropping what came in on top is
 			// unheard; otherwise the controller took seconds to bring the delay down (8 ms high after Tone designer was
-			// turned back on, harness 2026-10-12).
+			// turned back on).
 			const uint32_t start = g_margin + frames + kLookahead;
 			if (g_count > start)
 			{
@@ -367,8 +362,7 @@ namespace CableAmpLink
 			{
 				// The FIFO answers 1 ppm with 0.048 frames a second, so: proportional 4 (error halves in ~4 s) and integral
 				// 0.2, about critically damped. The integral only has to carry the clocks' drift (a few hundred ppm at most),
-				// so its share is capped at 500 ppm. Too strong an integral (1.5) wound up, overshot and drained the FIFO dry
-				// (harness, 2026-10-12).
+				// so its share is capped at 500 ppm. Too strong an integral (1.5) wound up, overshot and drained the FIFO dry.
 				constexpr double kProportional = 4.0;   // ppm per frame of trough error
 				constexpr double kIntegral = 0.2;       // ppm per frame-second
 				g_integral = std::clamp(g_integral + error * 0.25, -500.0 / kIntegral, 500.0 / kIntegral);
@@ -378,7 +372,7 @@ namespace CableAmpLink
 			// Every 20 s: if nothing ran dry and even the deepest dip kept half the margin (at least 96 frames) in hand, give
 			// 16 frames back. A PC with plugin spikes keeps the headroom it showed it needs; a steady one comes down to the
 			// base. (Giving margin back whenever the dip kept 64 frames ran a spiky chain dry every few minutes; a quarter of
-			// the excess every 5 s ran a heavy chain dry 3 to 8 times in 4 minutes in the harness, 2026-10-13. A margin a
+			// the excess every 5 s ran a heavy chain dry 3 to 8 times in 4 minutes. A margin a
 			// load used to grow is now never grown in the first place: SetGuestLoading.)
 			g_periodLowest = (std::min)(g_periodLowest, g_windowMin);
 			if (g_outputFrames - g_periodStart >= 20ull * 48000)

@@ -3,7 +3,7 @@
 #include <windows.h>
 #include <cstdint>
 
-// Guitar-to-ear delay of the game's own tones in Cable mode, measured while the player plays (2026-10-13).
+// Guitar-to-ear delay of the game's own tones in Cable mode, measured while the player plays.
 //
 // Why: the Tone designer's delay is measured sample by sample (CableAmpLink), but the game's tones pass through Wwise,
 // where a sample cannot be followed. The player could not tell what game tones cost, nor compare settings.
@@ -19,7 +19,7 @@ namespace Audio::GameToneLatency
 	void Input(const float* mono, uint32_t frames, UINT64 lastSample) noexcept;
 	// Output session: the game's packet as handed to the backend; its first sample is heard at `heard` (QPC, 100 ns).
 	void Output(const float* stereo, uint32_t frames, UINT64 heard) noexcept;
-	bool Valid();      // measured from the playing in the last 30 s
+	bool Valid();      // measured from the playing in the last 60 s
 	float MedianMs();
 	// Measured, or else estimated: what the game itself adds (measured once with its amp playing, remembered per game
 	// block size) plus what the output holds now (always live). So the game tones' figure stays right while the Tone

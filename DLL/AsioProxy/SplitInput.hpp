@@ -11,7 +11,7 @@
 
 namespace AsioProxy
 {
-	// A second ASIO interface for the guitar ("Input interface" on the overlay's Output page, ticket #109), while the
+	// A second ASIO interface for the guitar (each input's Interface on the overlay's Routing card), while the
 	// bridge stays bound to the output interface and runs on its clock.
 	//
 	// RS_ASIO.ini names the bridge for every section, so RS_ASIO sees one device; the split happens in here. The
@@ -53,7 +53,7 @@ namespace AsioProxy
 
 		// Bridge audio thread, once per host block before any Read: a slot is drained from its ring only once per block,
 		// so two host channels on the same input-interface channel (both players on In 2) get the same audio. Draining
-		// it twice would hand each one alternate halves, played at double speed (heard as echo and garble, 2026-10-11).
+		// it twice would hand each one alternate halves, played at double speed (heard as echo and garble).
 		void BeginBlock() { std::fill(m_slotRead.begin(), m_slotRead.end(), static_cast<uint8_t>(0)); }
 		// Bridge audio thread: `frames` mono Int32 samples of capture slot `slot` (the index in Open's `channels`).
 		void Read(size_t slot, int32_t* mono, uint32_t frames);

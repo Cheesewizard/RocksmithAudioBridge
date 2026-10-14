@@ -23,7 +23,6 @@ namespace CableAmpLink
 {
 	// Cable mode's bridge output exists (OutputSession initialised): create the link. Idempotent.
 	void Open();
-	void Close();
 	bool IsOpen();
 
 	// Capture thread: mono float guitar samples (48 kHz).

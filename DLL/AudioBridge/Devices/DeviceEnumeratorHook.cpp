@@ -308,8 +308,8 @@ namespace Audio::PersistentInput
 			}
 		}
 		// Tells the game a device changed state, so it reopens its output (a fresh output session, at the game block size
-		// in force now). A default-device change did nothing (2026-10-13: told, no reopen); the game reopened by itself
-		// when Windows reported a headphone device going away (OnDeviceStateChanged passes through CableNotifications),
+		// in force now). A default-device change does nothing (told, no reopen); the game reopens by itself
+		// when Windows reports a headphone device going away (OnDeviceStateChanged passes through CableNotifications),
 		// so it is told the same kind of news, about our own virtual output. Returns the callbacks told.
 		int NotifyOutputReset()
 		{

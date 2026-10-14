@@ -29,7 +29,7 @@ namespace RSMods
 			tab_RSModsPlus.Controls.Add(new BrandHeader { Dock = DockStyle.Top });
 			InitializeAudioBridgeSetup(page);
 			// A FlowLayoutPanel's scroll range ignores its bottom padding, so the last card (Report a problem) was cut
-			// off at the bottom and could not be scrolled into view (2026-10-13). An empty spacer is counted.
+			// off at the bottom and could not be scrolled into view. An empty spacer is counted.
 			page.Controls.Add(new Panel { Size = new Size(1, page.LogicalToDeviceUnits(24)), Margin = Padding.Empty });
 			StyleFeatureControls(tab_RSModsPlus);
 			StudioTheme.EnableDoubleBuffering(tab_RSModsPlus);

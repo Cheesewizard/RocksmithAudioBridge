@@ -9,14 +9,13 @@ using RSMods.Util;
 namespace RSMods
 {
 	// The Audit tab: basic checks for the guitar input mode that is selected (Guitar input on the Rocksmith Audio
-	// Bridge tab), because the Real Tone Cable and an ASIO interface fail in different ways (decided 2026-10-13). Both
+	// Bridge tab), because the Real Tone Cable and an ASIO interface fail in different ways. Both
 	// modes: Rocksmith.ini's audio values with Use recommended. Cable: the cable seen by Windows and Windows' microphone
 	// access. ASIO: RS_ASIO installed, RS_ASIO.ini set up (Set up for me / Restore), the bridge's interface and whether
 	// it opened last launch. The RS_ASIO Settings tab keeps a small card (mode, worst result, Open audit) under
 	// upstream's Config card, and the Rocksmith Settings tab an Open audit button, so the audit is one click from both
 	// files it changes.
-	// History: an Audit tab (10-11), then a card with a Details panel on the RS_ASIO tab, then three lines on that card
-	// (10-12); back to a tab once the checks became mode-specific. Rebuilt on every visit and after every change, so it
+	// Rebuilt on every visit and after every change, so it
 	// shows the files as they are now. Feedback is inline (no message boxes).
 	public partial class MainForm
 	{
@@ -288,9 +287,32 @@ namespace RSMods
 		{
 			bool saving = AllowSaving;
 			AllowSaving = false;
-			try { PriorSettings_LoadASIOSettings(); PriorSettings_LoadRocksmithSettings(); }
+			try { RefreshUpstreamIniCopies(); PriorSettings_LoadASIOSettings(); PriorSettings_LoadRocksmithSettings(); }
 			catch { }
 			finally { AllowSaving = saving; }
+		}
+
+		// Upstream's writers (ASIO\WriteSettings.cs, Rocksmith\WriteSettings.cs) keep every value of their file in a static
+		// dictionary filled once at startup and rewrite the whole file from it on each edit. After the audit writes a file,
+		// those dictionaries are read again from disk, or the next edit on the upstream tab would put the old values back.
+		private static void RefreshUpstreamIniCopies()
+		{
+			ASIO.ReadSettings.DisabledOutput = ASIO.ReadSettings.DisabledInput0 = ASIO.ReadSettings.DisabledInput1 = ASIO.ReadSettings.DisabledInputMic = false;
+			foreach (ASIO.ReadSettings.Sections section in Enum.GetValues(typeof(ASIO.ReadSettings.Sections)))
+			{
+				if (!ASIO.WriteSettings.newSettings.TryGetValue(ASIO.ReadSettings.SectionToName(section), out var values)) continue;
+				foreach (string key in new List<string>(values.Keys))
+					if (!key.StartsWith(";")) values[key] = ASIO.ReadSettings.ProcessSettings(key, section);
+			}
+
+			if (!Rocksmith.ReadSettings.DoesSettingsINIExist()) return;
+			foreach (var values in Rocksmith.WriteSettings.settings.Values)
+				foreach (string key in new List<string>(values.Keys))
+				{
+					// A key missing from the file keeps the value upstream would write for it.
+					string value = Rocksmith.ReadSettings.ProcessSettings(key);
+					if (value.Length > 0) values[key] = value;
+				}
 		}
 	}
 }

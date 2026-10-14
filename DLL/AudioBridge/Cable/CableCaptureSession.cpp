@@ -5,6 +5,7 @@
 #include "AudioBridge/Engine/CableGamePeriod.hpp"
 #include "AudioBridge/Engine/AudioBridgeEngine.hpp"
 #include "AudioBridge/Engine/GameToneLatency.hpp"
+#include "AudioBridge/Engine/OutputReserve.hpp"
 #include <avrt.h>
 #include <functiondiscoverykeys_devpkey.h>
 
@@ -20,6 +21,29 @@ namespace Audio::PersistentInput
 		return static_cast<UINT64>(counter.QuadPart / frequency.QuadPart) * 10000000
 			+ static_cast<UINT64>(counter.QuadPart % frequency.QuadPart) * 10000000 / frequency.QuadPart;
 	}
+
+	namespace
+	{
+		std::atomic<bool> g_usbWaitingForRestart{ false };
+		std::atomic<bool> g_usbFallbackLogged{ false };
+
+		// Player 1's cable opened through Windows because UsbDk did not take it. Logged once per launch with the reason a
+		// player can act on: a missing UsbDk needs the installer again, an installed one that missed the cable a restart.
+		void NoteWindowsCableFallback()
+		{
+			const bool installed = UsbCableCapture::IsRuntimeInstalled();
+			g_usbWaitingForRestart.store(installed);
+			if (g_usbFallbackLogged.exchange(true)) return;
+			if (installed)
+				LOG_WARNING("(PERSISTENT INPUT) Direct USB is not active: UsbDk is installed but has not picked up the Real Tone Cable."
+					" Restart Windows to finish installing it. Until then the cable plays through Windows (about 10 ms more delay)." << std::endl);
+			else
+				LOG_WARNING("(PERSISTENT INPUT) Direct USB is not active: UsbDk is not installed. Run the Rocksmith Audio Bridge installer"
+					" again, then restart Windows. Until then the cable plays through Windows (about 10 ms more delay)." << std::endl);
+		}
+	}
+
+	bool IsDirectUsbWaitingForRestart() { return g_usbWaitingForRestart.load(std::memory_order_relaxed); }
 
 	bool IsCaptureFormat(const WAVEFORMATEX* format)
 	{
@@ -199,6 +223,8 @@ namespace Audio::PersistentInput
 			CableAmpLink::FeedInput(samples, frames);
 			// The game tones' delay is timed from here: picks as they come off the cable (GameToneLatency).
 			GameToneLatency::Input(samples, frames, timestamp + UINT64(frames - 1) * 10000000 / SAMPLE_RATE);
+			// Playing through the game's amp in a menu takes the output's loading reserve away (OutputReserve).
+			OutputReserve::NoteInput(samples, frames);
 		}
 		std::unique_lock<std::mutex> guard(packetMutex);
 		if (!running || deviceResetRequested) return;
@@ -249,8 +275,8 @@ namespace Audio::PersistentInput
 		// than 20 ms. It was timed with GetTickCount64, which moves in 15.6 ms steps, against a grace of two packets:
 		// 20 ms at 480 frames hid that, but at 256 (10.7 ms) or 128 (5.3 ms) the counter stepping just after the latest
 		// 1 ms USB packet looked like a stopped cable, and a packet of silence went into the game's input every few
-		// hundred ms. Game tones only (Tone designer is fed before this), a click each time and one more packet of delay
-		// (2026-10-13). Timed with QPC now.
+		// hundred ms. Game tones only (Tone designer is fed before this), a click each time and one more packet of delay.
+		// Timed with QPC now.
 		const UINT64 lastCapture = lastPhysicalTime.load();
 		const UINT64 grace = (std::max)(UINT64(periodFrames) * 2 * 10000000 / SAMPLE_RATE, UINT64(200000));
 		if (lastCapture && CaptureTime() - lastCapture <= grace) return;
@@ -541,14 +567,20 @@ namespace Audio::PersistentInput
 				if (running && enumerator && !backend && !usbOpen && now >= nextOpen)
 				{
 					result = OpenUsb();
-					const bool onUsb = result != S_FALSE;
-					if (!onUsb) result = OpenDevice(enumerator.Get());
+					// UsbDk saw the cable but could not take it (e.g. installed, waiting for a Windows restart): Windows
+					// still owns it, so the Windows cable input plays this session instead of the guitar staying silent.
+					if (FAILED(result) && result != lastOpenResult)
+						LOG_WARNING("(PERSISTENT INPUT) The Real Tone Cable could not be opened through UsbDk, HRESULT " << std::hex << result << std::dec << "; using the Windows cable input" << std::endl);
+					const bool onUsb = SUCCEEDED(result) && result != S_FALSE;
+					if (!onUsb)
+					{
+						result = OpenDevice(enumerator.Get());
+						if (SUCCEEDED(result) && !gatedByPlayerTwoToggle) NoteWindowsCableFallback();
+					}
+					else if (!gatedByPlayerTwoToggle) g_usbWaitingForRestart.store(false);
 					nextOpen = now + 10000000;
 					if (FAILED(result) && result != lastOpenResult)
-					{
-						if (onUsb) LOG_WARNING("(PERSISTENT INPUT) The Real Tone Cable could not be opened through UsbDk, HRESULT " << std::hex << result << std::dec << "; retrying" << std::endl);
-						else LOG_WARNING("(PERSISTENT INPUT) Waiting for selected cable, HRESULT " << std::hex << result << std::dec << std::endl);
-					}
+						LOG_WARNING("(PERSISTENT INPUT) Waiting for selected cable, HRESULT " << std::hex << result << std::dec << std::endl);
 					lastOpenResult = result;
 				}
 				if (running && capture)

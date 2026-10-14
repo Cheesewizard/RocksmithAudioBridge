@@ -23,7 +23,7 @@ namespace RSMods
 	// What it writes: every guitar section and the output on "Rocksmith Audio Bridge ASIO" at fixed channels
 	// (output 0, Player 1 input 0, Player 2 input 1); [Config] EnableAsio=1. Everything else in the file stays. The
 	// player's own device and channel choices move into the bridge: the device becomes the bridge's interface
-	// (Target) and a channel other than the fixed one becomes a channel route (the overlay's Channels card, #109).
+	// (Target) and a channel other than the fixed one becomes a channel route (the overlay's Routing card).
 	internal static class RsAsioIniSetup
 	{
 		public enum State { NoRsAsio, NotSetUp, Managed, EditedByHand }
@@ -165,11 +165,16 @@ namespace RSMods
 		}
 
 		/// <summary>Puts the player's original RS_ASIO.ini back (or removes ours if there was none) and forgets the
-		/// managed state. The bridge's interface and channel routes stay saved for a later setup.</summary>
+		/// managed state. The bridge's interface and channel routes stay saved for a later setup. The original copy is
+		/// renamed RS_ASIO.restored-&lt;time&gt;.ini, so the next Set up for me backs up the file as it is then.</summary>
 		public static void Restore(string gameDirectory)
 		{
 			string path = IniPath(gameDirectory);
-			if (File.Exists(OriginalBackupPath)) File.Copy(OriginalBackupPath, path, overwrite: true);
+			if (File.Exists(OriginalBackupPath))
+			{
+				File.Copy(OriginalBackupPath, path, overwrite: true);
+				File.Move(OriginalBackupPath, UniqueBackupPath("RS_ASIO.restored-" + DateTime.Now.ToString("yyyyMMdd-HHmmss")));
+			}
 			else if (ReadState(OriginalMissingValue) == "1") { if (File.Exists(path)) File.Delete(path); }
 			else throw new InvalidOperationException("There is no saved original RS_ASIO.ini to restore.");
 			WriteState(HashValue, null);
@@ -189,7 +194,7 @@ namespace RSMods
 			}
 			else if (File.Exists(path) && GetState(gameDirectory) == State.EditedByHand)
 			{
-				string dated = Path.Combine(BackupFolder, "RS_ASIO." + DateTime.Now.ToString("yyyy-MM-dd HHmmss") + ".ini");
+				string dated = UniqueBackupPath("RS_ASIO." + DateTime.Now.ToString("yyyy-MM-dd HHmmss"));
 				File.Copy(path, dated, overwrite: false);
 				done.Add("Your edited RS_ASIO.ini is saved as " + Path.GetFileName(dated) + ".");
 			}
@@ -204,7 +209,15 @@ namespace RSMods
 			string name = Path.GetFileNameWithoutExtension(path);
 			string original = Path.Combine(BackupFolder, name + ".original.ini");
 			if (!File.Exists(original)) File.Copy(path, original);
-			File.Copy(path, Path.Combine(BackupFolder, name + "." + DateTime.Now.ToString("yyyy-MM-dd HHmmss") + ".ini"), overwrite: true);
+			File.Copy(path, UniqueBackupPath(name + "." + DateTime.Now.ToString("yyyy-MM-dd HHmmss")));
+		}
+
+		// <stem>.ini in the backup folder, or <stem> (2).ini and up when two backups land in the same second.
+		private static string UniqueBackupPath(string stem)
+		{
+			string path = Path.Combine(BackupFolder, stem + ".ini");
+			for (int copy = 2; File.Exists(path); copy++) path = Path.Combine(BackupFolder, stem + " (" + copy + ").ini");
+			return path;
 		}
 
 		public static bool IsBridge(string driver) =>

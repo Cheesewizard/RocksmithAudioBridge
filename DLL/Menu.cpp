@@ -38,7 +38,7 @@ namespace Menu {
 	/// </summary>
 	void RenderImGuiMenu() {
 		// Frame pacing, game frame to game frame (this runs once per frame). A player can see a stutter while the
-		// FPS counter reads hundreds (2026-10-12, Tone designer on the cable): the average hides single long frames.
+		// FPS counter reads hundreds: the average hides single long frames.
 		// Every 30 s that had any, one line says how many frames took over 25 / 50 ms and the worst, so a stutter can
 		// be placed in time and against the other log lines.
 		{

@@ -3,8 +3,8 @@ namespace RSMods
 	internal static class ProductInfo
 	{
 		// Product name. Internal names nobody sees (pipes, shared memory, registry keys, resource names) keep
-		// "RSModsPlus"; user-visible folders use the product name (%LOCALAPPDATA%\Rocksmith Audio Bridge,
-		// Videos\Rocksmith Audio Bridge). The runtime files are RocksmithAudioBridge.dll and RocksmithAudioBridgeAsio.dll.
+		// "RSModsPlus"; user-visible folders use the product name (%LOCALAPPDATA%\Rocksmith Audio Bridge).
+		// The runtime files are RocksmithAudioBridge.dll and RocksmithAudioBridgeAsio.dll.
 		public const string PRODUCT_NAME = "Rocksmith Audio Bridge";
 		// Keep VERSION in step with DLL/Shared/ProductVersion.hpp VERSION.
 		public const string VERSION = "4.2";

@@ -5,6 +5,7 @@
 #include "Mods/VolumeControl.hpp"
 #include "DropPedal/DropPedal.hpp"
 #include "GameState.hpp"
+#include "AudioBridge/Engine/OutputReserve.hpp"
 #include <atomic>
 #include <cmath>
 #include <mutex>
@@ -25,6 +26,7 @@ namespace ExternalAmp
 		std::atomic<int> g_returnTenths{ 0 };
 		std::atomic<bool> g_safety{ false };
 		std::atomic<int> g_cableBlock{ 0 };
+		std::atomic<bool> g_cableBlockApplying{ false };   // a SetCableBlock thread is running
 		std::atomic<bool> g_silenceTuning{ false };
 
 		std::mutex g_snapshotMutex;
@@ -262,6 +264,24 @@ namespace ExternalAmp
 
 				wasTuning = tuning;
 
+				// Cable mode's exclusive / ASIO output keeps a ~50 ms reserve while the game loads (OutputReserve), and
+				// goes lean where the game's sound has to be fast: in songs, tuners and calibration, and in menus while
+				// the player plays through the game's own amp (not while Tone designer plays it: that skips the queue).
+				{
+					const std::string menu = GameState::GetCurrentMenu();
+					// SelectionListDialog is left out: the game uses it for other lists too, and at boot.
+					const bool playScreen = menu != "SelectionListDialog" && (Contains(menu, GameState::songModes) || Contains(menu, GameState::songMenus)
+						|| Contains(menu, GameState::tuningMenus) || Contains(menu, GameState::calibrationMenus)
+						|| Contains(menu, GameState::lessonModes) || Contains(menu, GameState::riffRepeaterMenus));
+					const bool noodling = !mute.Muted() && Audio::OutputReserve::Playing();
+					const bool reserve = !playScreen && !noodling;
+					if (reserve != Audio::OutputReserve::Wanted())
+					{
+						Audio::OutputReserve::SetWanted(reserve);
+						LOG_INFO("(CABLE LATENCY) output reserve " << (reserve ? "on (menus / loading)" : playScreen ? "off (playing screen " + menu + ")" : std::string("off (playing through the game's amp)")) << std::endl);
+					}
+				}
+
 				const ULONGLONG now = GetTickCount64();
 				if (now >= nextRegistryCheck) { guest64 = Guest64Registered(); nextRegistryCheck = now + 5000; }
 
@@ -326,8 +346,21 @@ namespace ExternalAmp
 		frames = frames == 64 || frames == 128 || frames == 256 ? frames : 0;
 		g_cableBlock.store(frames);
 		WriteDword(L"CableBlockFrames", static_cast<DWORD>(frames));
-		// Reopening the link waits for the audio threads and writes the registry: not on the render thread.
-		std::thread([frames] { CableAmpLink::SetBlockSetting(frames); }).detach();
+		// Reopening the link waits for the audio threads and writes the registry: not on the render thread. One thread
+		// at a time, applying the newest setting until nothing changed meanwhile, so quick clicks cannot end on an older size.
+		if (g_cableBlockApplying.exchange(true)) return;
+		std::thread([]
+		{
+			for (;;)
+			{
+				const int applied = g_cableBlock.load();
+				CableAmpLink::SetBlockSetting(applied);
+				if (g_cableBlock.load() != applied) continue;
+				g_cableBlockApplying.store(false);
+				// A click just before the store saw this thread still running and left its value to it.
+				if (g_cableBlock.load() == applied || g_cableBlockApplying.exchange(true)) return;
+			}
+		}).detach();
 	}
 	void SetSilenceWhileTuning(bool on)
 	{

@@ -10,6 +10,7 @@
 #include "Recorder/TakeRecorder.hpp"
 #include "NoteByNote/Ml/MlServiceLauncher.hpp"
 #include "ExternalAmp/ExternalAmp.hpp"
+#include "ExternalAmp/CableAmpLink.hpp"
 #include "ToneDesigner/VstHostLink.hpp"
 #include "Shared/VstHostControl.hpp"
 #include "Shared/ShellOpenAsync.hpp"
@@ -799,7 +800,7 @@ namespace Overlay
 			enum class Dialog { None, SaveAs, Rename, Delete, NewTone, Discard, Levels, NewFolder, DeleteTones, Restore };
 			enum Filter { All, Favourites, Amps, Effects, Dynamics, Instruments, Recent, FilterCount };
 
-			// The panel's own colours (the mockup's): neutral greys, so it reads as a separate app inside the overlay.
+			// The panel's own colours: neutral greys, so it reads as a separate app inside the overlay.
 			namespace Ink
 			{
 				constexpr ImU32 App = IM_COL32(21, 23, 28, 255);
@@ -1144,6 +1145,8 @@ namespace Overlay
 					ImGui::EndMenu();
 				}
 				if (ImGui::MenuItem("Duplicate", nullptr, false, valid && idle && count < VstHostControl::kMaxSlots)) VstHostLink::DuplicateSlot(i);
+				if (ImGui::MenuItem("Reload plugin", nullptr, false, valid && idle)) VstHostLink::Reload(vst.slots[i].path);
+				Hint("Closes the plugin completely and starts it again, keeping its settings: for when it needs a fresh start to see something new, such as tones you imported into it. Every copy of it reloads; the rest of the chain keeps playing meanwhile.");
 				if (ImGui::MenuItem("Move left", nullptr, false, valid && idle && i > 0)) { VstHostLink::MoveSlot(i, -1); S().selected = i - 1; }
 				if (ImGui::MenuItem("Move right", nullptr, false, valid && idle && i + 1 < count)) { VstHostLink::MoveSlot(i, +1); S().selected = i + 1; }
 				ImGui::Separator();
@@ -2135,8 +2138,8 @@ namespace Overlay
 				};
 				auto slow = [](const VstHostLink::SongLoad* load) { return load && load->seconds >= 3.0f && !load->plugins.empty(); };
 				auto playing = [&](const std::string& key) { return !vst.songKey.empty() && _stricmp(key.c_str(), vst.songKey.c_str()) == 0; };
-				// The song playing now goes through the calls the old song strip under the board used, so it behaves
-				// the same: its tone loads at once (or the one playing stays when it is taken away).
+				// The song playing now goes through SetSongTone / ClearSongTone as well, so its tone loads at once (or
+				// the one playing stays when it is taken away).
 				auto assignTo = [&](const std::vector<std::string>& keys, const std::string& tone) {
 					for (const std::string& key : keys) {
 						if (!playing(key)) VstHostLink::SetToneForSong(key, tone);
@@ -2153,8 +2156,7 @@ namespace Overlay
 				const float inner = ImGui::GetWindowContentRegionMax().x - left;
 
 				// Title row (after the toggle), laid out like the plugin browser's: the count, search on the right.
-				// While a tone's plugins load in the background (what the old song strip under the board said), that
-				// shows in place of the count; amber while a change waits for it.
+				// While a tone's plugins load in the background, that shows in place of the count; amber while a change waits for it.
 				const SongLibrary::State state = SongLibrary::GetState();
 				const std::string count = !vst.preloadingName.empty()
 					? (vst.waitingOnBackground ? "Waiting for " + vst.preloadingName + " to finish loading, then your change goes through..."
@@ -2546,6 +2548,9 @@ namespace Overlay
 							Hint("Loads it in the background every time Tone designer starts (outside songs), so tones that use it always switch at once. Costs memory while loaded.");
 							if (ImGui::MenuItem("Unload", nullptr, false, vst.hostRunning && loaded)) VstHostLink::Unload(plugin.path);
 							Hint("Frees its memory. In the chain it stays; this only unloads the spare copy.");
+							if (ImGui::MenuItem("Reload", nullptr, false, vst.hostRunning && !vst.busy && (inChain || loaded) && !Loading(vst, plugin.path)))
+								VstHostLink::Reload(plugin.path);
+							Hint("Closes the plugin completely and starts it again, keeping each pedal's settings: for when it needs a fresh start to see something new, such as tones you imported into it. The rest of the chain keeps playing while it loads.");
 							ImGui::Separator();
 							if (ImGui::MenuItem("Favourite", nullptr, favourite)) VstHostLink::SetFavourite(plugin.path, !favourite);
 							if (ImGui::MenuItem("Show the file")) VstHostLink::ShowPluginFile(plugin.path);
@@ -3687,7 +3692,7 @@ namespace Overlay
 					char estimate[64] = "";
 					const double shared = device.sharedPeriod / 48.0, exclusive = device.exclusivePeriod / 48.0;
 					// A device whose driver stalls in event-driven exclusive mode runs it polling, three periods deep
-					// (OutputBackend remembers it): say what it really gets, not the minimum it reports (2026-10-13).
+					// (OutputBackend remembers it): say what it really gets, not the minimum it reports.
 					DWORD polling = 0, pollingSize = sizeof(polling);
 					const bool needsPolling = RegGetValueW(HKEY_CURRENT_USER, L"Software\\RSMods\\AsioProxy\\ExclusivePolling", device.id.c_str(),
 						RRF_RT_REG_DWORD, nullptr, &polling, &pollingSize) == ERROR_SUCCESS && polling;
@@ -3745,8 +3750,8 @@ namespace Overlay
 			if (onWindowsDevice && !pending.active) {
 				const bool isExclusive = outputMode == 2 || outputMode == 3;
 				bool wantExclusive = isExclusive;
-				// Taking Windows' default output away breaks what plays on it (YouTube showed "Audio renderer error",
-				// 2026-10-13): say so before, while there is still time to move Windows' default.
+				// Taking Windows' default output away breaks what plays on it (YouTube shows "Audio renderer error"):
+				// say so before, while there is still time to move Windows' default.
 				bool windowsDefault = false;
 				for (const auto& device : snapshot.devices)
 					if (device.id == Audio::SharedOutput::ExclusiveOutputDevice::WindowsId(endpoint)) windowsDefault = device.isDefault;
@@ -3757,9 +3762,15 @@ namespace Overlay
 					ImGui::PopTextWrapPos();
 					ImGui::PopStyleColor();
 				}
+				// Output only: the cable's input path is separate. By default it is read directly over USB (UsbCableCapture),
+				// already past Windows, so the text must not suggest exclusive mode is what makes the guitar fast. Exclusive
+				// is opt-in: some devices refuse it, and on a few it is slower than shared (polling, deeper buffer).
+				const char* exclusiveText = CableAmpLink::IsDirectUsb()
+					? "Sound output only. The guitar already skips Windows: the cable is read directly over USB. Not every device supports exclusive mode, and on a few it adds latency; compare the buffer shown above."
+					: "Sound output only; the guitar's input is not affected. Not every device supports exclusive mode, and on a few it adds latency; compare the buffer shown above.";
 				ImGui::BeginDisabled(outputMode == 0);
-				if (ToggleRow("Exclusive mode", "Bypasses Windows' mixer. Actual mode and buffer are shown above.", &wantExclusive,
-					"Other apps cannot play on this device while exclusive output is active. Some devices require polling with a larger buffer; shared recovery turns this switch off.")) {
+				if (ToggleRow("Exclusive mode", exclusiveText, &wantExclusive,
+					"Takes Windows' mixer off this device. Other apps cannot play on it while exclusive output is active. A device that refuses exclusive mode stays shared and this switch turns itself off; one whose driver needs polling runs a larger buffer, which can be slower than shared.")) {
 					const std::wstring windowsId = Audio::SharedOutput::ExclusiveOutputDevice::WindowsId(endpoint);
 					const std::wstring target = wantExclusive ? Audio::SharedOutput::ExclusiveOutputDevice::EndpointOf(windowsId) : windowsId;
 					pending = PendingSwitch{};
@@ -3803,7 +3814,7 @@ namespace Overlay
 				}
 			}
 			// The output moved without the user (unplugged, fell back, came back): an old "Now playing through" named the
-			// wrong device next to the one shown playing (2026-10-13).
+			// wrong device next to the one shown playing.
 			if (!pending.active && !g_outputMessageEndpoint.empty() && std::wstring(live.status.endpoint) != g_outputMessageEndpoint) OutputSay(std::string(), false);
 			if (!g_outputMessage.empty()) {
 				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(g_outputMessageIsError ? Color::Bad : Color::Muted));
@@ -3864,7 +3875,7 @@ namespace Overlay
 			BeginCard("Device buffer");
 			char current[64];
 			sprintf_s(current, "Now %u frames (%.2f ms).", period, period / 48.0);
-			// At the device's smallest, say so, or players wonder why it cannot go lower (2026-10-13).
+			// At the device's smallest, say so, or players wonder why it cannot go lower.
 			const std::string about = period && period <= minimum
 				? std::string(current) + " The smallest this device allows in shared mode; for less, turn on Exclusive mode above."
 				: std::string(current) + " How much sound Windows hands this device at a time. Smaller is lower latency; raise it if you hear crackles. Applies at once.";
@@ -3896,7 +3907,7 @@ namespace Overlay
 
 		// The block size the game's own engine runs at in Cable mode (CableGamePeriod.hpp). RS_ASIO players get it from
 		// their interface's buffer; Automatic does the same here from the output the game plays to. Fixed for the
-		// session when the game opens its devices, so a change says it applies next start.
+		// session when the game opens its devices, so a change applies with Apply now (the output reopens) or at the next start.
 		void GameBlockCard(const LiveState& live)
 		{
 			const std::wstring endpoint = live.status.endpoint;
@@ -3927,7 +3938,7 @@ namespace Overlay
 			// A different size waiting: one action, Apply now. The bridge tells the game its output changed and it reopens
 			// it at the new size (the input keeps its start-up size); off the render thread, the game may work inside the
 			// call. "Restart the game" only shows once Apply now was tried and the game did not take it within 3 s
-			// (a warning plus a button was two answers to one question, 2026-10-13).
+			// (a warning plus a button was two answers to one question).
 			static ULONGLONG appliedAt = 0;
 			static UINT32 appliedSize = 0;
 			if (next != now) {
@@ -3955,11 +3966,10 @@ namespace Overlay
 			EndCard();
 		}
 
-		// ---- Channel routing (ticket #109) ------------------------------------------------------------------
+		// ---- Channel routing ------------------------------------------------------------------
 		// Which channels of the ASIO interface the game's output and each player's input use. RS_ASIO.ini keeps
 		// asking for the same channels; the bridge maps them onto the ones picked here and applies a change at
 		// once (a short gap while it re-creates the interface's buffers), saved per interface for the next launch.
-		// One interface for every role for now: per-player interfaces are step 2 of the ticket.
 
 
 		// 0 idle, 1 applying, 2 applied, 3 saved for next launch, 4 failed.
@@ -4033,7 +4043,7 @@ namespace Overlay
 			PillRow(label, clock.settled ? "In sync" : "Catching up", clock.settled ? Color::Good : Color::Warn, clock.detail);
 		}
 
-		// ---- Routing (ticket #109) ----------------------------------------------------------------------------
+		// ---- Routing ----------------------------------------------------------------------------
 		// Each part of the game's audio picks an interface and a channel, the way RS_ASIO.ini can, but live: the output
 		// pair on the output interface (Switch output above picks that interface), and each input (Player 1, Player 2,
 		// the mic) on any ASIO interface, the output's by default. RS_ASIO.ini keeps naming the bridge at fixed
@@ -4510,7 +4520,7 @@ namespace Overlay
 			LatencyReadout(right, origin.y);
 		}
 
-		// Guitar to ear, on every page (2026-10-13): the Tone designer's delay (measured per sample, CableAmpLink) and the
+		// Guitar to ear, on every page: the Tone designer's delay (measured per sample, CableAmpLink) and the
 		// game tones' (measured from picks and attacks, GameToneLatency), the one being heard brighter. Cable mode only:
 		// both are timed from the cable.
 		void LatencyReadout(float right, float top)
@@ -4521,9 +4531,10 @@ namespace Overlay
 			char designer[48], game[48];
 			if (amp.cableLatencyMs > 0.0f) sprintf_s(designer, "Tone designer %.0f ms", amp.cableLatencyMs);
 			else sprintf_s(designer, "Tone designer -");
-			// Measured now, or the remembered game part plus the live output part ("~"), e.g. while the Tone designer plays.
-			if (Audio::GameToneLatency::Valid()) sprintf_s(game, "Game tones %.0f ms", Audio::GameToneLatency::MedianMs());
-			else if (Audio::GameToneLatency::Available()) sprintf_s(game, "Game tones ~%.0f ms", Audio::GameToneLatency::CurrentMs());
+			// Measured now, or the remembered game part plus the live output part (e.g. while the Tone designer plays).
+			// Both are worked out from picks, so the figure always reads as an estimate.
+			if (Audio::GameToneLatency::Valid()) sprintf_s(game, "Game tones ~%.0f ms (est.)", Audio::GameToneLatency::MedianMs());
+			else if (Audio::GameToneLatency::Available()) sprintf_s(game, "Game tones ~%.0f ms (est.)", Audio::GameToneLatency::CurrentMs());
 			else sprintf_s(game, "Game tones: play with the game amp once");
 			ImGui::PushFont(GetFonts().caption);
 			const char* title = "LATENCY ESTIMATE";
@@ -4537,7 +4548,7 @@ namespace Overlay
 			ImGui::PopFont();
 			ImGui::SetCursorScreenPos(ImVec2(x, top + 10.0f));
 			ImGui::InvisibleButton("##latency", ImVec2(designerW + gap + gameW, 38.0f));
-			Hint("Latency estimates: software timing plus the output driver's reported delay. Tone designer tracks audio blocks; game tones match your picks to output attacks. Cable conversion and USB delivery are excluded. This is not a calibrated guitar-to-ear measurement.");
+			Hint("Latency estimates: software timing plus the output driver's reported delay. Tone designer tracks audio blocks; game tones are a rougher estimate, matching your picks to output attacks. Cable conversion and USB delivery are excluded. This is not a calibrated guitar-to-ear measurement.");
 		}
 
 		void Sidebar(Page& page)

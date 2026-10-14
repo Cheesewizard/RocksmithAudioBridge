@@ -1095,11 +1095,14 @@ namespace {
 			&& data != nullptr)
 		{
 			const auto* bytes = static_cast<const uint8_t*>(data);
-			// Numeral decode trace: during a frozen chord, every glyph flush of one render frame
-			// every ~1.5 s logs each quad's centre and the coordinate it decoded to, so a game
-			// numeral that never registers as "resting" shows why.
+#if defined(_DEBUG)
+			// Numeral decode trace (Debug only): during a frozen chord, every glyph flush of one
+			// render frame every ~1.5 s logs each quad's centre and the coordinate it decoded to,
+			// so a game numeral that never registers as "resting" shows why. One stream, reset
+			// only for a flush that logs.
 			static ULONGLONG lastGlyphTraceTick = 0;
 			static uint64_t glyphTraceFrame = 0;
+			static std::ostringstream glyphTrace;
 			if (isGlyphFlush && NoteByNoteHighwayRenderer::IsChordHoldFrozen()
 				&& GetTickCount64() - lastGlyphTraceTick >= 1500)
 			{
@@ -1107,7 +1110,12 @@ namespace {
 				glyphTraceFrame = noteByNoteRenderFrame;
 			}
 			const bool shouldTraceGlyph = isGlyphFlush && glyphTraceFrame == noteByNoteRenderFrame;
-			std::ostringstream glyphTrace;
+			if (shouldTraceGlyph)
+			{
+				glyphTrace.str(std::string());
+				glyphTrace.clear();
+			}
+#endif
 			for (UINT block = 0; block < blockCount; ++block)
 			{
 				keepBlock[block] = true;
@@ -1186,6 +1194,7 @@ namespace {
 						}
 					}
 				}
+#if defined(_DEBUG)
 				if (shouldTraceGlyph && block < 24)
 				{
 					glyphTrace << ' ' << block << '[' << std::fixed << std::setprecision(3)
@@ -1194,6 +1203,7 @@ namespace {
 					if (stringIndex >= 0 && fretIndex >= 0) glyphTrace << stringIndex << ':' << fretIndex + 1;
 					else glyphTrace << '?';
 				}
+#endif
 				// A block that does not decode onto both tables is not provably a
 				// marker quad; it is always kept.
 				if (stringIndex < 0 || fretIndex < 0) continue;
@@ -1248,6 +1258,7 @@ namespace {
 				staleMarkerQuadsDropped.fetch_add(1, std::memory_order_relaxed);
 			}
 			vertexBuffer->Unlock();
+#if defined(_DEBUG)
 			if (shouldTraceGlyph)
 			{
 				std::ostringstream keepText;
@@ -1256,6 +1267,7 @@ namespace {
 					<< " blocks=" << blockCount << " keep=[" << keepText.str() << " ] quads[x,y,z]:" << glyphTrace.str()
 					<< std::endl);
 			}
+#endif
 		}
 		vertexBuffer->Release();
 		if (!didDecode) return false;

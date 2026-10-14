@@ -48,6 +48,8 @@ namespace VstHostControl
 		LoadSpare = 18,     // text = plugin path: load it now as a spare and keep it while the host runs
 		UnloadSpare = 19,   // text = plugin path: unload its spares (not the chain's)
 		SetStandby = 20,    // arg = 1: off, the game's amp plays and the plugins stay loaded; 0: on again
+		ReloadPlugin = 21,  // text = plugin path: unload every copy (chain and spares), load it again from scratch
+		                    // (an older host ignores it; the layout is unchanged, so no new version)
 	};
 
 	struct Slot

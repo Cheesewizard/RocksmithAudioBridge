@@ -8,11 +8,11 @@
 #include <thread>
 #include <vector>
 
-// A Windows output device in exclusive mode, as the bridge's playback device in Cable mode (2026-10-13).
+// A Windows output device in exclusive mode, as the bridge's playback device in Cable mode.
 //
 // Why: in shared mode Windows mixes every app's sound and hands it to the device in its own period, 10 ms on most
 // headphone jacks and USB devices, and the bridge has to keep up to a period queued in front of that. Measured on a
-// laptop's headphones with the Tone designer: about 28 ms guitar to ear, two thirds of it Windows. In exclusive mode the
+// headphone jack with the Tone designer: about 28 ms guitar to ear, two thirds of it Windows. In exclusive mode the
 // bridge talks to the device's driver directly at the device's smallest period (often 3 ms), as an ASIO driver does.
 // The price: while Rocksmith runs, no other program can play on that device (Windows says it is in use).
 //
@@ -40,7 +40,7 @@ namespace Audio::SharedOutput
 		// period (or `desiredFrames` when that is larger). `failure` says why not, in words for the overlay. Called on the
 		// output backend's thread (COM initialised there).
 		// polling = false: event driven, the driver wakes us once per period (the lowest delay). Some laptop drivers stop
-		// waking after a second in exclusive mode (Realtek speakers, 2026-10-13: a reopen loop heard as a high, mangled
+		// waking after a second in exclusive mode (some Realtek speakers: a reopen loop heard as a high, mangled
 		// tone), so polling = true instead keeps three periods in the device and tops it up a period at a time on a 1 ms
 		// timer, needing nothing from the driver but its fill level (one period more delay).
 		bool Open(const std::wstring& windowsId, const Activate& activate, uint32_t desiredFrames, bool polling, Fill fill, std::string& failure);
@@ -76,8 +76,6 @@ namespace Audio::SharedOutput
 		uint32_t m_chunkFrames = 0;    // one period: the size of every fill
 		bool m_polling = false;
 		uint32_t m_latencyFrames = 0;
-		uint32_t m_channels = 2;
-		uint32_t m_blockAlign = 0;
 		Sample m_sample = Sample::Float32;
 		const char* m_formatName = "";
 		std::vector<float> m_stereo;

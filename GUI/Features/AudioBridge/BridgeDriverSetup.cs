@@ -358,12 +358,14 @@ namespace RSMods.Audio
 		/// (through RSMods.exe --install-audio-bridge-driver "&lt;game folder&gt;") and its Uninstall removes it.
 		/// Installs the shared UsbDk dependency and registers the driver and its 64-bit guest (one admin prompt,
 		/// skipped when each is already current). The caller records the interface it wraps after elevation. Throws OperationCanceledException
-		/// when the prompt is declined.</summary>
-		public static void Install(string gameDirectory)
+		/// when the prompt is declined. UsbDk only serves the direct USB cable capture, so it never stops the driver:
+		/// its result comes back as the exit code (0, EXIT_USBDK_FAILED or EXIT_USBDK_RESTART) and a note.</summary>
+		public static int Install(string gameDirectory, out string usbDkNote)
 		{
-			UsbDkSetup.Install(gameDirectory);
+			UsbDkSetup.Outcome usbDk = UsbDkSetup.Install(gameDirectory, out usbDkNote);
 			string driverPath = Path.Combine(Path.GetFullPath(gameDirectory), "RocksmithAudioBridgeAsio.dll");
 			if (!IsProxyRegistrationCurrent(driverPath)) Register(driverPath);
+			return usbDk == UsbDkSetup.Outcome.Failed ? EXIT_USBDK_FAILED : usbDk == UsbDkSetup.Outcome.RestartNeeded ? EXIT_USBDK_RESTART : 0;
 		}
 
 		/// <summary>Records the interface the bridge wraps when none is saved yet and one can be chosen (see
@@ -382,9 +384,14 @@ namespace RSMods.Audio
 
 		public const string InstallArgument = "--install-audio-bridge-driver";
 		private const string ELEVATED_MARKER = "--elevated";
+		// Must match RunDriverInstall in Installer/Uninstaller.cs.
+		public const int EXIT_USBDK_FAILED = 3;
+		public const int EXIT_USBDK_RESTART = 4;
 
-		/// <summary>Exit codes for the installer: 0 set up, 2 the admin prompt was declined, 1 any other failure
-		/// (details in RSMods\AudioBridgeDriverInstall.log).</summary>
+		/// <summary>Exit codes for the installer: 0 set up, 2 the admin prompt was declined, 1 any other failure,
+		/// EXIT_USBDK_FAILED / EXIT_USBDK_RESTART the driver is set up but UsbDk failed / needs a Windows restart
+		/// (details in RSMods\AudioBridgeDriverInstall.log and RSMods\UsbDk\UsbDkInstall.log). The elevated child returns
+		/// the same codes to its parent.</summary>
 		public static bool TryRunInstallCommand(string[] arguments, out int exitCode)
 		{
 			exitCode = 0;
@@ -398,26 +405,36 @@ namespace RSMods.Audio
 				if (!elevatedChild && !IsAdministrator())
 				{
 					exitCode = RunElevated(arguments[1]);
-					if (exitCode == 0) CompletePerUserSetup(arguments[1], log);
+					if (exitCode == 0 || IsUsbDkWarning(exitCode))
+						CompletePerUserSetup(arguments[1], log, UsbDkNote(exitCode, arguments[1]));
 					return true;
 				}
-				Install(arguments[1]);
+				exitCode = Install(arguments[1], out string usbDkNote);
 				if (elevatedChild) return true;
-				CompletePerUserSetup(arguments[1], log);
+				CompletePerUserSetup(arguments[1], log, usbDkNote);
 			}
 			catch (OperationCanceledException error) { exitCode = 2; File.WriteAllText(log, error.Message); }
 			catch (Exception error) { exitCode = 1; File.WriteAllText(log, error.ToString()); }
 			return true;
 		}
 
-		private static void CompletePerUserSetup(string gameDirectory, string log)
+		private static bool IsUsbDkWarning(int exitCode) => exitCode == EXIT_USBDK_FAILED || exitCode == EXIT_USBDK_RESTART;
+
+		// The elevated child only passes its exit code back; the details are in UsbDkInstall.log.
+		private static string UsbDkNote(int exitCode, string gameDirectory) =>
+			exitCode == EXIT_USBDK_RESTART ? "UsbDk was installed and needs a Windows restart before direct USB cable capture works."
+			: exitCode == EXIT_USBDK_FAILED ? "UsbDk was not installed. Only direct USB cable capture is unavailable until it installs. See " + UsbDkSetup.LogPath(gameDirectory) + "."
+			: "";
+
+		private static void CompletePerUserSetup(string gameDirectory, string log, string usbDkNote)
 		{
 			// A fresh install also points RS_ASIO.ini at the bridge, backing the player's file up first. Only a
 			// file nobody set up yet that uses one interface throughout (RsAsioIniSetup.SetUpOnInstall).
 			FillTarget(gameDirectory);
 			string iniSetup = RsAsioIniSetup.SetUpOnInstall(gameDirectory);
 			string target = ReadTarget();
-			File.WriteAllText(log, "Driver registered; " + (string.IsNullOrEmpty(target) ? "no interface chosen yet." : "wraps " + target + ".") + Environment.NewLine + iniSetup);
+			File.WriteAllText(log, "Driver registered; " + (string.IsNullOrEmpty(target) ? "no interface chosen yet." : "wraps " + target + ".") + Environment.NewLine + iniSetup
+				+ (string.IsNullOrEmpty(usbDkNote) ? "" : Environment.NewLine + usbDkNote));
 		}
 
 		private static int RunElevated(string gameDirectory)

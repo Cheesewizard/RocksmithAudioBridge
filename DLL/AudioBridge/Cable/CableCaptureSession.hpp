@@ -19,6 +19,9 @@ namespace Audio::PersistentInput
 
 	bool IsCaptureFormat(const WAVEFORMATEX* format);
 	bool IsCable(IMMDevice* device);
+	// UsbDk is installed but missed Player 1's cable, which Windows sees: almost always a fresh UsbDk install waiting
+	// for a Windows restart. The cable plays through Windows meanwhile; the game screen tells the player why.
+	bool IsDirectUsbWaitingForRestart();
 
 	class CaptureSession
 	{
@@ -102,6 +105,6 @@ namespace Audio::PersistentInput
 		// The cable read directly over USB (its audio function on WinUSB) instead of `backend`; one or the other.
 		UsbCableCapture usb;
 		bool usbOpen = false;
-		UINT32 clockFrames = 0;   // packetMutex: input frames toward the next NotifyCableInputBlock
+		UINT32 clockFrames = 0;   // packetMutex: input frames toward the next NotifyCableInputFrames
 	};
 }

@@ -151,6 +151,7 @@ namespace RSMods
 				case "--install-note-by-note-menu":
 				case "--uninstall-note-by-note-menu":
 				case Audio.AsioProxySetup.InstallArgument:
+				case RsAsioIniSetup.RestoreArgument:
 					return true;
 				default:
 					return false;

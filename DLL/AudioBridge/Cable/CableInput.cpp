@@ -460,7 +460,7 @@ namespace Audio::CableInput
 					readFrame += chunkFrames;
 					discontinuityPending = true;
 					// The first second is the engine's pre-roll draining; only later skips are
-					// the game's audio thread genuinely falling behind.
+					// the game's audio thread really falling behind.
 					if (pastStartup) dropoutCount.fetch_add(1, std::memory_order_relaxed);
 				}
 				Compact();

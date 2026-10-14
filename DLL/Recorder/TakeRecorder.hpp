@@ -36,6 +36,6 @@ namespace Audio::Takes
 	void SetPreferVideo(bool video);
 	int VideoQuality();                    // VideoQuality = High (0, default) / Standard (1) / Small (2, 1080p)
 	void SetVideoQuality(int quality);
-	std::wstring Folder();                 // RecordingDirectory, or Videos\Rocksmith Audio Bridge like the desktop default
+	std::wstring Folder();                 // RecordingDirectory, or <game>\Recordings
 	std::wstring SessionFolder();          // Folder()\<game launch time>: where this launch's takes go
 }

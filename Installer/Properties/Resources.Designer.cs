@@ -953,7 +953,25 @@ namespace RS2014_Mod_Installer.Properties {
                 return ResourceManager.GetString("VstHostLicense", resourceCulture);
             }
         }
-        
+
+        /// <summary>
+        ///   Looks up a localized string similar to JUCE's licence, which the VST host is built with.
+        /// </summary>
+        internal static string VstHostJuceLicense {
+            get {
+                return ResourceManager.GetString("VstHostJuceLicense", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to the notices of the libraries JUCE compiles into the VST host.
+        /// </summary>
+        internal static string VstHostThirdPartyNotices {
+            get {
+                return ResourceManager.GetString("VstHostThirdPartyNotices", resourceCulture);
+            }
+        }
+
         /// <summary>
         ///   Looks up a localized resource of type System.Byte[].
         /// </summary>

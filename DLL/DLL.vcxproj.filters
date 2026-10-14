@@ -1032,6 +1032,9 @@
     <ClInclude Include="AudioBridge\Engine\CableGamePeriod.hpp">
       <Filter>AudioBridge\Engine</Filter>
     </ClInclude>
+    <ClInclude Include="AudioBridge\Engine\OutputReserve.hpp">
+      <Filter>AudioBridge\Engine</Filter>
+    </ClInclude>
     <ClInclude Include="AudioBridge\Engine\OutputTap.hpp">
       <Filter>AudioBridge\Engine</Filter>
     </ClInclude>

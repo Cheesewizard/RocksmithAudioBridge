@@ -8,6 +8,7 @@
 #include "NoteByNote/Ml/MlStringFretReader.hpp"
 #include "NoteByNote/Host/ControllerBridge.hpp"
 #include "AudioBridge/Cable/CableInput.hpp"
+#include "AudioBridge/Cable/CableCaptureSession.hpp"
 #include "AudioBridge/Engine/GameToneLatency.hpp"
 #include "ExternalAmp/ExternalAmp.hpp"
 #include "Overlay/OverlayToggles.hpp"
@@ -272,6 +273,9 @@ void GameOverlay::DisplayNoteByNoteStatus()
 	{
 		std::vector<std::string> lines;
 		Extensions::CollectHudLines(lines);
+		// Menus only, so it never covers a song: the restart that finishes the UsbDk install is easy to skip.
+		if (Audio::PersistentInput::IsDirectUsbWaitingForRestart() && !GameState::IsInSong())
+			lines.push_back("Restart Windows to finish installing the Real Tone Cable's low-latency driver (UsbDk).");
 		int top = static_cast<int>(WindowSize.height / 6.5f);
 		const int lineHeight = static_cast<int>(WindowSize.height / 36.0f);
 		for (const std::string& line : lines)
@@ -576,7 +580,7 @@ void GameOverlay::DisplayAudioDiagnostics()
 		}
 		else if (amp.cableHost && !ampPlaying && Audio::GameToneLatency::Available())
 		{
-			latencyEstimate << L"LATENCY  ~" << std::fixed << std::setprecision(0) << Audio::GameToneLatency::CurrentMs() << L" ms";
+			latencyEstimate << L"GAME TONES  ~" << std::fixed << std::setprecision(0) << Audio::GameToneLatency::CurrentMs() << L" ms EST";
 			showLatencyReadout = true;
 		}
 	}

@@ -143,6 +143,8 @@ namespace Audio::PersistentInput
 		bool pending = false;
 	};
 
+	bool UsbCableCapture::IsRuntimeInstalled() { return GetApi().Load(); }
+
 	std::vector<std::wstring> UsbCableCapture::FindCables()
 	{
 		std::vector<std::wstring> paths;
