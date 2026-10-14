@@ -1,4 +1,4 @@
-namespace RSMods
+﻿namespace RSMods
 {
     partial class MainForm
     {
@@ -2463,7 +2463,7 @@ namespace RSMods
             this.button_AssignNewGuitarArcadeTone.Name = "button_AssignNewGuitarArcadeTone";
             this.button_AssignNewGuitarArcadeTone.Size = new System.Drawing.Size(224, 35);
             this.button_AssignNewGuitarArcadeTone.TabIndex = 114;
-            this.button_AssignNewGuitarArcadeTone.Text = "Assign Tone As New Guitarcade Default";
+            this.button_AssignNewGuitarArcadeTone.Text = "Assign Tone As New GuitarArcade Default";
             this.button_AssignNewGuitarArcadeTone.UseVisualStyleBackColor = true;
             this.button_AssignNewGuitarArcadeTone.Click += new System.EventHandler(this.SetForget_AssignNewGuitarArcadeTone);
             // 
