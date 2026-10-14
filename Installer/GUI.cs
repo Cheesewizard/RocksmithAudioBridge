@@ -85,17 +85,20 @@ namespace RS2014_Mod_Installer
                 string rsModsPath = Path.Combine(rsPath, "RSMods", "RSMods.exe");
 
                 // The audio bridge driver is part of the mod, set up through RSMods.exe's own Install (one Windows
-                // admin prompt, skipped when it is already registered). Without it the install is rolled back.
-                string driverError = Uninstaller.RunDriverInstall(rsPath);
+                // admin prompt, skipped when it is already registered). Without it the install is rolled back, keeping the
+                // log the message points at. UsbDk failing only costs the direct USB cable capture, so it is a warning.
+                string driverError = Uninstaller.RunDriverInstall(rsPath, out string usbDkWarning, out bool restartNeeded);
                 if (driverError != null)
                 {
-                    Uninstaller.RemoveFiles(rsPath, removeSettings: false, menuEntryRemoved: false);
+                    Uninstaller.RemoveFiles(rsPath, removeSettings: false, menuEntryRemoved: false, keepLogs: true);
                     MessageBox.Show("Rocksmith Audio Bridge was not installed: its audio driver is required and could not be set up (" + driverError + ").\n\nRun the installer again and approve the Windows admin prompt.",
                         "Install cancelled", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     UseModsButton.Text = originalButtonText;
                     RefreshMode();
                     return;
                 }
+                if (usbDkWarning != null)
+                    MessageBox.Show("The mod is installed. " + usbDkWarning, "Real Tone Cable", MessageBoxButtons.OK, MessageBoxIcon.Warning);
 
                 // Note by Note is switched on from its Riff Repeater menu row, which lives in cache.psarc. Add it (or put
                 // it back after a Steam file check or another tool restored the cache). Only our entry is touched.
@@ -104,8 +107,35 @@ namespace RS2014_Mod_Installer
                     MessageBox.Show("The mod is installed, but the Note by Note entry could not be added to Riff Repeater (" + menuError + ").\n\nRun this installer again to retry.", "Note by Note menu", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 MessageBox.Show("This version of the installer allows you to take advantage of the new mod settings available by opening: " + rsModsPath, "New Mod Settings Available!", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
-                Process.Start(rsModsPath);
                 CreateDesktopShortcut(rsModsPath);
+                // Last, so it is the message players see: the low-latency USB driver for the Real Tone Cable (UsbDk) was
+                // just installed and only starts after a restart. Without one the cable still plays, but slower, with no
+                // sign of why.
+                if (restartNeeded)
+                {
+                    DialogResult restart = MessageBox.Show(
+                        "RESTART YOUR PC BEFORE YOU PLAY.\n\n" +
+                        "The low-latency driver for the Real Tone Cable was just installed. It only starts after Windows restarts. " +
+                        "Until then the cable still works, but with Windows' usual delay.\n\n" +
+                        "Save anything open in other programs, then press Yes to restart now. Press No to restart later yourself.",
+                        "Restart required", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button1);
+                    if (restart == DialogResult.Yes)
+                    {
+                        try
+                        {
+                            Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "shutdown.exe"),
+                                "/r /t 10 /c \"Restarting to finish installing Rocksmith Audio Bridge.\"") { UseShellExecute = false, CreateNoWindow = true });
+                            Close();
+                            return;
+                        }
+                        catch (Exception ex)
+                        {
+                            MessageBox.Show("Windows could not be restarted from here (" + ex.Message + "). Please restart your PC yourself before playing.", "Restart required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        }
+                    }
+                }
+
+                Process.Start(rsModsPath);
 
                 Close();
             }
@@ -135,6 +165,17 @@ namespace RS2014_Mod_Installer
                 MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
             bool removeSettings = MessageBox.Show("Also remove your mod settings (RSMods.ini)?\n\nChoose No to keep them for a later reinstall.",
                 "Uninstall", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
+            // UsbDk (the Real Tone Cable's direct USB driver) is system-wide, so it is asked about rather than removed
+            // silently: Yes by default when this installer put it there, No when it was already on the PC.
+            bool removeUsbDk = false;
+            if (Uninstaller.IsUsbDkInstalled())
+            {
+                bool ours = Uninstaller.UsbDkInstalledByUs();
+                removeUsbDk = MessageBox.Show(
+                    (ours ? "Also remove UsbDk, the low-latency Real Tone Cable driver this mod installed?\n\nChoose No only if another program you use needs it."
+                          : "UsbDk, the low-latency Real Tone Cable driver, is installed on this PC. It may have come with this mod or with another program.\n\nRemove it too?"),
+                    "Uninstall", MessageBoxButtons.YesNo, MessageBoxIcon.Question, ours ? MessageBoxDefaultButton.Button1 : MessageBoxDefaultButton.Button2) == DialogResult.Yes;
+            }
 
             UseWaitCursor = true;
             try
@@ -162,14 +203,27 @@ namespace RS2014_Mod_Installer
 
                 // 4. Our files.
                 var failed = Uninstaller.RemoveFiles(rsPath, removeSettings, menuEntryRemoved: menuError == null);
+
+                // 5. UsbDk, when asked. Last, so declining its admin prompt only leaves UsbDk behind.
+                bool usbDkRestart = false;
+                if (removeUsbDk)
+                {
+                    string usbDkError;
+                    try { usbDkError = Uninstaller.RemoveUsbDk(out usbDkRestart); }
+                    catch (OperationCanceledException) { usbDkError = "the Windows admin prompt was declined"; }
+                    if (usbDkError != null)
+                        MessageBox.Show("UsbDk could not be removed (" + usbDkError + "). You can remove \"UsbDk Runtime Libraries\" from Windows Settings > Apps > Installed apps.",
+                            "Uninstall", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
                 if (restoreError != null)
                     MessageBox.Show("Your original RS_ASIO.ini could not be put back (" + restoreError + "). A copy is in "
                         + System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "RocksmithAudioBridge", "Backups") + ".",
                         "Uninstall", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                string restartNote = usbDkRestart ? "\n\nRestart Windows to finish removing UsbDk." : "";
                 if (failed.Count == 0)
-                    MessageBox.Show("Rocksmith Audio Bridge was uninstalled. Your recordings were kept.", "Uninstall", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show("Rocksmith Audio Bridge was uninstalled. Your recordings were kept." + restartNote, "Uninstall", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 else
-                    MessageBox.Show("Uninstalled, but these files could not be removed (close any program using them and run Uninstall again):\n" + string.Join("\n", failed),
+                    MessageBox.Show("Uninstalled, but these files could not be removed (close any program using them and run Uninstall again):\n" + string.Join("\n", failed) + restartNote,
                         "Uninstall", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             catch (Exception ex)

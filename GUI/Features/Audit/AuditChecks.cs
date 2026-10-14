@@ -7,8 +7,8 @@ using RSMods.Audio;
 namespace RSMods
 {
 	// The audit's checks, per guitar input mode, because each mode fails in its own ways (decided 2026-10-13).
-	// Both modes: Rocksmith's own audio settings. Real Tone Cable: the cable seen by Windows (or bound to WinUSB for
-	// the direct USB read) and Windows letting desktop apps use the microphone. ASIO interface: RS_ASIO installed,
+	// Both modes: Rocksmith's own audio settings. Real Tone Cable: the cable seen by Windows (or left on WinUSB by an
+	// earlier direct USB setup) and Windows letting desktop apps use the microphone. ASIO interface: RS_ASIO installed,
 	// RS_ASIO.ini set up through the bridge, the bridge has an interface to open, and the last launch opened it.
 	// Deliberately basic (decided 2026-10-12): the bridge replaces the drivers and players can change settings live in
 	// game, so only the things that stop a launch from having sound are worth checking. An earlier version audited
@@ -147,16 +147,18 @@ namespace RSMods
 		}
 
 		// ---- Real Tone Cable --------------------------------------------------------------------------------------
-		// The cable as Windows sees it: an active capture endpoint named "Rocksmith USB Guitar Adapter", or, once bound
-		// to WinUSB for the direct USB read (DLL/AudioBridge/Cable/UsbCableCapture.cpp, VID_12BA&PID_00FF&MI_00), no
-		// endpoint at all, which is then expected.
+		// The cable as Windows sees it: an active capture endpoint named "Rocksmith USB Guitar Adapter". The direct USB
+		// read is on by default and goes through the UsbDk runtime the bridge driver install adds
+		// (DLL/AudioBridge/Cable/UsbCableCapture.cpp); the cable keeps its Windows driver, so the endpoint should be there.
+		// An earlier opt-in bound the cable's audio function to WinUSB instead (VID_12BA&PID_00FF&MI_00), which removes
+		// the endpoint; that binding is still recognised here so it is not reported as a missing cable.
 		public static AuditCheck CheckCable()
 		{
 			var check = new AuditCheck { Name = "Real Tone Cable" };
 			if (CableOnWinUsb())
 			{
 				check.State = AuditState.Ok;
-				check.Detail = "Set up for the direct USB read (WinUSB), so Windows does not list it as a sound device. That is expected.";
+				check.Detail = "The cable is on the WinUSB driver from an earlier direct USB setup, so Windows does not list it as a sound device. The direct USB read now works through UsbDk with the cable's own Windows driver.";
 				return check;
 			}
 			DeviceState found = 0;

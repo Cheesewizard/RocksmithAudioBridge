@@ -10,7 +10,7 @@ using RSMods.Audio;
 namespace RSMods
 {
 	// "Report a problem": zips the logs and settings that explain a bad launch and opens a pre-filled email to the
-	// dev address, so the user only has to attach the zip and press send. The developer files the GitHub issue.
+	// dev address, so the user only has to attach the zip and press send. The GitHub issue is filed from that email.
 	//
 	// Why email and not something more automatic: the app is public, so it cannot hold SMTP or upload credentials
 	// without handing them to anyone who opens the exe, and a pre-filled GitHub issue would let anyone spam the

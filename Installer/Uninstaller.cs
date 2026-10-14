@@ -13,7 +13,8 @@ namespace RS2014_Mod_Installer
     //   1. driver registration (one elevation prompt; cancelling stops the uninstall before anything is removed),
     //   2. the Note by Note row, removed surgically from the CURRENT cache.psarc by RSMods.exe (needs our files),
     //   3. our files (install manifest, plus the core files for installs made before the manifest existed),
-    //      then only folders that end up empty, and the extracted runtime cache in %LOCALAPPDATA%.
+    //      then only folders that end up empty, and the extracted runtime cache in %LOCALAPPDATA%,
+    //   4. UsbDk, when the player says yes (its own admin prompt; Windows Installer removes it).
     internal static class Uninstaller
     {
         private const string ProxyName = "Rocksmith Audio Bridge ASIO";
@@ -25,12 +26,14 @@ namespace RS2014_Mod_Installer
         {
             "xinput1_3.dll", "xinput1_3.pdb", "RocksmithAudioBridgeAsio.dll", "RocksmithAudioBridgeAsio64.dll", "RocksmithAudioBridgeVstHost.exe", ".rsmods-audio-mode.lock",
             @"RSMods\RSMods.exe", @"RSMods\RSMods.exe.config", @"RSMods\RocksmithAudioBridge.dll", @"RSMods\RSMods.pdb",
-            @"RSMods\UsbDk\UsbDk_1.0.22_x64.msi", @"RSMods\UsbDk\LICENSE.txt", @"RSMods\UsbDk\UsbDkInstall.log",
+            @"RSMods\UsbDk\UsbDk_1.0.22_x64.msi", @"RSMods\UsbDk\LICENSE.txt",
             "RSMods.exe", "RSMods.exe.config", "RocksmithAudioBridge.dll", "RSMods.pdb",
         };
         // Written by the menu tool next to RSMods.exe. Kept when removing the menu entry failed, since the uninstall
         // points the player at it.
         private static readonly string[] MenuToolLogs = { @"RSMods\NoteByNoteMenuInstall.log", "NoteByNoteMenuInstall.log" };
+        // Written by the driver install. Kept when an install is rolled back, since its error message points at them.
+        private static readonly string[] DriverInstallLogs = { @"RSMods\AudioBridgeDriverInstall.log", @"RSMods\UsbDk\UsbDkInstall.log" };
 
         // The installed settings app: RSMods\RSMods.exe, or the game folder copy an earlier release candidate left.
         private static string ToolPath(string rocksmithLocation)
@@ -122,9 +125,13 @@ namespace RS2014_Mod_Installer
 
         // Runs the installed RSMods.exe's driver Install: registers the driver and its 64-bit guest (one admin prompt,
         // skipped when already current) and records the interface it wraps. Returns null on success, otherwise a
-        // short reason.
-        public static string RunDriverInstall(string rocksmithLocation)
+        // short reason. usbDkWarning is set when the driver is in place but UsbDk (only needed for direct USB cable
+        // capture) failed; restartNeeded when it was just installed and only works after a Windows restart. Neither is a
+        // reason to roll back.
+        public static string RunDriverInstall(string rocksmithLocation, out string usbDkWarning, out bool restartNeeded)
         {
+            usbDkWarning = null;
+            restartNeeded = false;
             string exe = ToolPath(rocksmithLocation);
             if (!File.Exists(exe)) return "RSMods.exe is missing";
             string toolFolder = Path.GetDirectoryName(exe);
@@ -137,13 +144,89 @@ namespace RS2014_Mod_Installer
             using (var process = Process.Start(info))
             {
                 if (!process.WaitForExit(180000)) { try { process.Kill(); } catch { } return "it did not finish within 3 minutes"; }
+                // Exit codes from AsioProxySetup.TryRunInstallCommand (GUI/Features/AudioBridge/BridgeDriverSetup.cs).
                 switch (process.ExitCode)
                 {
                     case 0: return null;
                     case 2: return "the Windows admin prompt was declined";
+                    case 3:
+                        usbDkWarning = "Direct USB capture for the Real Tone Cable is not available yet: its UsbDk component could not be installed. The cable still works the usual way.\n\nDetails: "
+                            + Path.Combine(rocksmithLocation, "RSMods", "UsbDk", "UsbDkInstall.log");
+                        return null;
+                    case 4:
+                        // A fresh UsbDk install (it always needs a restart): remembered, so Uninstall offers to remove it.
+                        restartNeeded = true;
+                        MarkUsbDkInstalledByUs(true);
+                        return null;
                     default: return "see " + Path.Combine(toolFolder, "AudioBridgeDriverInstall.log");
                 }
             }
+        }
+
+        // UsbDk 1.0.22 x64, the exact MSI the installer embeds (pinned by hash), so its product code is fixed.
+        private const string UsbDkProductCode = "{6D4A6ED0-CF41-4615-A4B3-BDA018C3C1CD}";
+        // Whether this installer put UsbDk on the PC. HKCU and not under Software\RSMods\AsioProxy, which removing the
+        // settings deletes before the question about UsbDk would be answered.
+        private const string InstallerKey = @"Software\RSMods\Installer";
+
+        private static void MarkUsbDkInstalledByUs(bool installed)
+        {
+            try
+            {
+                if (installed) using (var key = Registry.CurrentUser.CreateSubKey(InstallerKey)) key.SetValue("InstalledUsbDk", 1, RegistryValueKind.DWord);
+                else using (var key = Registry.CurrentUser.OpenSubKey(InstallerKey, writable: true)) key?.DeleteValue("InstalledUsbDk", throwOnMissingValue: false);
+            }
+            catch { }
+        }
+
+        public static bool UsbDkInstalledByUs()
+        {
+            using (var key = Registry.CurrentUser.OpenSubKey(InstallerKey)) return key?.GetValue("InstalledUsbDk") is int value && value == 1;
+        }
+
+        // UsbDk 1.0.22 is on the PC (Windows Installer's entry for its product code, in either registry view).
+        public static bool IsUsbDkInstalled()
+        {
+            foreach (var view in Environment.Is64BitOperatingSystem ? new[] { RegistryView.Registry64, RegistryView.Registry32 } : new[] { RegistryView.Registry32 })
+                using (var registry = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view))
+                using (var entry = registry.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\" + UsbDkProductCode))
+                    if (entry != null) return true;
+            return false;
+        }
+
+        // Uninstalls UsbDk through Windows Installer (one admin prompt). Returns null on success, otherwise a short reason;
+        // restartNeeded when Windows wants a restart to finish removing its driver. Throws OperationCanceledException if
+        // the prompt is declined.
+        public static string RemoveUsbDk(out bool restartNeeded)
+        {
+            restartNeeded = false;
+            var info = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "msiexec.exe"), "/x " + UsbDkProductCode + " /qn /norestart")
+            {
+                UseShellExecute = true,
+                Verb = "runas",
+                WindowStyle = ProcessWindowStyle.Hidden,
+            };
+            int exitCode;
+            try
+            {
+                using (var process = Process.Start(info))
+                {
+                    if (!process.WaitForExit(180000)) return "Windows Installer did not finish within 3 minutes";
+                    exitCode = process.ExitCode;
+                }
+            }
+            catch (Win32Exception error) when (error.NativeErrorCode == 1223)
+            {
+                throw new OperationCanceledException("Removing UsbDk needs Windows admin approval, and the prompt was declined.");
+            }
+            // 1605: not installed (already removed). 3010 / 1641: removed, finished at the next restart.
+            if (exitCode == 0 || exitCode == 1605 || exitCode == 3010 || exitCode == 1641)
+            {
+                restartNeeded = exitCode == 3010 || exitCode == 1641;
+                MarkUsbDkInstalledByUs(false);
+                return null;
+            }
+            return "Windows Installer exit code " + exitCode;
         }
 
         // Runs the installed RSMods.exe to put back the RS_ASIO.ini the player had before "Set up for me" rewrote it
@@ -167,20 +250,22 @@ namespace RS2014_Mod_Installer
         }
 
         // Deletes our files and returns the ones that could not be removed.
-        public static List<string> RemoveFiles(string rocksmithLocation, bool removeSettings, bool menuEntryRemoved)
+        // keepLogs: a rolled-back install keeps the driver install logs its error message points at.
+        public static List<string> RemoveFiles(string rocksmithLocation, bool removeSettings, bool menuEntryRemoved, bool keepLogs = false)
             => RemoveFiles(rocksmithLocation, removeSettings, menuEntryRemoved,
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Rocksmith Audio Bridge"),
-                () => Registry.CurrentUser.DeleteSubKeyTree(@"Software\RSMods\AsioProxy", throwOnMissingSubKey: false));
+                () => Registry.CurrentUser.DeleteSubKeyTree(@"Software\RSMods\AsioProxy", throwOnMissingSubKey: false), keepLogs);
 
         // appData is %LOCALAPPDATA%\Rocksmith Audio Bridge (a parameter so it can be exercised against a scratch folder).
         internal static List<string> RemoveFiles(string rocksmithLocation, bool removeSettings, bool menuEntryRemoved, string appData,
-            Action removeUserSettingsKey)
+            Action removeUserSettingsKey, bool keepLogs = false)
         {
             var failed = new List<string>();
             var root = Path.GetFullPath(rocksmithLocation);
             var relative = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var line in DLLStuff.ReadInstallManifest(rocksmithLocation)) if (!string.IsNullOrWhiteSpace(line)) relative.Add(line.Trim());
             foreach (var core in CoreFiles) relative.Add(core);
+            foreach (var log in DriverInstallLogs) { if (keepLogs) relative.Remove(log); else relative.Add(log); }
             // The recovery copy of cache.psarc is only dropped once our menu entry is gone; otherwise it is kept.
             if (menuEntryRemoved)
             {
@@ -198,7 +283,7 @@ namespace RS2014_Mod_Installer
             }
 
             // Only folders that are now empty: the RSMods folder can hold the player's own files (custom mods, backups).
-            foreach (var folder in new[] { @"RSMods\ddc", @"RSMods\tools", @"RSMods\CustomMods", "RSMods" })
+            foreach (var folder in new[] { @"RSMods\ddc", @"RSMods\tools", @"RSMods\CustomMods", @"RSMods\UsbDk", "RSMods" })
             {
                 var full = Path.Combine(root, folder);
                 try { if (Directory.Exists(full) && !Directory.EnumerateFileSystemEntries(full).Any()) Directory.Delete(full); } catch { }

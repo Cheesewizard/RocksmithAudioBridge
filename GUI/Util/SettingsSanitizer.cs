@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
 using System.Windows.Forms;
 
@@ -24,7 +25,8 @@ namespace RSMods.Util
             if (string.IsNullOrWhiteSpace(rawValue))
                 return Clamp(defaultValue, min, max);
 
-            if (!decimal.TryParse(rawValue.Trim(), out decimal parsed))
+            // The ini files hold invariant numbers ("2.5"); the current culture would read that as 25 on de-DE.
+            if (!decimal.TryParse(rawValue.Trim(), NumberStyles.Number, CultureInfo.InvariantCulture, out decimal parsed))
             {
                 AddWarning(sourceFile, settingName, rawValue, defaultValue.ToString(),
                     "not a valid number");
