@@ -116,7 +116,7 @@ namespace VstHostControl
 		volatile LONG spareCount;
 		wchar_t sparePaths[kMaxSpares][kPathChars];
 		// Written by the overlay (v6).
-		volatile LONG preloadAllowed;  // 0 while a song plays: a plugin starting up could cost late buffers
+		volatile LONG preloadAllowed;  // 0 while a song plays (a plugin starting up could cost late buffers) or the player is using the page
 		// Written by the host (v7).
 		volatile LONG standby;         // off: the amp link is released, the plugins stay loaded (Command::SetStandby)
 	};

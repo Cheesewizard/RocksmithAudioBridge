@@ -68,6 +68,12 @@ namespace VstHostLink
 		bool g_mutedForTuning = false;
 		ULONGLONG g_tuningPolledAt = 0;
 		ULONGLONG g_songPolledAt = 0;
+		// The player clicking or typing on the Tone designer page (NotePageInUse). "Always keep loaded" plugins wait
+		// for a quiet page: one loading in the background takes the host's one thread for up to half a minute
+		// (TH3-64 ~25 s), and New tone, Open tone or Add plugin clicked meanwhile waited behind it with nothing
+		// seeming to happen.
+		std::atomic<ULONGLONG> g_pageUsedAt{ 0 };
+		constexpr ULONGLONG kPageQuietMs = 20000;
 		std::string g_songKey;           // the song being played, empty outside songs
 		std::string g_appliedSong;       // the song whose tone was last applied
 		std::string g_songTarget;        // the tone the current song plays (its own or the default); empty: none set
@@ -660,8 +666,11 @@ namespace VstHostLink
 			// The tuner and calibration before a song: the song is chosen, so its tone can load now (the player tunes
 			// meanwhile). SelectionListDialog is left out: the game uses it for other lists too.
 			const bool aboutToPlay = !inSong && (menu.find("PreSongTuner") != std::string::npos || menu.find("CalibrationMeter_PreGame") != std::string::npos);
-			// The host loads starred plugins in the background only outside songs: one starting up costs CPU.
-			shared->preloadAllowed = inSong ? 0 : 1;
+			// The host loads starred plugins in the background only outside songs (one starting up costs CPU), and
+			// not while the player is using the page (g_pageUsedAt).
+			const ULONGLONG usedAt = g_pageUsedAt.load();
+			const bool pageBusy = usedAt != 0 && now - usedAt < kPageQuietMs;
+			shared->preloadAllowed = inSong || pageBusy ? 0 : 1;
 			if (menu != g_lastMenu)
 			{
 				g_lastMenu = menu;
@@ -1301,6 +1310,7 @@ namespace VstHostLink
 	void ShowSlot(int slot) { Queue(Command::ShowSlot, slot); }
 	void HideSlot(int slot) { Queue(Command::HideSlot, slot); }
 	void ClearChain() { Queue(Command::ClearChain); }
+	void NotePageInUse() { g_pageUsedAt = GetTickCount64(); }
 	void SetLevels(int inputTenths, int outputTenths) { Queue(Command::SetLevels, inputTenths, outputTenths); }
 	void LoadTone(const std::string& name) { g_toneBeforeSong.clear(); Queue(Command::LoadTone, 0, 0, Wide(name)); }
 	void SaveTone(const std::string& name) { Queue(Command::SaveTone, 0, 0, Wide(name)); KickSlow(); }

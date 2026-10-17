@@ -2735,6 +2735,9 @@ namespace Overlay
 						const bool fresh = s.dialog == Dialog::NewTone;
 						heading(fresh ? "Start a new tone?" : "Load \"" + s.dialogTone + "\"?");
 						Caption(("Changes to " + current + " are not saved.").c_str());
+						// The host is busy loading a plugin in the background: say the choice waits for it, rather
+						// than the box closing with nothing seeming to happen.
+						if (const std::string wait = WaitNote(vst); !wait.empty()) WarnCaption(wait.c_str());
 						auto proceed = [&] { if (fresh) VstHostLink::ClearChain(); else VstHostLink::LoadTone(s.dialogTone); };
 						if (!vst.toneName.empty()) {
 							if (Button("Save, then continue", true)) { VstHostLink::SaveTone(vst.toneName); proceed(); close = true; }
@@ -2924,6 +2927,10 @@ namespace Overlay
 			// Start reading the song library as soon as the page is shown, so the Songs pane is ready when it is
 			// opened. Refresh() runs on its own thread and only starts once a session (later calls return at once).
 			SongLibrary::Refresh();
+			// A click, scroll or key on the page holds "Always keep loaded" background loads off (VstHostLink), so a
+			// New tone or Add plugin is not left waiting behind one. Mouse movement alone does not count.
+			const ImGuiIO& io = ImGui::GetIO();
+			if (ImGui::IsAnyMouseDown() || io.MouseWheel != 0.0f || io.InputQueueCharacters.Size > 0) VstHostLink::NotePageInUse();
 			const ExternalAmp::Snapshot amp = ExternalAmp::GetSnapshot();
 			const VstHostLink::Snapshot vst = VstHostLink::GetSnapshot();
 

@@ -129,6 +129,9 @@ namespace VstHostLink
 	void DuplicateSlot(int slot);
 	void SetChainBypass(bool bypass);
 	void ClearChain();
+	// The player clicked or typed on the Tone designer page: background loads of "Always keep loaded" plugins hold
+	// off until the page has been quiet for a while, so they do not hold up what the player asks for.
+	void NotePageInUse();
 	void SetLevels(int inputTenths, int outputTenths);
 	void LoadTone(const std::string& name);
 	void SaveTone(const std::string& name);
