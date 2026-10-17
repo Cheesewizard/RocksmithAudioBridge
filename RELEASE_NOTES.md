@@ -1,4 +1,4 @@
-# Rocksmith Audio Bridge 4.2 beta release notes
+# Rocksmith Audio Bridge 4.2 release notes
 
 Two big additions: the **Tone designer**, which plays your guitar through your own VST3 plugins (amp sims, pedals, NAM captures) inside Rocksmith, and **live audio routing**, which lets you pick any interface and channel for each player while the game runs. Real Tone Cable players get both, plus much lower latency. To update, run the installer over your existing install; your `RSMods.ini` settings and key bindings are kept.
 
@@ -73,7 +73,7 @@ Pointing `RS_ASIO.ini` at the Audio Bridge used to cost you RS_ASIO's choice of 
 - **Real Tone Cable feels as slow as before, or the game shows "Restart Windows to finish installing the Real Tone Cable's low-latency driver (UsbDk)".** The direct USB read needs UsbDk, which only starts after Windows restarts. Restart your PC and start the game again. Until then the cable still works, through Windows, with about 10 ms more delay. `RSMods_debug.txt` says which case you are in: a line starting `(PERSISTENT INPUT) Direct USB is not active` gives the reason (restart needed, or UsbDk not installed: run the installer again, then restart), and `Real Tone Cable opened directly over USB` means it is working.
 
 ## Coming next
-The next update brings stability fixes from this beta's reports and support for Rocksmith's **Learn to Play** update.
+The next update brings stability fixes and support for the **Learn & Play** edition of Rocksmith 2014 Remastered.
 
 Report problems with the **Make bug report** button on the settings app's Rocksmith Audio Bridge tab, or on [this repository](https://github.com/Cheesewizard/RocksmithAudioBridge/issues).
 
