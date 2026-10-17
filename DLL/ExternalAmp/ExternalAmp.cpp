@@ -301,6 +301,7 @@ namespace ExternalAmp
 					g_snapshot.cableHost = proxyLoaded && !Proxy();
 					g_snapshot.cableDirectUsb = CableAmpLink::IsDirectUsb();
 					g_snapshot.cableLatencyMs = CableAmpLink::RecentLatencyMs();
+					g_snapshot.cableReadMs = CableAmpLink::RecentReadMs();
 				}
 				CableAmpLink::LogLatency();   // every 30 s while the cable hosts the link
 				CableAmpLink::SetGuestLoading(VstHostLink::IsLoading());

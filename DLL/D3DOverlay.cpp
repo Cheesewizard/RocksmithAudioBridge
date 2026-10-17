@@ -575,12 +575,16 @@ void GameOverlay::DisplayAudioDiagnostics()
 		const bool ampPlaying = amp.cableHost && amp.enabled && !amp.comparing && amp.link.linkOpen && amp.link.connected;
 		if (ampPlaying && amp.cableLatencyMs > 0.0f)
 		{
-			latencyEstimate << L"LATENCY  ~" << std::fixed << std::setprecision(0) << amp.cableLatencyMs << L" ms";
+			// The DAW convention: input (the cable read), output (Tone designer to speaker), total. Rounded once and
+			// subtracted so the parts add up to the total.
+			const long total = std::lround(amp.cableLatencyMs);
+			const long input = std::min(total, std::lround(amp.cableReadMs));
+			latencyEstimate << L"LATENCY  IN " << input << L"  OUT " << total - input << L"  TOTAL ~" << total << L" ms";
 			showLatencyReadout = true;
 		}
 		else if (amp.cableHost && !ampPlaying && Audio::GameToneLatency::Available())
 		{
-			latencyEstimate << L"GAME TONES  ~" << std::fixed << std::setprecision(0) << Audio::GameToneLatency::CurrentMs() << L" ms EST";
+			latencyEstimate << L"GAME TONES  ~" << std::fixed << std::setprecision(0) << Audio::GameToneLatency::CurrentMs() << (Audio::GameToneLatency::Guessed() ? L" ms GUESS" : L" ms EST");
 			showLatencyReadout = true;
 		}
 	}

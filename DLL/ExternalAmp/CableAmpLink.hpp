@@ -40,6 +40,9 @@ namespace CableAmpLink
 	uint32_t LateWhileLoading();   // late blocks set aside because they came while Tone designer was loading
 	// The same delay, smoothed, for the Amp sim page; 0 until measured.
 	float RecentLatencyMs();
+	// The read part of it (Input): the packet's length (~1 ms direct USB, ~10 ms through Windows) plus the measured
+	// wait when packets are handed over in batches, smoothed; 0 until measured. The rest of RecentLatencyMs is output.
+	float RecentReadMs();
 
 	// Block size between the cable and the guest (Amp sim page, cable players only): 0 = Automatic (64 on direct USB,
 	// 128 on the Windows cable input), else 64 / 128 / 256; 64 is raised to 128 on the Windows input. A change while

@@ -3013,6 +3013,16 @@ namespace Overlay
 		AmpTab g_ampTab = AmpTab::ToneDesigner;
 		bool g_ampLinkOpen = false;   // Tone designer tab: the Amp link card shown in full (session only)
 
+		// The cable's guitar-to-speaker figure in two parts: input (the cable read: packet wait, cable to PC) and output
+		// (the rest). Rounded once and subtracted, so the two parts always add up to the total shown.
+		struct CableSplit { int total, input, output; };
+		CableSplit SplitCableLatency(const ExternalAmp::Snapshot& amp)
+		{
+			const int total = static_cast<int>(std::lround(amp.cableLatencyMs));
+			const int read = (std::min)(total, static_cast<int>(std::lround(amp.cableReadMs)));
+			return { total, read, total - read };
+		}
+
 		void AmpLinkCard(const ExternalAmp::Snapshot& amp)
 		{
 			const AmpLink::Status& link = amp.link;
@@ -3028,11 +3038,14 @@ namespace Overlay
 			else if (link.connected) InfoRow("Playing", name, Color::Good);
 			else if (link.guestPresent) InfoRow("Playing", name + " (audio stopped)", Color::Warn);
 			else InfoRow("Playing", "The game's amp (nothing connected)", Color::Muted);
-			char text[96];
+			char text[128];
 			// On the cable the link's own blocks are a small part of the delay (the output device and its buffer are the
-			// rest), so the measured guitar-to-speaker figure is shown instead (CableAmpLink's measurement).
-			if (link.frames > 0 && amp.cableHost && amp.cableLatencyMs > 0.0f)
-				sprintf_s(text, "48 kHz, %d samples, latency estimate %.0f ms", link.frames, amp.cableLatencyMs);
+			// rest), so the measured guitar-to-speaker figure is shown instead (CableAmpLink's measurement), split into
+			// input, output and total (the DAW convention).
+			if (link.frames > 0 && amp.cableHost && amp.cableLatencyMs > 0.0f) {
+				const CableSplit split = SplitCableLatency(amp);
+				sprintf_s(text, "48 kHz, %d samples, latency input %d ms, output %d ms, total %d ms", link.frames, split.input, split.output, split.total);
+			}
 			else if (link.frames > 0)
 				sprintf_s(text, "48 kHz, %d samples, +%.1f ms", link.frames, link.frames * (link.latencyBlocks > 1 ? 2 : 1) * 1000.0 / AmpLink::kSampleRate);
 			InfoRow("Format", link.frames > 0 ? text : "Waiting for the game's audio");
@@ -3144,9 +3157,12 @@ namespace Overlay
 				else if (link.connected) { summary = name; dot = Color::Good; }
 				else if (link.guestPresent) { summary = name + " (audio stopped)"; dot = Color::Warn; }
 				else summary = "The game's amp (nothing connected)";
-				char text[96];
+				char text[128];
 				if (link.frames > 0) {
-					if (amp.cableHost && amp.cableLatencyMs > 0.0f) sprintf_s(text, "   48 kHz, %d samples, guitar to speaker %.0f ms", link.frames, amp.cableLatencyMs);
+					if (amp.cableHost && amp.cableLatencyMs > 0.0f) {
+						const CableSplit split = SplitCableLatency(amp);
+						sprintf_s(text, "   48 kHz, %d samples, in %d + out %d = %d ms", link.frames, split.input, split.output, split.total);
+					}
 					else sprintf_s(text, "   48 kHz, %d samples, +%.1f ms", link.frames, link.frames * (link.latencyBlocks > 1 ? 2 : 1) * 1000.0 / AmpLink::kSampleRate);
 					summary += text;
 				}
@@ -4528,14 +4544,18 @@ namespace Overlay
 			const ExternalAmp::Snapshot amp = ExternalAmp::GetSnapshot();
 			if (!amp.cableHost) return;
 			const bool toneDesignerPlays = amp.toneDesigner && amp.enabled && !amp.comparing;
-			char designer[48], game[48];
-			if (amp.cableLatencyMs > 0.0f) sprintf_s(designer, "Tone designer %.0f ms", amp.cableLatencyMs);
+			char designer[96], game[48];
+			if (amp.cableLatencyMs > 0.0f) {
+				const CableSplit split = SplitCableLatency(amp);
+				sprintf_s(designer, "Tone designer in %d  out %d  total %d ms", split.input, split.output, split.total);
+			}
 			else sprintf_s(designer, "Tone designer -");
 			// Measured now, or the remembered game part plus the live output part (e.g. while the Tone designer plays).
 			// Both are worked out from picks, so the figure always reads as an estimate.
 			if (Audio::GameToneLatency::Valid()) sprintf_s(game, "Game tones ~%.0f ms (est.)", Audio::GameToneLatency::MedianMs());
-			else if (Audio::GameToneLatency::Available()) sprintf_s(game, "Game tones ~%.0f ms (est.)", Audio::GameToneLatency::CurrentMs());
-			else sprintf_s(game, "Game tones: play with the game amp once");
+			else if (Audio::GameToneLatency::Available())
+				sprintf_s(game, Audio::GameToneLatency::Guessed() ? "Game tones ~%.0f ms (guess)" : "Game tones ~%.0f ms (est.)", Audio::GameToneLatency::CurrentMs());
+			else sprintf_s(game, "Game tones -");
 			ImGui::PushFont(GetFonts().caption);
 			const char* title = "LATENCY ESTIMATE";
 			const float gap = 14.0f;
@@ -4548,7 +4568,7 @@ namespace Overlay
 			ImGui::PopFont();
 			ImGui::SetCursorScreenPos(ImVec2(x, top + 10.0f));
 			ImGui::InvisibleButton("##latency", ImVec2(designerW + gap + gameW, 38.0f));
-			Hint("Latency estimates: software timing plus the output driver's reported delay. Tone designer tracks audio blocks; game tones are a rougher estimate, matching your picks to output attacks. Cable conversion and USB delivery are excluded. This is not a calibrated guitar-to-ear measurement.");
+			Hint("Latency estimates: software timing plus the output driver's reported delay. Input is how long the guitar waits for each packet from the cable (about 1 ms read directly over USB, 10 ms through Windows), plus any measured wait when packets arrive in batches; output is the Tone designer, its buffers and the output device (exclusive mode lowers this part); total is the two together. Tone designer tracks audio blocks; game tones are a rougher estimate, matching your picks to output attacks; until a few picks have been timed with the game amp playing, the game tones figure is a guess from the game block size. The cable's own converter and the USB bus are excluded. This is not a calibrated guitar-to-ear measurement.");
 		}
 
 		void Sidebar(Page& page)

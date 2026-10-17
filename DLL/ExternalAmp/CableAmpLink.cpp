@@ -127,6 +127,53 @@ namespace CableAmpLink
 		std::atomic<uint64_t> g_latSumUs{ 0 }, g_latCount{ 0 }, g_latMaxUs{ 0 }, g_latMinUs{ UINT64_MAX }, g_fillSum{ 0 },
 			g_deviceUs{ 0 }, g_trims{ 0 }, g_trimmedFrames{ 0 };
 		std::atomic<float> g_recentMs{ 0.0f };   // the same delay, smoothed over about a second, for the Amp sim page
+		// The read part of that delay (Input on the readouts): the packet's own length (its first sample waited for the
+		// rest) plus the batching wait below. Smoothed over about a second.
+		std::atomic<float> g_readMs{ 0.0f };
+
+		// Batching wait, measured. The cable fills packets at a steady 48 kHz, but Windows and the USB host controller
+		// can hand several over at once (or late), and each held packet waited on top of its own length. Every
+		// delivery's arrival is compared with the sample clock: lateness = arrival - (frames delivered so far at 48 kHz).
+		// The earliest delivery of the last 0.5-1 s (the lowest lateness) is the baseline, a packet handed over as soon
+		// as it was full; anything above it is batching wait. The windowed minimum follows clock drift between the cable
+		// and the PC (100 ppm is 0.1 ms per second). What it cannot see is a delay every packet shares (the cable's
+		// converter, the bus): that is not measurable without a loopback and stays out, as the log says.
+		// Capture thread only, except the stats.
+		int64_t g_schedFrames = 0;                       // frames delivered since the schedule started
+		INT64 g_schedStart = 0;                          // QPC (100 ns) when the schedule started
+		INT64 g_lastArrival = 0;
+		INT64 g_windowMinLate = INT64_MAX, g_prevWindowMinLate = INT64_MAX;
+		int64_t g_windowStartFrames = 0;
+		std::atomic<uint64_t> g_batchSumUs{ 0 }, g_batchCount{ 0 }, g_batchMaxUs{ 0 };
+
+		// The wait (100 ns) the delivery that just arrived spent held up past the baseline.
+		INT64 BatchWait(INT64 arrived, uint32_t frames)
+		{
+			// A gap (stream (re)started, stalled, or the link reopened) loses the count of frames: start again.
+			if (!g_schedStart || arrived - g_lastArrival > 500000) {
+				g_schedStart = arrived; g_schedFrames = 0; g_windowStartFrames = 0;
+				g_windowMinLate = g_prevWindowMinLate = INT64_MAX;
+			}
+			g_lastArrival = arrived;
+			g_schedFrames += frames;
+			const INT64 late = arrived - g_schedStart - g_schedFrames * 625 / 3;   // frames * 10^7 / 48000
+			// Much earlier than the baseline: frames were lost (a dropped packet shifts the count), so start again.
+			if (g_prevWindowMinLate != INT64_MAX && late < (std::min)(g_windowMinLate, g_prevWindowMinLate) - 20000) {
+				g_schedStart = arrived; g_schedFrames = 0; g_windowStartFrames = 0;
+				g_windowMinLate = g_prevWindowMinLate = INT64_MAX;
+				return 0;
+			}
+			if (late < g_windowMinLate) g_windowMinLate = late;
+			if (g_schedFrames - g_windowStartFrames >= 24000) {   // 0.5 s windows; the baseline spans this one and the last
+				g_prevWindowMinLate = g_windowMinLate;
+				g_windowMinLate = late;
+				g_windowStartFrames = g_schedFrames;
+			}
+			// Until a whole window has been seen the baseline is not trusted: no wait reported yet.
+			if (g_prevWindowMinLate == INT64_MAX) return 0;
+			const INT64 wait = late - (std::min)(g_windowMinLate, g_prevWindowMinLate);
+			return wait > 0 ? wait : 0;
+		}
 
 		void Push(const float* left, const float* right, long frames, UINT64 firstStamp)
 		{
@@ -248,8 +295,21 @@ namespace CableAmpLink
 		if (frames > g_burstFrames.load(std::memory_order_relaxed)) g_burstFrames.store(frames, std::memory_order_relaxed);
 		const ASIOBufferInfo info{ 1, 0, { g_inputBlock.data(), g_inputBlock.data() } };
 		{ FifoLock lock(false); if (lock.owned) Collect(); }   // before the slots move on
-		// This delivery's last sample came in now; sample i came in (frames - 1 - i) samples earlier.
-		const UINT64 arrived = Now100ns();
+		// This delivery's last sample was ready `wait` before now (held in a batch); sample i (frames - 1 - i) samples
+		// before that. Backdating by the wait puts batching into the measured total as well as into Input.
+		const UINT64 now = Now100ns();
+		const INT64 wait = BatchWait(static_cast<INT64>(now), frames);
+		const UINT64 arrived = now - static_cast<UINT64>(wait);
+		{
+			const uint64_t waitUs = static_cast<uint64_t>(wait) / 10;
+			g_batchSumUs.fetch_add(waitUs, std::memory_order_relaxed);
+			g_batchCount.fetch_add(1, std::memory_order_relaxed);
+			if (waitUs > g_batchMaxUs.load(std::memory_order_relaxed)) g_batchMaxUs.store(waitUs, std::memory_order_relaxed);
+			// Time-weighted smoothing (about 1 s) so 1 ms USB packets and 10 ms Windows packets settle alike.
+			const float packetMs = frames * 1000.0f / 48000.0f, inputMs = packetMs + wait / 10000.0f;
+			const float read = g_readMs.load(std::memory_order_relaxed), alpha = (std::min)(1.0f, packetMs / 1000.0f);
+			g_readMs.store(read > 0.0f ? read + (inputMs - read) * alpha : inputMs, std::memory_order_relaxed);
+		}
 		for (uint32_t i = 0; i < frames; ++i)
 		{
 			if (g_inputFill == 0) g_fillStartStamp = arrived - static_cast<UINT64>(frames - 1 - i) * 10000000 / 48000;
@@ -457,6 +517,7 @@ namespace CableAmpLink
 	uint32_t LateWhileLoading() { return g_lateWhileLoading.load(); }
 
 	float RecentLatencyMs() { return g_open.load() ? g_recentMs.load(std::memory_order_relaxed) : 0.0f; }
+	float RecentReadMs() { return g_open.load() ? g_readMs.load(std::memory_order_relaxed) : 0.0f; }
 
 	void LogLatency()
 	{
@@ -470,6 +531,9 @@ namespace CableAmpLink
 		const uint64_t fill = g_fillSum.exchange(0), trims = g_trims.exchange(0), trimmed = g_trimmedFrames.exchange(0);
 		if (!count || !g_open.load()) return;
 		const AmpLink::Status status = g_host.GetStatus();
+		const uint64_t batchCount = g_batchCount.exchange(0), batchSum = g_batchSumUs.exchange(0), batchMax = g_batchMaxUs.exchange(0);
+		LOG_INFO("(TONE DESIGNER LATENCY) input " << g_readMs.load() << " ms (packets " << g_burstFrames.load() << " frames max; batching wait avg "
+			<< (batchCount ? batchSum / batchCount / 10 / 100.0 : 0.0) << " ms, max " << batchMax / 100 / 10.0 << " ms over " << batchCount << " deliveries)" << std::endl);
 		LOG_INFO("(TONE DESIGNER LATENCY) cable in to speaker out avg " << sum / count / 100 / 10.0 << " ms (min " << minUs / 100 / 10.0
 			<< ", max " << maxUs / 100 / 10.0 << "); of that the output device " << g_deviceUs.load() / 100 / 10.0 << " ms and the return FIFO avg "
 			<< fill / count * 10 / 48 / 10.0 << " ms; " << g_block.load() << "-sample blocks" << (g_safety.load() ? " + safety block" : "")
