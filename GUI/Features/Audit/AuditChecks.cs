@@ -78,7 +78,7 @@ namespace RSMods
 			}
 			check.State = wrong.Length == 0 ? AuditState.Ok : AuditState.Problem;
 			check.Detail = wrong.Length == 0
-				? "Rocksmith.ini's audio settings suit " + (asio ? "an ASIO interface." : "the Real Tone Cable.")
+				? "Rocksmith.ini's audio settings suit " + (asio ? "an ASIO interface." : "the Real Tone Cable. ExclusiveMode and Win32UltraLowLatencyMode do not matter for the cable.")
 				: "Rocksmith.ini: " + wrong + ". Fix sets them (a backup is kept).";
 			return check;
 		}
@@ -186,6 +186,12 @@ namespace RSMods
 					check.Detail = "The cable is disabled in Windows' Sound settings, so Rocksmith cannot hear it. Enable it under Recording.";
 					check.FixLabel = "Open Sound settings";
 					check.Fix = () => System.Diagnostics.Process.Start("control.exe", "mmsys.cpl,,1");
+					break;
+				// While Rocksmith runs, the direct USB read has UsbDk take the cable from its Windows driver, so the
+				// endpoint is gone by design. Only a closed game proves the cable is missing.
+				case DeviceState _ when System.Diagnostics.Process.GetProcessesByName("Rocksmith2014").Length > 0:
+					check.State = AuditState.Ok;
+					check.Detail = "Rocksmith is reading the cable straight over USB, so Windows does not list it while the game runs. Close the game and check again to test the cable itself.";
 					break;
 				default:
 					check.State = AuditState.Problem;

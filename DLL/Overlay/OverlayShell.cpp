@@ -3785,15 +3785,12 @@ namespace Overlay
 					ImGui::PopTextWrapPos();
 					ImGui::PopStyleColor();
 				}
-				// Output only: the cable's input path is separate. By default it is read directly over USB (UsbCableCapture),
-				// already past Windows, so the text must not suggest exclusive mode is what makes the guitar fast. Exclusive
-				// is opt-in: some devices refuse it, and on a few it is slower than shared (polling, deeper buffer).
-				const char* exclusiveText = CableAmpLink::IsDirectUsb()
-					? "Sound output only. The guitar already skips Windows: the cable is read directly over USB. Not every device supports exclusive mode, and on a few it adds latency; compare the buffer shown above."
-					: "Sound output only; the guitar's input is not affected. Not every device supports exclusive mode, and on a few it adds latency; compare the buffer shown above.";
+				// Exclusive mode and direct USB (UsbCableCapture) are two separate latency features: direct USB is the
+				// cable's input and is on by default; exclusive mode is this device's output and is opt-in. The text
+				// describes exclusive mode on its own and does not mention the input path.
 				ImGui::BeginDisabled(outputMode == 0);
-				if (ToggleRow("Exclusive mode", exclusiveText, &wantExclusive,
-					"Takes Windows' mixer off this device. Other apps cannot play on it while exclusive output is active. A device that refuses exclusive mode stays shared and this switch turns itself off; one whose driver needs polling runs a larger buffer, which can be slower than shared.")) {
+				if (ToggleRow("Exclusive mode", "Lowers the delay of the sound you hear by playing straight to this device, past Windows' mixer. Only for devices that support exclusive mode.", &wantExclusive,
+					"Other apps cannot play on this device while exclusive mode is on. A device that does not support it stays shared and this switch turns itself off.")) {
 					const std::wstring windowsId = Audio::SharedOutput::ExclusiveOutputDevice::WindowsId(endpoint);
 					const std::wstring target = wantExclusive ? Audio::SharedOutput::ExclusiveOutputDevice::EndpointOf(windowsId) : windowsId;
 					pending = PendingSwitch{};
