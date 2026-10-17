@@ -27,7 +27,7 @@ The VST host is built on JUCE and licensed AGPLv3; the rest of the mod stays MIT
 The External amp and Tone designer pages are now one **Amp sim** page: an Amp link card with the shared settings (latency, late buffers, extra safety buffer, compare), then a **Tone designer** tab and an **External app** tab (AmpliTube and other apps on the bridge's ASIO driver, as before).
 
 ### Live audio routing (ASIO)
-With `RS_ASIO.ini` pointed at the Audio Bridge you used to lose RS_ASIO's per-section devices and channels. The bridge now does that routing itself, and every change applies while you play:
+Pointing `RS_ASIO.ini` at the Audio Bridge used to cost you RS_ASIO's choice of device and channel for each player. The bridge now does that routing itself, and every change applies while you play:
 - **Output page, Routing card:** pick the output pair, and for Player 1, Player 2 and the mic the interface, input channel and clock. Each input can come from a different ASIO interface; the bridge keeps it in sync with the output's clock.
 - **Switch output** lists every ASIO interface and Windows device, grouped. ASIO4ALL and other wrapper drivers no longer block switching.
 - The settings app's Rocksmith Audio Bridge tab has the same **ASIO interface** and **Input interface** pickers, live while the game runs.
