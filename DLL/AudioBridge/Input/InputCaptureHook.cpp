@@ -191,6 +191,7 @@ namespace Audio::AsioHook
 		StagePeak stageProxyRaw;          // the real device's buffers inside the proxy, before RS_ASIO
 		StagePeak stageCaptureRaw;        // what RS_ASIO handed the game, before the conditioner
 		StagePeak stageAfterConditioner;  // what the game and detection actually hear
+		std::atomic<uint64_t> chainSeenTick{ 0 };   // GetTickCount64 of the last packet through the hook (InputChainRunning)
 		std::atomic<uint32_t> stageSilentFlagPackets{ 0 };      // game packets flagged silent by the capture
 		std::atomic<uint32_t> stageReplacedWithSilence{ 0 };    // packets this hook swapped for zeros
 		std::atomic<uint32_t> proxyInputRate{ 0 };
@@ -1316,6 +1317,7 @@ namespace Audio::AsioHook
 				}
 				CableInput::ReportTapPacket(peak, silent, *frameCount, routeFormats[routeIndex].sampleRate);
 				stageAfterConditioner.Note(silent ? 0.0f : peak);   // stage meter 3
+				chainSeenTick.store(GetTickCount64(), std::memory_order_relaxed);
 
 				// Latency loopback capture: copy the raw input (before any processor) while a measurement is armed.
 				const int latTarget = g_latencyTarget.load(std::memory_order_relaxed);
@@ -1956,6 +1958,12 @@ namespace Audio::AsioHook
 	float GetHumFilterBaseHz()
 	{
 		return g_humFilterBaseHz.load(std::memory_order_relaxed);
+	}
+
+	bool InputChainRunning()
+	{
+		const uint64_t seen = chainSeenTick.load(std::memory_order_relaxed);
+		return seen != 0 && GetTickCount64() - seen < 2000;
 	}
 
 	namespace

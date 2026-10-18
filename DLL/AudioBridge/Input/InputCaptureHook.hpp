@@ -54,6 +54,11 @@ namespace Audio::AsioHook
 	void SetHumFilterBaseHz(float baseHz);
 	float GetHumFilterBaseHz();
 
+	// True while Player 1's input chain (the capture hook) has handled a packet in the last 2 s. The hook is only
+	// installed at launch when gain, noise suppressor, compressor or hum filter is on (ModManager), so switching the
+	// first one on mid-session does nothing until a restart; the overlay's Input page says so.
+	bool InputChainRunning();
+
 	// Round-trip latency measurement (paired with the proxy's probe injection): arm a one-shot capture of
 	// `frames` route-0 input samples (the looped-back probe), then the host correlates them against the probe.
 	void StartLatencyCapture(int frames);
