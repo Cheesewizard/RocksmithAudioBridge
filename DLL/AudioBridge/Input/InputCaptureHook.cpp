@@ -1940,7 +1940,15 @@ namespace Audio::AsioHook
 	{
 		// 0 (or <20) = off; else the mains fundamental (50 or 60). Clamped so a stray value can't build a
 		// nonsensical notch bank. Any positive base arms the front-of-chain notch cascade.
-		if (!std::isfinite(baseHz) || baseHz < 20.0f) { g_humFilterBaseHz.store(0.0f, std::memory_order_relaxed); return; }
+		//
+		// Withdrawn 2026-10-17: kept off whatever is saved (HumFilter in RSMods.ini, op 24), and its controls are gone
+		// from the overlay and the Settings app. Played live on an M-Track (game amp and Tone designer alike), its
+		// 38-48 narrow notches rang back after every pick as a 20 ms comb: thin, tinny, mangled tone with a faint echo,
+		// worst on palm mutes and light notes on the high E. On real charger hum it removed only 3-7.5 dB (atlas
+		// hum-filter harness, 2026-10-14), and the noise suppressor already silences the hum between notes. The code
+		// stays for research; flip kHumFilterUsable to bring it back.
+		constexpr bool kHumFilterUsable = false;
+		if (!kHumFilterUsable || !std::isfinite(baseHz) || baseHz < 20.0f) { g_humFilterBaseHz.store(0.0f, std::memory_order_relaxed); return; }
 		EnsureHumWorker();
 		g_humFilterBaseHz.store(std::clamp(baseHz, 20.0f, 120.0f), std::memory_order_relaxed);
 	}

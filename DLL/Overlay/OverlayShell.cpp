@@ -689,13 +689,12 @@ namespace Overlay
 
 			// Seeded once from the keys the DLL applies at launch, then user-driven.
 			static bool seeded = false;
-			static bool gainOn, gateOn, compOn, humOn, rgOn;
-			static int gainTenths, gateTenths, compPct, humHz, rgTenths;
+			static bool gainOn, gateOn, compOn, rgOn;
+			static int gainTenths, gateTenths, compPct, rgTenths;
 			if (!seeded) {
 				gainTenths = Settings::GetModSetting("AsioInputGain");        gainOn = gainTenths > 0;
 				gateTenths = Settings::GetModSetting("NoiseGateThreshold");   gateOn = gateTenths < 0; if (!gateOn) gateTenths = -500;
 				compPct = Settings::GetModSetting("CompressorStrength");      compOn = compPct > 0;
-				humHz = Settings::GetModSetting("HumFilter");                 humOn = humHz >= 20; if (!humOn) humHz = 50;
 				rgOn = Settings::GetModSetting("RocksmithGateOverride") != 0; rgTenths = Settings::GetModSetting("RocksmithGateThreshold"); if (rgTenths == 0) rgTenths = -593;
 				seeded = true;
 			}
@@ -727,14 +726,7 @@ namespace Overlay
 			if (SliderRow("Strength", &comp, 0.0f, 100.0f, "%.0f%%", &compSaved)) { compPct = static_cast<int>(comp + 0.5f); PreviewInt(20, compPct); }
 			if (compSaved) SendInt(20, compPct);
 			ImGui::EndDisabled();
-
-			// Adaptive mains hum / buzz remover (op 24, nominal Hz; off = 0). HumRemover.hpp.
-			if (ToggleRow("Hum filter", "Measures your mains hum between notes and removes only its lines, up to 8 kHz.", &humOn)) SendInt(24, humOn ? humHz : 0);
-			ImGui::BeginDisabled(!humOn);
-			static const char* const mains[] = { "50 Hz", "60 Hz" };
-			int mainsIndex = humHz >= 55 ? 1 : 0;
-			if (SegmentedRow("Mains frequency", &mainsIndex, mains, 2, "50 Hz in the UK, EU and AU. 60 Hz in the US.")) { humHz = mainsIndex ? 60 : 50; SendInt(24, humHz); }
-			ImGui::EndDisabled();
+			// The hum filter (op 24) is withdrawn: it mangled the tone (AsioHook::SetHumFilterBaseHz), so no control here.
 			EndCard();
 
 			BeginCard("Rocksmith");
