@@ -58,4 +58,7 @@ namespace CableAmpLink
 	void Configure(bool mixOn, float returnGain);
 	void SetLatencyBlocks(int blocks);
 	void SetPitchSemitones(int semitones);
+	// The Input page's hum filter (0 = off, else 50 / 60 Hz) and noise suppressor (linear threshold, 0 = off) for the
+	// Tone designer's input (AmpFeedConditioner.hpp).
+	void ConfigureConditioner(float humBaseHz, float gateThreshold);
 }

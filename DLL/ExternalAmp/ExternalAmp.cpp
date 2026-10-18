@@ -6,6 +6,7 @@
 #include "DropPedal/DropPedal.hpp"
 #include "GameState.hpp"
 #include "AudioBridge/Engine/OutputReserve.hpp"
+#include "AudioBridge/Input/InputCaptureHook.hpp"
 #include <atomic>
 #include <cmath>
 #include <mutex>
@@ -100,6 +101,20 @@ namespace ExternalAmp
 			if (!proxy) { CableAmpLink::SetPitchSemitones(semitones); return; }
 			using PitchFn = void(__cdecl*)(int);
 			if (auto fn = reinterpret_cast<PitchFn>(GetProcAddress(proxy, "RSModsAsio_SetAmpLinkPitch"))) fn(semitones);
+		}
+
+		// The Input page's hum filter and noise suppressor, for the amp sim's input too (AmpFeedConditioner.hpp): the
+		// link feeds the amp sim the raw DI, so without this a noisy interface reached a high-gain amp sim unfiltered.
+		// Read from the game's input chain, so the switches there mean the same thing for both.
+		void SendConditioner()
+		{
+			const float humBaseHz = Audio::AsioHook::GetHumFilterBaseHz();
+			const float gateDb = Audio::AsioHook::GetNoiseGateThresholdDb();   // 0 = off
+			const float gate = gateDb < 0.0f ? std::pow(10.0f, gateDb / 20.0f) : 0.0f;
+			HMODULE proxy = Proxy();
+			if (!proxy) { CableAmpLink::ConfigureConditioner(humBaseHz, gate); return; }
+			using ConditionerFn = void(__cdecl*)(float, float);
+			if (auto fn = reinterpret_cast<ConditionerFn>(GetProcAddress(proxy, "RSModsAsio_ConfigureAmpFeed"))) fn(humBaseHz, gate);
 		}
 
 		// Player 1's level as the game would play it: the louder of our game object's value and the global value.
@@ -245,6 +260,7 @@ namespace ExternalAmp
 				ConfigureProxy(enabled && !tuning, gain, g_safety.load());
 				const int pedalSemitones = DropPedal::GetAppliedInputShiftSemitones();
 				SendPedalShift(pedalSemitones);
+				SendConditioner();
 
 				const bool connected = proxyLoaded && link.linkOpen && link.connected;
 				connectedTicks = connected ? connectedTicks + 1 : 0;

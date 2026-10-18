@@ -166,6 +166,18 @@ extern "C" __declspec(dllexport) void RSModsAsio_SetAmpLinkPitch(int semitones)
 {
 	g_ampLink.SetPitchSemitones(semitones);
 }
+// The Input page's hum filter (0 = off, else 50 / 60 Hz) and noise suppressor threshold (linear, 0 = off) for the amp
+// sim's input (AmpFeedConditioner.hpp). ExternalAmp.cpp sends them every tick.
+extern "C" __declspec(dllexport) void RSModsAsio_ConfigureAmpFeed(float humBaseHz, float gateThreshold)
+{
+	// The conditioner's hum analysis thread runs code in this DLL for the rest of the process: never unload it.
+	static const bool pinned = [] {
+		HMODULE self = nullptr;
+		return GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN, reinterpret_cast<LPCWSTR>(&RSModsAsio_ConfigureAmpFeed), &self) != 0;
+	}();
+	(void)pinned;
+	g_ampLink.ConfigureConditioner(humBaseHz, gateThreshold);
+}
 // Fills `status` (sizeof(AmpLink::Status) bytes, checked against `size`). Returns 1 when filled.
 extern "C" __declspec(dllexport) int RSModsAsio_GetAmpLinkStatus(AmpLink::Status* status, int size)
 {
