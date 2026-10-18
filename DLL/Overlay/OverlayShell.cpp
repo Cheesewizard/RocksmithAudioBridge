@@ -39,6 +39,8 @@
 #include <thread>
 #include <optional>
 #include <atomic>
+#include <set>
+#include <cwctype>
 
 namespace Overlay
 {
@@ -3257,25 +3259,61 @@ namespace Overlay
 		// (busy in another app, a buffer size it refuses) costs nothing: the previous interface is opened again and
 		// the reason shown. Only a switch that worked is saved (HKCU Target), so the next launch starts there.
 
-		// Every 32-bit ASIO driver installed, except the bridge itself: what RS_ASIO itself could open.
-		std::vector<std::wstring> InstalledAsioDrivers()
+		// Every ASIO driver installed in one registry view, except the bridge itself.
+		std::vector<std::wstring> AsioDriversIn(REGSAM view)
 		{
-			static std::vector<std::wstring> cached;
-			static ULONGLONG readAt = 0;
-			if (readAt != 0 && GetTickCount64() - readAt < 3000) return cached;
-			readAt = GetTickCount64();
-			cached.clear();
+			std::vector<std::wstring> names;
 			HKEY asio{};
-			if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ASIO", 0, KEY_READ | KEY_WOW64_32KEY, &asio) != ERROR_SUCCESS) return cached;
+			if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ASIO", 0, KEY_READ | view, &asio) != ERROR_SUCCESS) return names;
 			wchar_t name[256];
 			for (DWORD index = 0;; ++index) {
 				DWORD length = 256;
 				if (RegEnumKeyExW(asio, index, name, &length, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
-				if (_wcsicmp(name, L"Rocksmith Audio Bridge ASIO") != 0 && _wcsicmp(name, L"Rocksmith Audio Bridge") != 0) cached.push_back(name);
+				if (_wcsicmp(name, L"Rocksmith Audio Bridge ASIO") != 0 && _wcsicmp(name, L"Rocksmith Audio Bridge") != 0) names.push_back(name);
 			}
 			RegCloseKey(asio);
-			std::sort(cached.begin(), cached.end(), [](const std::wstring& a, const std::wstring& b) { return _wcsicmp(a.c_str(), b.c_str()) < 0; });
-			return cached;
+			return names;
+		}
+
+		// The ASIO drivers the bridge can open: every 32-bit one (what RS_ASIO itself could open) plus, with `with64`, the
+		// ones registered only as 64-bit, which the bridge runs in its 64-bit driver host (AsioProxy/Remote64.hpp).
+		// Cable mode's sound-only output (AsioOutputDevice) loads drivers inside the game, so it asks without them.
+		// g_host64Drivers (lower case): the drivers the bridge would run in the 64-bit host, by the same rule as its
+		// resolver (AsioProxyDriver ResolveAsioDriver): 64-bit only, or any with a 64-bit build while the
+		// Prefer64BitDrivers test switch is on. Every other one is loaded in the game as its 32-bit build.
+		std::set<std::wstring> g_host64Drivers;
+		std::vector<std::wstring> InstalledAsioDrivers(bool with64 = true)
+		{
+			static std::vector<std::wstring> cached32, cachedAll;
+			static ULONGLONG readAt = 0;
+			if (readAt == 0 || GetTickCount64() - readAt >= 3000) {
+				readAt = GetTickCount64();
+				cached32 = AsioDriversIn(KEY_WOW64_32KEY);
+				cachedAll = cached32;
+				g_host64Drivers.clear();
+				DWORD prefer64 = 0, size = sizeof(prefer64);
+				const bool preferHost = RegGetValueW(HKEY_CURRENT_USER, L"Software\\RSMods\\AsioProxy", L"Prefer64BitDrivers", RRF_RT_REG_DWORD, nullptr, &prefer64, &size) == ERROR_SUCCESS && prefer64 == 1;
+				for (const std::wstring& name : AsioDriversIn(KEY_WOW64_64KEY)) {
+					const bool has32 = std::any_of(cached32.begin(), cached32.end(), [&](const std::wstring& n) { return _wcsicmp(n.c_str(), name.c_str()) == 0; });
+					if (!has32) cachedAll.push_back(name);
+					if (has32 && !preferHost) continue;
+					std::wstring lower = name;
+					std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
+					g_host64Drivers.insert(lower);
+				}
+				auto byName = [](const std::wstring& a, const std::wstring& b) { return _wcsicmp(a.c_str(), b.c_str()) < 0; };
+				std::sort(cached32.begin(), cached32.end(), byName);
+				std::sort(cachedAll.begin(), cachedAll.end(), byName);
+			}
+			return with64 ? cachedAll : cached32;
+		}
+
+		// True when the bridge runs this driver's 64-bit build in its driver host; false: its 32-bit build in the game.
+		bool RunsIn64BitHost(const std::wstring& name)
+		{
+			std::wstring lower = name;
+			std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
+			return g_host64Drivers.count(lower) != 0;
 		}
 
 		void SaveInterfaceTarget(const std::wstring& driver)
@@ -3573,7 +3611,10 @@ namespace Overlay
 					const bool isCurrent = _wcsicmp(driver.c_str(), asioDriver.c_str()) == 0;
 					const std::string name = Utf8(driver);
 					const std::string label = name + "##asio-" + name;
-					const bool clicked = ChoiceRow(("asio-" + name).c_str(), label.c_str(), isCurrent ? "ASIO, lowest latency" : "ASIO", isCurrent && !routing && !virtualProxy && !interfaceBusy);
+					// Which build the bridge uses: 32-bit in the game, or 64-bit in its driver host (one buffer later).
+					const bool host64 = RunsIn64BitHost(driver);
+					const char* detail = isCurrent ? (host64 ? "ASIO 64-bit, low latency" : "ASIO 32-bit, lowest latency") : (host64 ? "ASIO 64-bit" : "ASIO 32-bit");
+					const bool clicked = ChoiceRow(("asio-" + name).c_str(), label.c_str(), detail, isCurrent && !routing && !virtualProxy && !interfaceBusy);
 					if (!clicked || interfaceBusy) continue;
 					if (isCurrent && virtualProxy) {
 						pending = PendingSwitch{};
@@ -3599,7 +3640,7 @@ namespace Overlay
 			// control panel. Windows' shared audio adds its period and the USB audio driver's buffering on top; through
 			// ASIO an interface plays with the delay its owner knows from other programs. The guitar stays on the cable.
 			if (!canRoute && session) {
-				const std::vector<std::wstring> drivers = InstalledAsioDrivers();
+				const std::vector<std::wstring> drivers = InstalledAsioDrivers(false);   // loaded in the game: 32-bit only
 				if (!drivers.empty()) {
 					ImGui::Dummy(ImVec2(0, 4));
 					SectionLabel("ASIO interfaces (sound only)");
@@ -3609,7 +3650,7 @@ namespace Overlay
 					const std::wstring id = Audio::SharedOutput::AsioOutputDevice::EndpointOf(driver);
 					const bool selected = endpoint == id;
 					const std::string name = Utf8(driver);
-					const bool clicked = ChoiceRow(("asio-out-" + name).c_str(), (name + "##asio-out-" + name).c_str(), selected ? "ASIO, lowest latency" : "ASIO", selected);
+					const bool clicked = ChoiceRow(("asio-out-" + name).c_str(), (name + "##asio-out-" + name).c_str(), selected ? "ASIO 32-bit, lowest latency" : "ASIO 32-bit", selected);
 					Hint("Plays the game (and Tone designer) through this interface's own ASIO driver, at the buffer size set in its control panel. The guitar stays on the Real Tone Cable. While the game runs, other programs cannot use this ASIO driver.");
 					if (!clicked || selected) continue;
 					pending = PendingSwitch{};
@@ -4540,6 +4581,47 @@ namespace Overlay
 					mlNextPoll = 0;
 				}
 				ImGui::EndDisabled();
+				EndCard();
+			}
+
+			// 64-bit ASIO driver host test switch (AsioProxy/Remote64.hpp): HKCU AsioProxy\Prefer64BitDrivers makes the bridge
+			// run any driver that has a 64-bit build through RocksmithAudioBridgeDriverHost.exe, so the path can be tested on
+			// an interface that ships both builds. Written from the game itself: a value set from a Claude shell lands in the
+			// Claude package's private registry copy and never reaches a Steam-launched game. Flipping it reopens the current
+			// ASIO interface (the bridge reads the switch when it loads a driver), the same live switch Switch output uses.
+			{
+				static bool prefer64 = false;
+				static uint64_t nextRead = 0;
+				const uint64_t now = GetTickCount64();
+				if (now >= nextRead) {
+					DWORD value = 0, size = sizeof(value);
+					prefer64 = RegGetValueW(HKEY_CURRENT_USER, L"Software\\RSMods\\AsioProxy", L"Prefer64BitDrivers", RRF_RT_REG_DWORD, nullptr, &value, &size) == ERROR_SUCCESS && value == 1;
+					nextRead = now + 1000;
+				}
+				BeginCard("64-bit ASIO driver host");
+				if (ToggleRow("Use 64-bit drivers", "Runs every ASIO driver that has a 64-bit build through the 64-bit driver host, one buffer later. Test switch: a driver with only a 64-bit build always uses the host.", &prefer64)) {
+					HKEY key{};
+					if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\RSMods\\AsioProxy", 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) == ERROR_SUCCESS) {
+						const DWORD value = prefer64 ? 1 : 0;
+						RegSetValueExW(key, L"Prefer64BitDrivers", 0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value));
+						RegCloseKey(key);
+					}
+					nextRead = now + 1000;
+					LOG_INFO("(AUDIO BRIDGE) 64-bit driver host test switch " << (prefer64 ? "on" : "off") << std::endl);
+					const std::wstring current = ReadPassthroughOutputName();
+					if (!current.empty() && Audio::OutputTap::ProxyOutputMode() == 2 && g_interfaceState.load() != 1)
+						SwitchInterface(current, current);   // reopen it so the change applies now
+				}
+				const std::wstring current = ReadPassthroughOutputName();
+				if (!current.empty()) {
+					InstalledAsioDrivers();   // keeps the host list current
+					Caption((Utf8(current) + (RunsIn64BitHost(current) ? ": 64-bit build, through the driver host." : ": 32-bit build, in the game.")).c_str());
+				}
+				if (g_interfaceState.load() == 1) Caption("Reopening the interface...");
+				else {
+					std::lock_guard<std::mutex> lock(g_interfaceMessageMutex);
+					if (!g_outputSwitchMessage.empty()) Caption(g_outputSwitchMessage.c_str());
+				}
 				EndCard();
 			}
 		}

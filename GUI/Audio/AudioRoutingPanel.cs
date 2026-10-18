@@ -978,8 +978,8 @@ namespace RSMods.Audio
 				"Rejects idle noise and false signal bursts while preserving sustained notes. This level controls when an opened note closes.");
 			AddFeature(grid, compressorEnableCheck, compressorSlider, compInput, "%",
 				"Evens out level swings during sustained notes, the way a hot cable's signal already is.");
-			AddFeature(grid, humFilterCheck, humFilterSlider, humFilterInput, "Hz",
-				"Removes mains hum from a grounded interface. 50 Hz in the UK, EU and AU; 60 Hz in the US.");
+			// No hum filter row: withdrawn 2026-10-17, it mangled the tone; the DLL keeps it off whatever is saved
+			// (AsioHook::SetHumFilterBaseHz). The controls below stay constructed but unparented, so nothing changes HumFilter.
 			AddFeature(grid, rgEnableCheck, rgGateSlider, rgGateInput, "dB",
 				"Overrides Rocksmith's own amp gate so decaying notes are not cut off. Lower values keep notes ringing longer.");
 			card.Add(grid);

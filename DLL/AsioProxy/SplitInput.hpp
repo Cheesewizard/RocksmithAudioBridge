@@ -41,7 +41,7 @@ namespace AsioProxy
 		// Loads, initialises and starts the input interface for `channels` (0-based device input channels). On
 		// failure returns false with a user-readable `failure` and leaves nothing open.
 		bool Open(const std::wstring& driverName, const std::wstring& dllPath, const CLSID& clsid, void* sysHandle,
-			const std::vector<long>& channels, LogFn log, std::string& failure);
+			const std::vector<long>& channels, LogFn log, std::string& failure, bool remote64 = false);
 		// False when the driver stayed wedged in its callback: the object is quarantined and must be abandoned
 		// (leaked, never deleted or reused); IsQuarantined says so.
 		bool Close();

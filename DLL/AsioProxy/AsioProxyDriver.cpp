@@ -18,6 +18,7 @@
 #include "MeterDsp.h"
 #include "VirtualCableCapture.hpp"
 #include "SplitInput.hpp"
+#include "Remote64Driver.hpp"
 #include "AmpLinkHost.hpp"
 #include "AmpLinkGuest.hpp"
 #include "../Shared/ProductVersion.hpp"
@@ -600,8 +601,12 @@ namespace
 	}
 
 	// Resolve an ASIO driver name to its DLL path + CLSID via HKLM/HKCU Software\ASIO\<name>.
-	bool ResolveAsioDriver(const std::wstring& name, std::wstring& dllPath, CLSID& clsid)
+	// `remote64` comes back true for a driver registered only as 64-bit (or with Prefer64BitDrivers set, testing): the
+	// game cannot load it, so it runs in the 64-bit driver host (Remote64Driver.cpp) and dllPath is its 64-bit DLL.
+	bool ResolveAsioDriver(const std::wstring& name, std::wstring& dllPath, CLSID& clsid, bool& remote64)
 	{
+		remote64 = Remote64::Prefer64() && Remote64::Resolve(name, dllPath, clsid);
+		if (remote64) return true;
 		for (HKEY root : { HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER })
 		{
 			HKEY key = nullptr;
@@ -625,7 +630,8 @@ namespace
 			dllPath = path;
 			return true;
 		}
-		return false;
+		remote64 = Remote64::Resolve(name, dllPath, clsid);
+		return remote64;
 	}
 }
 
@@ -1147,8 +1153,9 @@ private:
 				const Pending& pending = wanted[device];
 				std::wstring dllPath; CLSID clsid{};
 				std::string failure;
-				if (!ResolveAsioDriver(pending.driver, dllPath, clsid)) failure = "it is not installed as an ASIO driver";
-				else if (Split(device).Open(pending.driver, dllPath, clsid, m_sysHandle, pending.channels, &ProxyLog, failure)) failure.clear();
+				bool remote64 = false;
+				if (!ResolveAsioDriver(pending.driver, dllPath, clsid, remote64)) failure = "it is not installed as an ASIO driver";
+				else if (Split(device).Open(pending.driver, dllPath, clsid, m_sysHandle, pending.channels, &ProxyLog, failure, remote64)) failure.clear();
 				if (!Split(device).IsOpen())
 				{
 					errors += (errors.empty() ? "" : " ") + WideToUtf8(pending.driver) + " would not open as an input interface: " + failure + ". Its inputs come from the output interface.";
@@ -1853,11 +1860,26 @@ private:
 		std::wstring dllPath; CLSID clsid;
 		const std::wstring targetDriver = driverName.empty() ? ReadTargetDriverName() : driverName;
 		m_bindTarget = targetDriver;   // named in the bind error if a later step refuses
-		if (!ResolveAsioDriver(targetDriver, dllPath, clsid))
+		bool remote64 = false;
+		if (!ResolveAsioDriver(targetDriver, dllPath, clsid, remote64))
 		{
 			ProxyLog("LoadReal: no ASIO registry entry for '%ls'", targetDriver.c_str());
 			NoteBindFailure("it is not installed as an ASIO driver (reinstall its driver)");
 			return false;
+		}
+		if (remote64)
+		{
+			// A 64-bit-only driver: the stand-in starts the 64-bit host and is used exactly like a loaded driver.
+			std::string failure;
+			m_real = Remote64::Create(targetDriver, dllPath, clsid, &ProxyLog, failure);
+			if (!m_real)
+			{
+				ProxyLog("LoadReal: 64-bit '%ls' not started: %s", targetDriver.c_str(), failure.c_str());
+				NoteBindFailure("%s", failure.c_str());
+				return false;
+			}
+			ProxyLog("LoadReal: '%ls' loaded through the 64-bit host", targetDriver.c_str());
+			return true;
 		}
 		m_realModule = LoadLibraryW(dllPath.c_str());
 		// Pinned: an ASIO driver's own threads can outlive Release() (a USB worker waking late), and once its DLL is
