@@ -1,5 +1,6 @@
 #include "../stdafx.h"
 #include "RiffRepeater.hpp"
+#include "GameAddress.hpp"
 
 const float Divisor = 10000.f;
 const float Max = 400.f;
@@ -71,7 +72,7 @@ void RiffRepeater::RequestGameSpeed(float realPercent) {
 	if (!(realPercent >= 25.f && realPercent <= 100.f)) return;
 	const float slider = RealSpeedToSlider(realPercent);
 	using SetRRSpeedFn = void(__cdecl*)(float);
-	reinterpret_cast<SetRRSpeedFn>(0x405880)(slider);
+	reinterpret_cast<SetRRSpeedFn>(GameAddress(0x405880, 0x000058A0))(slider);
 }
 
 /// <summary>

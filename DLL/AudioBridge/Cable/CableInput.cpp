@@ -1611,7 +1611,7 @@ namespace Audio::CableInput
 		}
 
 		originalPaOpenStream = reinterpret_cast<PaOpenStream_t>(
-			DetourFunction(target, reinterpret_cast<byte*>(&Hook_PaOpenStream)));
+			MemUtil::DetourFunction(target, reinterpret_cast<byte*>(&Hook_PaOpenStream)));
 		if (originalPaOpenStream == nullptr)
 		{
 			if (inputOwnedByAsio) PersistentInput::Install(L"", L"", false, false, PersistentInput::EnumeratorSource::RsAsio);

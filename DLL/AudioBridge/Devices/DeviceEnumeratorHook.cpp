@@ -555,10 +555,20 @@ namespace Audio::PersistentInput
 	{
 		// These two post-September-2022 call sites are independently documented by RS_ASIO.
 		// Patch only a complete, unique match. Other executable layouts require their own verified profile.
-		const BYTE patterns[2][8] = {
+		// Each pattern is the 6 bytes the Ubisoft wrapper made of the original "call [CoCreateInstance]" (a call to
+		// a virtualised stub plus one filler byte) followed by "test eax,eax"; all 6 are replaced below.
+		const BYTE septemberPatterns[2][8] = {
 			{ 0xe8, 0x3e, 0x9d, 0x7d, 0x00, 0xcd, 0x85, 0xc0 },
 			{ 0xe8, 0xc2, 0x23, 0x57, 0x00, 0x96, 0x85, 0xc0 }
 		};
+		// Learn & Play December 2024: the same two sites (RVA 0x801EDD in FUN 0x801E80, the September 0xC02D60 at the
+		// same +0x5D; RVA 0xA742A8 in the WASAPI device scan 0xA741A0), each unique in the image. Here the wrapper put
+		// the filler byte before the call.
+		const BYTE learnAndPlayPatterns[2][8] = {
+			{ 0x55, 0xe8, 0x79, 0x77, 0xdc, 0x00, 0x85, 0xc0 },
+			{ 0x56, 0xe8, 0x0e, 0x16, 0x94, 0x00, 0x85, 0xc0 }
+		};
+		const auto& patterns = GameAddressDetail::IsLearnAndPlayDecember2024() ? learnAndPlayPatterns : septemberPatterns;
 		auto* base = reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr));
 		const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
 		if (dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
@@ -603,14 +613,26 @@ namespace Audio::PersistentInput
 		configuredOutputReplacement = replaceOutput;
 		configuredTap = tapMode;
 		originalCreateObject = interceptRsAsio ? asioCreate : CoCreateInstance;
+		// The Learn & Play wrapper refuses VirtualProtect on game code; fall back to the direct syscall that
+		// MemUtil::PatchAdr uses. September keeps plain VirtualProtect, which succeeds there.
+		const bool learnAndPlay = GameAddressDetail::IsLearnAndPlayDecember2024();
+		auto protect = [learnAndPlay](BYTE* address, DWORD newProtection, DWORD* oldProtection)
+		{
+			// Learn & Play skips the refused (and slow) VirtualProtect attempt.
+			if (!learnAndPlay && VirtualProtect(address, 6, newProtection, oldProtection)) return true;
+			ULONG previous = 0;
+			if (!NT_SUCCESS(MemUtil::HookedVirtualProtect(address, 6, newProtection, previous))) return false;
+			*oldProtection = previous;
+			return true;
+		};
 		DWORD protection[2]{};
 		for (UINT index = 0; index < 2; ++index)
 		{
-			if (!VirtualProtect(sites[index], 6, PAGE_EXECUTE_READWRITE, &protection[index]))
+			if (!protect(sites[index], PAGE_EXECUTE_READWRITE, &protection[index]))
 			{
 				for (UINT previous = 0; previous < index; ++previous)
 				{
-					DWORD ignored = 0; VirtualProtect(sites[previous], 6, protection[previous], &ignored);
+					DWORD ignored = 0; protect(sites[previous], protection[previous], &ignored);
 				}
 				return false;
 			}
@@ -623,7 +645,7 @@ namespace Audio::PersistentInput
 			sites[index][5] = 0x90;
 			FlushInstructionCache(GetCurrentProcess(), sites[index], 6);
 			DWORD ignored = 0;
-			if (!VirtualProtect(sites[index], 6, protection[index], &ignored))
+			if (!protect(sites[index], protection[index], &ignored))
 				LOG_ERROR("(PERSISTENT INPUT) Could not restore call-site protection" << std::endl);
 		}
 		LOG_INFO("(AUDIO ROUTING) " << (tapMode ? "Passive output tap installed (render device wrapped, playback unchanged)"

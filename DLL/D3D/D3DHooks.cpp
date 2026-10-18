@@ -9,6 +9,7 @@
 #include "NoteByNote/Host/ControllerBridge.hpp"
 
 #include <intrin.h>
+#include "GameAddress.hpp"
 
 #pragma intrinsic(_ReturnAddress)
 
@@ -894,13 +895,13 @@ namespace {
 	std::atomic<unsigned long long> staleMarkerQuadsConsidered{ 0 };
 	std::atomic<unsigned long long> staleMarkerQuadsDropped{ 0 };
 	std::atomic<unsigned long long> staleMarkerDrawsFiltered{ 0 };
-	constexpr uintptr_t MARKER_SLICE_CALLER = 0x00BEC0DA;
+	const uintptr_t MARKER_SLICE_CALLER = GameAddress(0x00BEC0DA, 0x007EB22A);
 	// The batched glyph flush that draws the fingering NUMERALS (otherwise a suppressed
 	// upcoming chord leaves its floating finger number behind). One triangle-list draw carries ~21 glyph quads including
 	// the kept members' numerals, so it filters per quad exactly like the marker
 	// slices; glyphs that do not land on a marker coordinate (fret numbers below the
 	// strings, highway labels) never decode and are always kept.
-	constexpr uintptr_t GLYPH_FLUSH_CALLER = 0x00DFC98C;
+	const uintptr_t GLYPH_FLUSH_CALLER = GameAddress(0x00DFC98C, 0x009FB9CC);
 	constexpr float MARKER_QUAD_FRET_EPSILON = 1.2f;
 	constexpr float MARKER_QUAD_STRING_EPSILON = 0.6f;
 	// Bass neck. RENDERED_STRING_HEIGHTS is the guitar neck; on a bass arrangement the four

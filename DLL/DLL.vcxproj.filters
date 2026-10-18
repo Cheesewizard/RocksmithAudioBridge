@@ -719,6 +719,9 @@
     <ClInclude Include="VersioningStruct.h">
       <Filter>Main Headers</Filter>
     </ClInclude>
+    <ClInclude Include="GameAddress.hpp">
+      <Filter>Main Headers</Filter>
+    </ClInclude>
     <ClInclude Include="stdafx.h">
       <Filter>Main Headers</Filter>
     </ClInclude>

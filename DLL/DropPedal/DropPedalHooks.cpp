@@ -409,7 +409,7 @@ void DropPedalHooks::Install()
 	const uintptr_t referenceBuilder = Offsets::func_tuningReferenceBuilder.GetValue();
 	if (referenceBuilder != 0)
 	{
-		const PBYTE trampoline = DetourFunction((PBYTE)referenceBuilder, (PBYTE)SpyReferenceBuilder);
+		const PBYTE trampoline = MemUtil::DetourFunction((PBYTE)referenceBuilder, (PBYTE)SpyReferenceBuilder);
 		if (trampoline == nullptr)
 		{
 			LOG_ERROR("Drop pedal failed to hook the tuning reference builder at 0x"

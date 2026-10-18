@@ -43,6 +43,7 @@
 #include <sstream>
 #include <unordered_set>
 #include <vector>
+#include "GameAddress.hpp"
 namespace
 {
 	void AppendNbnTraceLine(const std::string& text)
@@ -62,15 +63,15 @@ namespace
 
 namespace
 {
-	constexpr uintptr_t LAS_OWNER_VTABLE = 0x11D1430;      // GamePlaysongLAS
-	constexpr uintptr_t PLAYER_SONG_VTABLE = 0x119F668;    // GameComponentPlayerSong
-	constexpr uintptr_t NATIVE_HIT_DECISION = 0x7E2640;    // owner vtable +0xF0
-	constexpr uintptr_t STOP_TMUSIC = 0x44C130;            // PlayerSong vtable +0x24
-	constexpr uintptr_t SET_FIVE_CLOCKS = 0x7DE490;        // owner vtable +0x50
-	constexpr uintptr_t COORDINATED_REBUILD = 0x7E87F0;    // owner vtable +0x54
-	constexpr uintptr_t MARK_ACTIVE_NOTES = 0x7E8920;      // owner in EDX, plain ret
-	constexpr uintptr_t PLAY_SOUND_CSTRING = 0x7CE8D0;     // event name in ESI
-	constexpr uintptr_t ENGINE_COMPENSATION = 0x1224A20;   // double, 0.053 engine constant
+	const uintptr_t LAS_OWNER_VTABLE = GameAddress(0x11D1430, 0x00DD2C60);      // GamePlaysongLAS
+	const uintptr_t PLAYER_SONG_VTABLE = GameAddress(0x119F668, 0x00DA0E70);    // GameComponentPlayerSong
+	const uintptr_t NATIVE_HIT_DECISION = GameAddress(0x7E2640, 0x003E3010);    // owner vtable +0xF0
+	const uintptr_t STOP_TMUSIC = GameAddress(0x44C130, 0x0004BE90);            // PlayerSong vtable +0x24
+	const uintptr_t SET_FIVE_CLOCKS = GameAddress(0x7DE490, 0x003DEE50);        // owner vtable +0x50
+	const uintptr_t COORDINATED_REBUILD = GameAddress(0x7E87F0, 0x003E91E0);    // owner vtable +0x54
+	const uintptr_t MARK_ACTIVE_NOTES = GameAddress(0x7E8920, 0x003E9310);      // owner in EDX, plain ret
+	const uintptr_t PLAY_SOUND_CSTRING = GameAddress(0x7CE8D0, 0x003CF400);     // event name in ESI
+	const uintptr_t ENGINE_COMPENSATION = GameAddress(0x1224A20, 0x00E262B8);   // double, 0.053 engine constant
 	constexpr uintptr_t LAS_SECTION_START = 0x3C0;
 	constexpr uintptr_t LAS_SECTION_START_MIRROR = 0x3C4;
 	constexpr uintptr_t LAS_SECTION_END = 0x3C8;
@@ -82,19 +83,19 @@ namespace
 	constexpr uintptr_t PHRASE_SECTION_START = 0x24;
 	constexpr uintptr_t PHRASE_SECTION_END = 0x28;
 	constexpr uint32_t PHRASE_SECTION_MAX = 1024;
-	constexpr uintptr_t NOTE_VFX_VTABLE = 0x119BFB0;
-	constexpr uintptr_t SPECIALIZED_NOTE_VFX_VTABLE = 0x119BFD8;
-	constexpr uintptr_t BEAT_VFX_VTABLE = 0x119BF28;
-	constexpr uintptr_t ARM_NOTE_VFX_PROMPT = 0x40D2E0;    // NoteVfx vtable +0x20
-	constexpr uintptr_t CLEAR_NOTE_VFX_PROMPT = 0x40D360;  // NoteVfx vtable +0x24
-	constexpr uintptr_t ARM_SPECIALIZED_PROMPT_BC = 0x40D710; // Specialized NoteVfx vtable +0x14
-	constexpr uintptr_t ARM_SPECIALIZED_PROMPT_C0 = 0x40D790; // Specialized NoteVfx vtable +0x18
-	constexpr uintptr_t CLEAR_SPECIALIZED_PROMPT = 0x40D810;  // Specialized NoteVfx vtable +0x1C
+	const uintptr_t NOTE_VFX_VTABLE = GameAddress(0x119BFB0, 0x00D9D838);
+	const uintptr_t SPECIALIZED_NOTE_VFX_VTABLE = GameAddress(0x119BFD8, 0x00D9D860);
+	const uintptr_t BEAT_VFX_VTABLE = GameAddress(0x119BF28, 0x00D9D7B0);
+	const uintptr_t ARM_NOTE_VFX_PROMPT = GameAddress(0x40D2E0, 0x0000D1F0);    // NoteVfx vtable +0x20
+	const uintptr_t CLEAR_NOTE_VFX_PROMPT = GameAddress(0x40D360, 0x0000D270);  // NoteVfx vtable +0x24
+	const uintptr_t ARM_SPECIALIZED_PROMPT_BC = GameAddress(0x40D710, 0x0000D620); // Specialized NoteVfx vtable +0x14
+	const uintptr_t ARM_SPECIALIZED_PROMPT_C0 = GameAddress(0x40D790, 0x0000D6A0); // Specialized NoteVfx vtable +0x18
+	const uintptr_t CLEAR_SPECIALIZED_PROMPT = GameAddress(0x40D810, 0x0000D720);  // Specialized NoteVfx vtable +0x1C
 	constexpr char FREEZE_NOTE_TRACK_EVENT[] = "Play_FreezeNoteTrack";
-	constexpr uintptr_t ONSET_NOTE_QUERY = 0x48DC40;
-	constexpr uintptr_t LOUDEST_PLAYED_NOTE_QUERY = 0x48E5F0;
-	constexpr uintptr_t TUNING_OFFSETS = 0x1199D2C;
-	constexpr uintptr_t MOTION_NOTE_SINGLETON = 0x0135F57C;
+	const uintptr_t ONSET_NOTE_QUERY = GameAddress(0x48DC40, 0x0008E590);
+	const uintptr_t LOUDEST_PLAYED_NOTE_QUERY = GameAddress(0x48E5F0, 0x0008EF40);
+	const uintptr_t TUNING_OFFSETS = GameAddress(0x1199D2C, 0x00D99CDC);
+	const uintptr_t MOTION_NOTE_SINGLETON = GameAddress(0x0135F57C, 0x00F6057C);
 	constexpr uintptr_t MOTION_NOTE_SINGLETON_STEP = 0x10;
 	constexpr uintptr_t MOTION_NOTE_CONTAINER_STEP = 0x04;
 	constexpr uintptr_t MOTION_NOTE_ARRAY_POINTER = 0x1284;
@@ -108,7 +109,7 @@ namespace
 	constexpr float BEND_VARIANCE_SEMITONES = 0.5f;
 	constexpr float BEND_OVERBEND_ALLOWANCE_SEMITONES = 1.5f;
 	constexpr float BEND_VETO_ESTIMATOR_SLACK_SEMITONES = 0.15f;
-	constexpr uintptr_t DETECTION_ROOT = 0x0135F57C;
+	const uintptr_t DETECTION_ROOT = GameAddress(0x0135F57C, 0x00F6057C);
 	constexpr uintptr_t DETECTION_ARRANGEMENT_GUITAR = 0x10;   // Player 1, guitar and bass; +0x14 = player 2
 	constexpr uintptr_t DETECTION_ENGINE = 0x08;
 	constexpr uintptr_t DETECTION_DETECTOR = 0x04;
@@ -126,15 +127,15 @@ namespace
 	constexpr uintptr_t RING_FRAME_PITCH_MODE_TWO = 0x0C;
 	constexpr uintptr_t RING_FRAME_PITCH_DEFAULT = 0x14;
 	constexpr uintptr_t RING_FRAME_SEQUENCE = 0x748;
-	constexpr uintptr_t ONSET_DEDUPE_GLOBAL = 0x012F6920;
-	constexpr uintptr_t DETECTOR_GATE_LEVEL_THRESHOLD = 0x01224418;
-	constexpr uintptr_t DETECTOR_GATE_QUALITY_THRESHOLD = 0x012243A0;
+	const uintptr_t ONSET_DEDUPE_GLOBAL = GameAddress(0x012F6920, 0x00EF7920);
+	const uintptr_t DETECTOR_GATE_LEVEL_THRESHOLD = GameAddress(0x01224418, 0x00E25CB0);
+	const uintptr_t DETECTOR_GATE_QUALITY_THRESHOLD = GameAddress(0x012243A0, 0x00E25C38);
 	constexpr double DETECTOR_GATE_LEVEL_FALLBACK = -55.0;
 	constexpr double DETECTOR_GATE_QUALITY_FALLBACK = 50.0;
 	constexpr int32_t DETECTOR_RING_MAX_CAPACITY = 4096;
 	constexpr uintptr_t DETECTOR_SOUNDING_TABLE = 0x604;
 	constexpr uintptr_t DETECTOR_SOUNDING_COUNT = 0x6A4;
-	constexpr uintptr_t ND_STRENGTH_THRESHOLD_GLOBAL = 0x01199DD4;
+	const uintptr_t ND_STRENGTH_THRESHOLD_GLOBAL = GameAddress(0x01199DD4, 0x00D99D84);
 	constexpr float ND_STRENGTH_THRESHOLD_FALLBACK = 5.0f;
 	constexpr double ND_SOUNDING_HOLD_SECONDS = 0.18;
 	constexpr int32_t ND_SOUNDING_MAX_ENTRIES = 64;
@@ -576,10 +577,12 @@ namespace
 	int QueryNativeOnsetNote()
 	{
 		int result = -1;
+		// A local, not the namespace constant: inline asm reads a local's value, and the address differs per build.
+		const uintptr_t onsetNoteQuery = ONSET_NOTE_QUERY;
 		__asm
 		{
 			xor eax, eax        // arrangement kind 0 (guitar)
-			mov edx, 0x48DC40   // ONSET_NOTE_QUERY
+			mov edx, onsetNoteQuery
 			call edx
 			mov result, eax
 		}
@@ -600,10 +603,11 @@ namespace
 	int QueryNativeLoudestPlayedNote()
 	{
 		int result = -1;
+		const uintptr_t loudestPlayedNoteQuery = LOUDEST_PLAYED_NOTE_QUERY;
 		__asm
 		{
 			xor eax, eax        // arrangement kind 0 (guitar)
-			mov edx, 0x48E5F0   // LOUDEST_PLAYED_NOTE_QUERY
+			mov edx, loudestPlayedNoteQuery
 			call edx
 			mov result, eax
 		}
@@ -3168,13 +3172,13 @@ namespace
 	}
 	constexpr uintptr_t OWNER_FROZEN_ON_TAG = 0x5E3;
 	volatile bool isNativeFreezeFlagEnabled = false;
-	constexpr uintptr_t NATIVE_SCHEDULER_GLOBAL = 0x0135F5AC;
+	const uintptr_t NATIVE_SCHEDULER_GLOBAL = GameAddress(0x0135F5AC, 0x00F605AC);
 	constexpr uintptr_t OWNER_FREEZE_TAG_STRING = 0x5C8;
 	constexpr uintptr_t OWNER_FREEZE_TAG_BEGIN = 0x5D8;
 	constexpr uintptr_t OWNER_FREEZE_TAG_END = 0x5DC;
 	constexpr uintptr_t OWNER_RESUME_FROM_TAG = 0x5E4;
 	constexpr uintptr_t OWNER_FREEZE_START_TIME = 0x618;
-	constexpr uintptr_t CHORD_DISPLAY_GLOBAL = 0x0135F54C;
+	const uintptr_t CHORD_DISPLAY_GLOBAL = GameAddress(0x0135F54C, 0x00F6054C);
 	constexpr uintptr_t CHORD_DISPLAY_GLOBAL_HOP = 0x10;
 	constexpr uintptr_t CHORD_DISPLAY_WRAPPER_SLOT = 0x50;
 	constexpr uintptr_t OWNER_CHORD_DISPLAY_COMPONENT = 0x78;
@@ -3188,7 +3192,7 @@ namespace
 	uint64_t scheduleShiftCount = 0;
 	std::chrono::steady_clock::time_point transportFrozenAt{};
 	bool hasTransportFrozenAt = false;
-	constexpr uintptr_t NATIVE_SCHEDULE_SHIFT_FN = 0x57EB00;
+	const uintptr_t NATIVE_SCHEDULE_SHIFT_FN = GameAddress(0x57EB00, 0x00180130);
 	constexpr int NATIVE_SCHEDULE_SHIFT_ENTRY = 4;
 	constexpr int NATIVE_SCHEDULE_SHIFT_OP_ADD = 3;
 
@@ -3227,14 +3231,14 @@ namespace
 			<< std::setprecision(3) << elapsedSeconds
 			<< "s (call #" << scheduleShiftCount << ")." << std::endl);
 	}
-	constexpr uintptr_t NATIVE_CHORD_MATCHER_FN = 0x4E6E90;
+	const uintptr_t NATIVE_CHORD_MATCHER_FN = GameAddress(0x4E6E90, 0x000E7B00);
 	constexpr uintptr_t MATCHER_ARRANGEMENT_SLOT = 0x10;
 	constexpr uintptr_t MATCHER_DET_SLOT = 0x08;
 	constexpr uintptr_t MATCHER_STATE_SLOT = 0x04;
 	constexpr uintptr_t MATCHER_GATE_A_OFFSET = 0xDD8;
 	constexpr uintptr_t MATCHER_GATE_B_OFFSET = 0xD38;
-	constexpr uintptr_t MATCHER_GATE_A_THRESHOLD = 0x1224418; // double global
-	constexpr uintptr_t MATCHER_GATE_B_THRESHOLD = 0x12243A0; // double global
+	const uintptr_t MATCHER_GATE_A_THRESHOLD = GameAddress(0x1224418, 0x00E25CB0); // double global
+	const uintptr_t MATCHER_GATE_B_THRESHOLD = GameAddress(0x12243A0, 0x00E25C38); // double global
 
 	int CallNativeChordMatcher(const int* midis, int count, int frameOffset)
 	{
@@ -3279,7 +3283,7 @@ namespace
 		}
 		return (resultAl & 1) ? 1 : 0;
 	}
-	constexpr uintptr_t NATIVE_SINGLE_NOTE_MATCHER_FN = 0x4E7B30;
+	const uintptr_t NATIVE_SINGLE_NOTE_MATCHER_FN = GameAddress(0x4E7B30, 0x000E87A0);
 	int CallNativeSingleNoteMatcher(int expectedMidi, int frameOffset)
 	{
 		if (expectedMidi < 0 || frameOffset < 0) return -1;
@@ -4080,7 +4084,7 @@ namespace
 		}
 		return true;   // every expected tone present and dominant
 	}
-	constexpr uintptr_t NATIVE_STARTAT_CORE = 0x4749C0;
+	const uintptr_t NATIVE_STARTAT_CORE = GameAddress(0x4749C0, 0x000755B0);
 
 	struct GameTagString
 	{

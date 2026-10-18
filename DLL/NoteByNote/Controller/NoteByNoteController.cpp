@@ -20,6 +20,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include "GameAddress.hpp"
 
 namespace
 {
@@ -139,7 +140,7 @@ namespace
 	}
 	namespace StoppedPreviewFilter
 	{
-		constexpr uintptr_t PREVIEW_CONTEXT_VTABLE = 0x0121B6F0;
+		const uintptr_t PREVIEW_CONTEXT_VTABLE = GameAddress(0x0121B6F0, 0x00E1CF58);
 		constexpr float MARKER_OFFSET = 0.5f;
 		constexpr float OFFSCREEN_STRING_POSITION = -999.5f;
 		constexpr float MARKER_SCALE_MIN = 0.70f;

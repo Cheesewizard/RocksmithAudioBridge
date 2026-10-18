@@ -1686,7 +1686,7 @@ namespace Audio::AsioHook
 					return UnmarshalHookInstallResult::Retry;
 				}
 
-				const PBYTE trampoline = DetourFunction(
+				const PBYTE trampoline = MemUtil::DetourFunction(
 					reinterpret_cast<PBYTE>(unmarshalPatchedTarget),
 					reinterpret_cast<PBYTE>(&Hook_UnmarshalStreamComPointers));
 				if (trampoline == nullptr)

@@ -6,12 +6,13 @@
 #include "VersioningStruct.h"
 
 #include <cstring>
+#include "GameAddress.hpp"
 namespace
 {
-	constexpr uintptr_t NATIVE_SCORING_UPDATE = 0x7E2880;
-	constexpr uintptr_t NATIVE_HIT_DECISION = 0x7E2640;
-	constexpr uintptr_t NATIVE_RENDER_PREPARATION = 0x7E4870;
-	constexpr uintptr_t NATIVE_NOTE_HEAD_DRAW = 0xBEBCD0;
+	const uintptr_t NATIVE_SCORING_UPDATE = GameAddress(0x7E2880, 0x003E3250);
+	const uintptr_t NATIVE_HIT_DECISION = GameAddress(0x7E2640, 0x003E3010);
+	const uintptr_t NATIVE_RENDER_PREPARATION = GameAddress(0x7E4870, 0x003E5240);
+	const uintptr_t NATIVE_NOTE_HEAD_DRAW = GameAddress(0xBEBCD0, 0x007EAE20);
 
 	using NativeRenderPreparation = void(__stdcall*)(void* owner, float updateTime);
 
@@ -99,7 +100,7 @@ namespace
 			uint8_t* stub = stubPool + hostIndex * STUB_SIZE;
 			WriteStub(stub, hostIndex);
 
-			void* trampoline = DetourFunction(
+			void* trampoline = MemUtil::DetourFunction(
 				reinterpret_cast<PBYTE>(static_cast<uintptr_t>(address)),
 				reinterpret_cast<PBYTE>(stub));
 			if (trampoline == nullptr)
@@ -212,20 +213,22 @@ void NoteByNoteNativeScoring::Initialize()
 {
 	std::lock_guard<std::mutex> lock(hookMutex);
 	if (areHooksInstalled) return;
-	if (!IsExactGameBuild(VersionType::RemasteredSeptember2022))
+	// Mapped for September 2022 (fixed addresses) and Learn & Play December 2024 (GameAddress RVAs from the atlas
+	// port). Any other exe would get September addresses that point at the wrong code, so it stays off.
+	if (!IsExactGameBuild(VersionType::RemasteredSeptember2022) && !IsExactGameBuild(VersionType::LPDecember2024))
 	{
-		LOG_ERROR("(NBN HOOKS) This Rocksmith build is not the September 2022 release Note by Note is mapped for;"
-			<< " Note by Note stays off and none of its hooks are installed." << std::endl);
+		LOG_ERROR("(NBN HOOKS) This Rocksmith build is neither the September 2022 release nor Learn & Play December 2024,"
+			<< " the builds Note by Note is mapped for; Note by Note stays off and none of its hooks are installed." << std::endl);
 		return;
 	}
 
-	originalScoringUpdate = reinterpret_cast<ResearchProtocol::ScoringUpdate>(DetourFunction(
+	originalScoringUpdate = reinterpret_cast<ResearchProtocol::ScoringUpdate>(MemUtil::DetourFunction(
 		reinterpret_cast<PBYTE>(NATIVE_SCORING_UPDATE),
 		reinterpret_cast<PBYTE>(&ScoringUpdateDetour)));
-	originalHitDecision = reinterpret_cast<ResearchProtocol::HitDecision>(DetourFunction(
+	originalHitDecision = reinterpret_cast<ResearchProtocol::HitDecision>(MemUtil::DetourFunction(
 		reinterpret_cast<PBYTE>(NATIVE_HIT_DECISION),
 		reinterpret_cast<PBYTE>(&HitDecisionDetour)));
-	originalRenderPreparation = reinterpret_cast<NativeRenderPreparation>(DetourFunction(
+	originalRenderPreparation = reinterpret_cast<NativeRenderPreparation>(MemUtil::DetourFunction(
 		reinterpret_cast<PBYTE>(NATIVE_RENDER_PREPARATION),
 		reinterpret_cast<PBYTE>(&RenderPreparationDetour)));
 	if (originalScoringUpdate == nullptr
@@ -247,7 +250,7 @@ void NoteByNoteNativeScoring::Initialize()
 	LOG_INFO("(NBN HOOK HOST) Permanent native scoring, hit-decision, and preparation detours"
 		<< " installed; non-destructive presentation hooks installed=" << isGateInstalled << "."
 		<< " Controller behavior is supplied by the reloadable research probe." << std::endl);
-	originalNoteHeadDraw = reinterpret_cast<ResearchProtocol::NoteHeadDraw>(DetourFunction(
+	originalNoteHeadDraw = reinterpret_cast<ResearchProtocol::NoteHeadDraw>(MemUtil::DetourFunction(
 		reinterpret_cast<PBYTE>(NATIVE_NOTE_HEAD_DRAW),
 		reinterpret_cast<PBYTE>(&NoteHeadDrawDetour)));
 	LOG_INFO("(NBN HOOK HOST) Note-head draw research detour installed="
