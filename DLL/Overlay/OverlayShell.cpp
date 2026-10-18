@@ -2473,9 +2473,14 @@ namespace Overlay
 							Hint("Loads it in the background every time Tone designer starts (outside songs), so tones that use it always switch at once. Costs memory while loaded.");
 							if (ImGui::MenuItem("Unload", nullptr, false, vst.hostRunning && loaded)) VstHostLink::Unload(plugin.path);
 							Hint("Frees its memory. In the chain it stays; this only unloads the spare copy.");
-							if (ImGui::MenuItem("Reload", nullptr, false, vst.hostRunning && !vst.busy && (inChain || loaded) && !Loading(vst, plugin.path)))
-								VstHostLink::Reload(plugin.path);
-							Hint("Closes the plugin completely and starts it again, keeping each pedal's settings: for when it needs a fresh start to see something new, such as tones you imported into it. The rest of the chain keeps playing while it loads.");
+							// A plugin whose background load failed has no copy to reload, so Reload is the retry: it loads it
+							// again in the background (which clears the failed mark), the same as Load in the background.
+							const bool failed = !inChain && !loaded && Listed(vst.preloadFailed, plugin.path);
+							if (ImGui::MenuItem("Reload", nullptr, false, vst.hostRunning && !vst.busy && (inChain || loaded || failed) && !Loading(vst, plugin.path))) {
+								if (failed) VstHostLink::LoadInBackground(plugin.path);
+								else VstHostLink::Reload(plugin.path);
+							}
+							Hint("Closes the plugin completely and starts it again, keeping each pedal's settings: for when it needs a fresh start to see something new, such as tones you imported into it. The rest of the chain keeps playing while it loads. If it failed to load, this tries again.");
 							ImGui::Separator();
 							if (ImGui::MenuItem("Favourite", nullptr, favourite)) VstHostLink::SetFavourite(plugin.path, !favourite);
 							if (ImGui::MenuItem("Show the file")) VstHostLink::ShowPluginFile(plugin.path);
@@ -2511,7 +2516,7 @@ namespace Overlay
 							ImGui::BeginTooltip();
 							ImGui::PushTextWrapPos(ImGui::GetFontSize() * 24.0f);
 							ImGui::TextUnformatted(why.c_str());
-							ImGui::TextDisabled("It is not loaded in the background again until you right-click it and pick Load in the background.");
+							ImGui::TextDisabled("It is not loaded in the background again until you right-click it and pick Reload.");
 							ImGui::PopTextWrapPos();
 							ImGui::EndTooltip();
 						}
