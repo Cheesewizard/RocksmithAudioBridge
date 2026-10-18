@@ -16,19 +16,18 @@ Some interfaces only install a 64-bit ASIO driver, which 32-bit Rocksmith cannot
 - A 64-bit driver plays one buffer later than a 32-bit one. When an interface has both builds, the bridge keeps using the 32-bit one.
 - This needs `RS_ASIO.ini` pointed at the Audio Bridge (the Audit tab's **Set up for me** does this). In Cable mode, the ASIO output for the game's sound still lists 32-bit drivers only.
 
-### Latency readout in ASIO mode
+### Latency readout in ASIO mode (new in this beta, feedback welcome)
 The guitar to ear readout in the overlay header now works on an ASIO interface, not only on the Real Tone Cable. It shows your driver's reported input and output delay, plus the amp link's blocks while the Tone designer or an external amp sim plays (**in**, **out** and **total**). The game tones figure adds the game's own processing: timed from your picks when the game's amp is heard, otherwise estimated, and marked **guess** when it has nothing to go on. Treat it as a guide, not a calibrated measurement. General > Display > **Latency readout** shows a compact one on the game screen (it needs the Audio diagnostics HUD).
 
 ## Changes
-- **Input page, one tab per player.** The Input page has a tab for Player 1, Player 2, and the mic while `RS_ASIO.ini` sends it through the bridge. Each tab shows what the input is (ASIO interface or Real Tone Cable), its level, that source's settings, then the processing. Picking each input's interface and channel moves here from the Output page's Routing card, which now keeps only the output pair. The **Real Tone Cable for Player 2** switch moves here from the General page.
-- **Input processing for Player 1 only, for now.** Input gain, noise suppressor and compressor run on Player 1. The Player 2 tab says its own processing is coming in the next build.
+- **Input page, one tab per player.** The Input page has a tab for Player 1, Player 2, and the mic while `RS_ASIO.ini` sends it through the bridge. Each tab shows what the input is (ASIO interface or Real Tone Cable), its level, that source's settings, then the processing. Picking each input's interface and channel moves here from the Output page, where an **Output pair** card remains for interfaces with more than one pair of outputs. The **Real Tone Cable for Player 2** switch moves here from the General page.
+- **Input processing for Player 1 only, for now.** Input gain, noise suppressor and compressor run on Player 1. Player 2's own processing is planned.
 - **"Not running this launch".** Input processing starts at game launch only when one of its switches is on. If you switch the first one on mid-session, the Processing card now says so: restart the game once to start it.
 - **The noise suppressor now also cleans the amp sim's input.** The Tone designer and external amp sims used to get the raw guitar signal, so a noisy interface reached a high-gain amp unfiltered. With the Input page's **Noise suppressor** on, the amp sim gets the same cleaned signal, on ASIO and on the Real Tone Cable alike. The game's own input is not changed.
 - **The hum filter is removed.** It thinned the tone and left a faint echo after each pick, worst on palm mutes and light notes on the high E, and removed little real hum. The noise suppressor already silences hum between notes. If you had it on, it now stays off, and its controls are gone from the overlay and the settings app.
 
 ## Fixes
 - **Real Tone Cable routing works with `ExclusiveMode=0` in `Rocksmith.ini`.** The game could fail to open its output ("No audio output device"). The bridge now owns the real device in Cable mode, so that setting no longer matters there.
-- **Switch output survives alt-tab.** The game rebuilds its sound output on every focus change, and that rebuild could reopen the device from launch or fall back to the Windows default, undoing your Switch output pick. The pick now stays.
 - **Tone designer: Reload retries a plugin that failed to load in the background.** Reload used to be greyed out for such a plugin; it now loads it again.
 
 # Rocksmith Audio Bridge 4.2 release notes
