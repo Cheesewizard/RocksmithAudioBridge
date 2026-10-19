@@ -545,4 +545,5 @@ namespace CableAmpLink
 	void Configure(bool mixOn, float returnGain) { g_host.Configure(mixOn, returnGain); }
 	void SetLatencyBlocks(int blocks) { g_host.SetLatencyBlocks(blocks); g_safety.store(blocks >= 2, std::memory_order_relaxed); }
 	void SetPitchSemitones(int semitones) { g_host.SetPitchSemitones(semitones); }
+	void ConfigureConditioner(float gateThreshold) { g_host.ConfigureConditioner(gateThreshold); }
 }

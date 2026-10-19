@@ -43,6 +43,8 @@ namespace ExternalAmp
 		int cableBlockSetting = 0;     // cable block size: 0 = Automatic, else 64 / 128 / 256 frames
 		float cableLatencyMs = 0.0f;   // measured guitar-to-speaker delay through the amp sim on the cable (0 = not yet)
 		float cableReadMs = 0.0f;      // the read part of it (packet wait, cable to PC); the rest is tone to speaker
+		float asioInMs = 0.0f;         // ASIO mode: the driver's reported input latency (0 = no proxy stream)
+		float asioOutMs = 0.0f;        // ...and output latency; both include the driver's buffer
 		AmpLink::Status link{};
 	};
 

@@ -12,12 +12,13 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+#include "GameAddress.hpp"
 
 namespace
 {
-	constexpr uintptr_t RIFF_REPEATER_INPUT_DISPATCHER = 0x00630800;
-	constexpr uintptr_t RIFF_REPEATER_ADJUST_SLIDER = 0x00633150;
-	constexpr uintptr_t RIFF_REPEATER_STAGE_BUILDER = 0x006397D0;
+	const uintptr_t RIFF_REPEATER_INPUT_DISPATCHER = GameAddress(0x00630800, 0x00231580);
+	const uintptr_t RIFF_REPEATER_ADJUST_SLIDER = GameAddress(0x00633150, 0x00233ED0);
+	const uintptr_t RIFF_REPEATER_STAGE_BUILDER = GameAddress(0x006397D0, 0x0023A560);
 	constexpr uintptr_t VIEW_CONTAINER_OFFSET = 0x1C4;      // controller+0x1C4: the row container
 	constexpr uintptr_t CONTAINER_ENUMERATE_SLOT = 0x74;    // (old container class only) fills {begin,end,cap}
 	constexpr uintptr_t CONTAINER_GET_BY_NAME_SLOT = 0x18;  // (const char* name) -> row node (AdjustSlider 0x633150)
@@ -28,7 +29,7 @@ namespace
 	const byte STAGE_BUILDER_PROLOGUE[] = { 0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xC0, 0x81, 0xEC, 0xB4, 0x00, 0x00, 0x00, 0xA1 };
 	using StageBuilder = void(__stdcall*)(void* controller, int* sortOrderCounter);
 	StageBuilder originalStageBuilder = nullptr;
-	constexpr uintptr_t RIFF_REPEATER_SETTINGS_BUILDER = 0x006358E0;
+	const uintptr_t RIFF_REPEATER_SETTINGS_BUILDER = GameAddress(0x006358E0, 0x00236670);
 	const byte SETTINGS_BUILDER_PROLOGUE[] = { 0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xC0, 0x81, 0xEC, 0xB4, 0x08, 0x00, 0x00, 0xA1 };
 	using SettingsBuilder = void(__fastcall*)(void* controller, void* unusedEdx, int* sortOrderCounter);
 	SettingsBuilder originalSettingsBuilder = nullptr;
@@ -225,13 +226,10 @@ namespace
 		if (*reinterpret_cast<char**>(text + 0x14) != text + 0x10) text = *reinterpret_cast<char**>(text);
 		return text;
 	}
-	enum : uintptr_t
-	{
-		INTERN_NAME_FN = 0x0087C470,
-		MAKE_NUMBER_FN = 0x0087F930,
-		SET_MEMBER_FN = 0x008816C0,
-		RELEASE_NAME_FN = 0x0087C3D0,
-	};
+	const uintptr_t INTERN_NAME_FN = GameAddress(0x0087C470, 0x0047CB80);
+	const uintptr_t MAKE_NUMBER_FN = GameAddress(0x0087F930, 0x00480040);
+	const uintptr_t SET_MEMBER_FN = GameAddress(0x008816C0, 0x00481DB0);
+	const uintptr_t RELEASE_NAME_FN = GameAddress(0x0087C3D0, 0x0047CAE0);
 
 	void InternName(const char* name, uint32_t* outHandle)
 	{
@@ -299,7 +297,7 @@ namespace
 		if (handle != 0) ReleaseName(handle);
 		return true;
 	}
-	constexpr uintptr_t SET_BOOL_MEMBER_FN = 0x00882660;
+	const uintptr_t SET_BOOL_MEMBER_FN = GameAddress(0x00882660, 0x00482D30);
 
 	void CallSetBoolMember(void* object, uint32_t* nameHandle, bool value, void** outValue)
 	{
@@ -325,7 +323,7 @@ namespace
 		if (outValue != nullptr) ValueRelease(outValue);
 		if (handle != 0) ReleaseName(handle);
 	}
-	constexpr uintptr_t RS_SLIDER_VTABLE = 0x011AD72C;
+	const uintptr_t RS_SLIDER_VTABLE = GameAddress(0x011AD72C, 0x00DAEF9C);
 	constexpr uintptr_t COMPONENT_DATA_OFFSET = 0x8;
 	constexpr uintptr_t COMPONENT_DIRTY_OFFSET = 0xD;
 	constexpr uintptr_t CONTROLLER_COMPONENT_MAP_OFFSET = 0x60;
@@ -362,8 +360,8 @@ namespace
 		return nullptr;
 	}
 	constexpr uintptr_t SLIDER_VALUE_OFFSET = 0x88;
-	constexpr uintptr_t SLIDER_SET_VALUE_FN = 0x005C3FB0;
-	constexpr uintptr_t SLIDER_REFRESH_FN = 0x005C3CD0;
+	const uintptr_t SLIDER_SET_VALUE_FN = GameAddress(0x005C3FB0, 0x001C5730);
+	const uintptr_t SLIDER_REFRESH_FN = GameAddress(0x005C3CD0, 0x001C5450);
 
 	void CallSliderSetValue(void* slider, float value)
 	{
@@ -564,11 +562,11 @@ namespace
 	constexpr const char* RIFF_REPEATER_SETTINGS_CONTROLLER_NAME = "LearnASong_RiffRepeater";
 	constexpr const char* SPEED_SLIDER_ID = "Speed";
 	constexpr uintptr_t SLIDER_MAX_OFFSET = 0x9C;
-	constexpr uintptr_t SLIDER_REFRESH_FROM_MODEL_FN = 0x005C3590;
+	const uintptr_t SLIDER_REFRESH_FROM_MODEL_FN = GameAddress(0x005C3590, 0x001C4D10);
 	constexpr uintptr_t CONTROLLER_SPEED_PERCENT_OFFSET = 0x300;
 	constexpr uintptr_t CONTROLLER_SECTION_START_INDEX_OFFSET = 0x310;
 	constexpr uintptr_t CONTROLLER_SECTION_END_INDEX_OFFSET = 0x318;
-	constexpr uintptr_t EVENT_BUS_GLOBAL = 0x0135F54C;
+	const uintptr_t EVENT_BUS_GLOBAL = GameAddress(0x0135F54C, 0x00F6054C);
 	constexpr size_t MENU_CAP_NOTE_LIMIT = 4096;
 
 	bool ControllerNameIs(void* candidate, const char* name)
@@ -1013,7 +1011,7 @@ void NoteByNoteMenu::Initialize()
 		return;
 	}
 
-	originalDispatcher = DetourFunction(
+	originalDispatcher = MemUtil::DetourFunction(
 		reinterpret_cast<byte*>(RIFF_REPEATER_INPUT_DISPATCHER),
 		reinterpret_cast<byte*>(DispatcherDetour));
 	if (originalDispatcher == nullptr)
@@ -1024,7 +1022,7 @@ void NoteByNoteMenu::Initialize()
 
 	if (MatchesBytes(RIFF_REPEATER_STAGE_BUILDER, STAGE_BUILDER_PROLOGUE, sizeof(STAGE_BUILDER_PROLOGUE)))
 	{
-		originalStageBuilder = reinterpret_cast<StageBuilder>(DetourFunction(
+		originalStageBuilder = reinterpret_cast<StageBuilder>(MemUtil::DetourFunction(
 			reinterpret_cast<byte*>(RIFF_REPEATER_STAGE_BUILDER),
 			reinterpret_cast<byte*>(StageBuilderDetour)));
 		if (originalStageBuilder == nullptr)
@@ -1041,7 +1039,7 @@ void NoteByNoteMenu::Initialize()
 
 	if (MatchesBytes(RIFF_REPEATER_SETTINGS_BUILDER, SETTINGS_BUILDER_PROLOGUE, sizeof(SETTINGS_BUILDER_PROLOGUE)))
 	{
-		originalSettingsBuilder = reinterpret_cast<SettingsBuilder>(DetourFunction(
+		originalSettingsBuilder = reinterpret_cast<SettingsBuilder>(MemUtil::DetourFunction(
 			reinterpret_cast<byte*>(RIFF_REPEATER_SETTINGS_BUILDER),
 			reinterpret_cast<byte*>(SettingsBuilderDetour)));
 		if (originalSettingsBuilder == nullptr)

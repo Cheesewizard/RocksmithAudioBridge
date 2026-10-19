@@ -32,8 +32,9 @@ namespace Audio::OutputTap
 	// Current proxy transport: 0 = not initialized/unavailable, 1 = virtual ASIO clock, 2 = real ASIO.
 	// The virtual clock keeps the host alive while physical hardware is absent.
 	int ProxyOutputMode();
-	// Current proxy capture transport: 0 = physical ASIO input, 1 = virtual input waiting for
-	// a Real Tone Cable, 2 = virtual input receiving the Real Tone Cable.
+	// Whether the proxy's input carries signal (AsioProxyDriver::InputModeValue): 0 = no stream or no inputs,
+	// 1 = virtual clock waiting for a Real Tone Cable, 2 = live input: a real ASIO stream OR the cable on the
+	// virtual clock. To tell ASIO from the cable, use ProxyOutputMode (1 = virtual clock, 2 = real ASIO).
 	int ProxyInputMode();
 	// Why the proxy could not open the user's real ASIO device this launch (one readable line), or empty
 	// when it bound or never tried. Explains a silent guitar that would otherwise show only as "no input".
@@ -87,6 +88,8 @@ namespace Audio::OutputTap
 	using ProxySinkFn = void(__cdecl*)(const void* interleaved, long frames, long channels, long asioSampleType, double sampleRate);
 	// Register a routing sink; returns false if the proxy driver is not loaded (no ASIO bridge in the chain).
 	bool AddProxySink(ProxySinkFn sink);
+	// Taps the game's output for GameToneLatency's ASIO mode once the proxy is loaded (true once done; retry until then).
+	bool InstallGameToneSink();
 	void RemoveProxySink(ProxySinkFn sink);
 	// Mute (redirect) or unmute the proxy's forward to the real ASIO device. Muting makes routing a true
 	// switch (the game's bound device falls silent) rather than an additive second output. No-op if the

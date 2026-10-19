@@ -181,6 +181,78 @@ PBYTE MemUtil::TrampHook(PBYTE src, PBYTE dst, unsigned int len)
 		return nullptr;
 }
 
+PBYTE MemUtil::DetourFunction(PBYTE target, PBYTE detour)
+{
+	if (target == nullptr || detour == nullptr)
+		return nullptr;
+
+	// September 2022: Detours works, keep using it. Learn & Play goes straight to the syscall path: the wrapper
+	// takes about 5 s to refuse each of Detours' VirtualProtect calls, and those delays pushed the Cable install past
+	// the game's own audio start ("No audio output device").
+	if (!GameAddressDetail::IsLearnAndPlayDecember2024())
+	{
+		if (PBYTE trampoline = ::DetourFunction(target, detour))
+			return trampoline;
+	}
+
+	// Learn & Play: Detours' VirtualProtect on game code is refused (see MemUtil.hpp). Build the trampoline the
+	// same way: whole instructions covering at least the 5-byte jump, copied by Detours' disassembler so relative
+	// branches are re-aimed, then a jump back to the first untouched instruction.
+	constexpr size_t JMP_SIZE = 5;
+	constexpr size_t TRAMPOLINE_SIZE = 64;
+	PBYTE trampoline = static_cast<PBYTE>(VirtualAlloc(nullptr, TRAMPOLINE_SIZE, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+	if (trampoline == nullptr)
+		return nullptr;
+
+	PBYTE source = target;
+	PBYTE copy = trampoline;
+	while (static_cast<size_t>(source - target) < JMP_SIZE)
+	{
+		// A return inside the stolen bytes means the function is too short to hold the jump.
+		if (*source == 0xC3 || *source == 0xC2)
+		{
+			VirtualFree(trampoline, 0, MEM_RELEASE);
+			return nullptr;
+		}
+
+		PBYTE branchTarget = nullptr;
+		PBYTE next = DetourCopyInstruction(copy, source, &branchTarget);
+		// A branch back into the bytes being replaced cannot be relocated.
+		if (next == nullptr || next <= source || (branchTarget > target && branchTarget < target + JMP_SIZE))
+		{
+			VirtualFree(trampoline, 0, MEM_RELEASE);
+			return nullptr;
+		}
+		copy += next - source;
+		source = next;
+	}
+
+	const size_t stolen = static_cast<size_t>(source - target);
+	if (copy + JMP_SIZE > trampoline + TRAMPOLINE_SIZE)
+	{
+		VirtualFree(trampoline, 0, MEM_RELEASE);
+		return nullptr;
+	}
+	copy[0] = 0xE9;
+	*reinterpret_cast<int32_t*>(copy + 1) = static_cast<int32_t>(source - (copy + JMP_SIZE));
+	FlushInstructionCache(GetCurrentProcess(), trampoline, TRAMPOLINE_SIZE);
+
+	ULONG oldProtection = 0;
+	ULONG unused = 0;
+	if (!NT_SUCCESS(HookedVirtualProtect(target, stolen, PAGE_EXECUTE_READWRITE, oldProtection)))
+	{
+		VirtualFree(trampoline, 0, MEM_RELEASE);
+		return nullptr;
+	}
+	target[0] = 0xE9;
+	*reinterpret_cast<int32_t*>(target + 1) = static_cast<int32_t>(detour - (target + JMP_SIZE));
+	for (size_t i = JMP_SIZE; i < stolen; i++)
+		target[i] = 0xCC; // same padding Detours leaves
+	FlushInstructionCache(GetCurrentProcess(), target, stolen);
+	HookedVirtualProtect(target, stolen, oldProtection, unused);
+	return trampoline;
+}
+
 /// <summary>
 /// Will reading this pointer kill the game?
 /// </summary>

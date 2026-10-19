@@ -18,6 +18,7 @@
 #include "MeterDsp.h"
 #include "VirtualCableCapture.hpp"
 #include "SplitInput.hpp"
+#include "Remote64Driver.hpp"
 #include "AmpLinkHost.hpp"
 #include "AmpLinkGuest.hpp"
 #include "../Shared/ProductVersion.hpp"
@@ -166,12 +167,33 @@ extern "C" __declspec(dllexport) void RSModsAsio_SetAmpLinkPitch(int semitones)
 {
 	g_ampLink.SetPitchSemitones(semitones);
 }
+// The Input page's noise suppressor threshold (linear, 0 = off) for the amp sim's input (AmpFeedConditioner.hpp).
+// ExternalAmp.cpp sends it every tick.
+extern "C" __declspec(dllexport) void RSModsAsio_ConfigureAmpFeed(float gateThreshold)
+{
+	g_ampLink.ConfigureConditioner(gateThreshold);
+}
 // Fills `status` (sizeof(AmpLink::Status) bytes, checked against `size`). Returns 1 when filled.
 extern "C" __declspec(dllexport) int RSModsAsio_GetAmpLinkStatus(AmpLink::Status* status, int size)
 {
 	if (!status || size != static_cast<int>(sizeof(AmpLink::Status))) return 0;
 	*status = g_ampLink.GetStatus();
 	return 1;
+}
+
+// The driver's own latency figures (getLatencies, in frames) and the stream's rate, cached each time buffers are
+// created (Real or Virtual) so the overlay's ASIO latency readout never calls into the driver from another thread.
+// 0 = no stream. Returns 1 when a stream is up and the figures are known.
+static std::atomic<long> g_latencyIn{ 0 }, g_latencyOut{ 0 };
+static std::atomic<int> g_latencyRate{ 0 };
+extern "C" __declspec(dllexport) int RSModsAsio_GetLatencies(long* inFrames, long* outFrames, int* sampleRate)
+{
+	const long in = g_latencyIn.load(), out = g_latencyOut.load();
+	const int rate = g_latencyRate.load();
+	if (inFrames) *inFrames = in;
+	if (outFrames) *outFrames = out;
+	if (sampleRate) *sampleRate = rate;
+	return rate > 0 && (in > 0 || out > 0) ? 1 : 0;
 }
 
 namespace
@@ -573,8 +595,11 @@ namespace
 	}
 
 	// Resolve an ASIO driver name to its DLL path + CLSID via HKLM/HKCU Software\ASIO\<name>.
-	bool ResolveAsioDriver(const std::wstring& name, std::wstring& dllPath, CLSID& clsid)
+	// `remote64` comes back true for a driver registered only as 64-bit: the game cannot load it, so it runs in the
+	// 64-bit driver host (Remote64Driver.cpp) and dllPath is its 64-bit DLL.
+	bool ResolveAsioDriver(const std::wstring& name, std::wstring& dllPath, CLSID& clsid, bool& remote64)
 	{
+		remote64 = false;
 		for (HKEY root : { HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER })
 		{
 			HKEY key = nullptr;
@@ -598,7 +623,8 @@ namespace
 			dllPath = path;
 			return true;
 		}
-		return false;
+		remote64 = Remote64::Resolve(name, dllPath, clsid);
+		return remote64;
 	}
 }
 
@@ -874,7 +900,7 @@ public:
 		return 0;
 	}
 	ASIOError getChannelInfo(ASIOChannelInfo* info) override { if (m_mode.load() == OutputMode::Virtual && info && info->channel > 1 && ProbeRealBeforeBind()) { const ASIOError e = m_real->getChannelInfo(info); if (e == 0) info->type = ASIOSTInt32LSB; return e; } if (m_mode.load() == OutputMode::Virtual) { if (!info || info->channel < 0 || info->channel > 1) return -1; info->isActive = 1; info->channelGroup = 0; info->type = ASIOSTInt32LSB; strcpy_s(info->name, 32, info->isInput ? (info->channel == 0 ? "Virtual Capture Left" : "Virtual Capture Right") : (info->channel == 0 ? "Virtual Left" : "Virtual Right")); return 0; } if (!m_real) return -1; const ASIOError e = m_real->getChannelInfo(info); if (e == 0 && info) info->type = ASIOSTInt32LSB; return e; }
-	ASIOError disposeBuffers() override { std::lock_guard<std::mutex> transition(m_transitionMutex); ProxyLog("disposeBuffers: mode %s", m_mode.load() == OutputMode::Virtual ? "Virtual" : "Real"); if (m_mode.load() == OutputMode::Virtual) { StopVirtual(); m_virtualCable.Stop(); FreeVirtualBuffers(); } DisableRealCallbacksAndWait(); m_bufferInfos = nullptr; m_numChannels = 0; m_callbackSeen.store(false); if (s_active == this) s_active = nullptr; const ASIOError e = m_real ? m_real->disposeBuffers() : 0; FreeBridge(); return e; }
+	ASIOError disposeBuffers() override { std::lock_guard<std::mutex> transition(m_transitionMutex); ProxyLog("disposeBuffers: mode %s", m_mode.load() == OutputMode::Virtual ? "Virtual" : "Real"); if (m_mode.load() == OutputMode::Virtual) { StopVirtual(); m_virtualCable.Stop(); FreeVirtualBuffers(); } DisableRealCallbacksAndWait(); m_bufferInfos = nullptr; m_numChannels = 0; m_callbackSeen.store(false); if (s_active == this) s_active = nullptr; g_latencyRate.store(0); const ASIOError e = m_real ? m_real->disposeBuffers() : 0; FreeBridge(); return e; }
 	ASIOError controlPanel() override { return m_real ? m_real->controlPanel() : 0; }
 	ASIOError future(long selector, void* opt) override { return m_real ? m_real->future(selector, opt) : -1; }
 	ASIOError outputReady() override { return m_real ? m_real->outputReady() : 0; }
@@ -1120,8 +1146,9 @@ private:
 				const Pending& pending = wanted[device];
 				std::wstring dllPath; CLSID clsid{};
 				std::string failure;
-				if (!ResolveAsioDriver(pending.driver, dllPath, clsid)) failure = "it is not installed as an ASIO driver";
-				else if (Split(device).Open(pending.driver, dllPath, clsid, m_sysHandle, pending.channels, &ProxyLog, failure)) failure.clear();
+				bool remote64 = false;
+				if (!ResolveAsioDriver(pending.driver, dllPath, clsid, remote64)) failure = "it is not installed as an ASIO driver";
+				else if (Split(device).Open(pending.driver, dllPath, clsid, m_sysHandle, pending.channels, &ProxyLog, failure, remote64)) failure.clear();
 				if (!Split(device).IsOpen())
 				{
 					errors += (errors.empty() ? "" : " ") + WideToUtf8(pending.driver) + " would not open as an input interface: " + failure + ". Its inputs come from the output interface.";
@@ -1378,7 +1405,18 @@ private:
 		g_trim.Configure(g_trimGain.load());
 		ConfigureGuard();
 		OpenAmpLink();
+		CacheLatencies();
 		s_active = this;
+	}
+
+	// RSModsAsio_GetLatencies: the figures as the host would get them, on the control thread that made the buffers.
+	void CacheLatencies()
+	{
+		long in = 0, out = 0;
+		if (getLatencies(&in, &out) != 0) in = out = 0;
+		g_latencyIn.store(in);
+		g_latencyOut.store(out);
+		g_latencyRate.store(static_cast<int>(m_sampleRate > 0.0 ? m_sampleRate : 48000.0));
 	}
 
 	void OpenAmpLink()
@@ -1521,6 +1559,7 @@ private:
 		// and a Virtual re-create at a larger size does not overrun the scratch sized for the last Real bind.
 		ConfigureGuard();
 		OpenAmpLink();
+		CacheLatencies();
 		s_active = this;
 		return 0;
 	}
@@ -1814,11 +1853,26 @@ private:
 		std::wstring dllPath; CLSID clsid;
 		const std::wstring targetDriver = driverName.empty() ? ReadTargetDriverName() : driverName;
 		m_bindTarget = targetDriver;   // named in the bind error if a later step refuses
-		if (!ResolveAsioDriver(targetDriver, dllPath, clsid))
+		bool remote64 = false;
+		if (!ResolveAsioDriver(targetDriver, dllPath, clsid, remote64))
 		{
 			ProxyLog("LoadReal: no ASIO registry entry for '%ls'", targetDriver.c_str());
 			NoteBindFailure("it is not installed as an ASIO driver (reinstall its driver)");
 			return false;
+		}
+		if (remote64)
+		{
+			// A 64-bit-only driver: the stand-in starts the 64-bit host and is used exactly like a loaded driver.
+			std::string failure;
+			m_real = Remote64::Create(targetDriver, dllPath, clsid, &ProxyLog, failure);
+			if (!m_real)
+			{
+				ProxyLog("LoadReal: 64-bit '%ls' not started: %s", targetDriver.c_str(), failure.c_str());
+				NoteBindFailure("%s", failure.c_str());
+				return false;
+			}
+			ProxyLog("LoadReal: '%ls' loaded through the 64-bit host", targetDriver.c_str());
+			return true;
 		}
 		m_realModule = LoadLibraryW(dllPath.c_str());
 		// Pinned: an ASIO driver's own threads can outlive Release() (a USB worker waking late), and once its DLL is

@@ -1,4 +1,5 @@
 #include "AmpLinkHost.hpp"
+#include "../AudioBridge/Input/AmpFeedConditioner.hpp"
 #include <sddl.h>
 #include <algorithm>
 #include <cmath>
@@ -116,6 +117,22 @@ namespace AmpLink
 		m_pitchSemitones.store(std::clamp(semitones, -24, 24), std::memory_order_relaxed);
 	}
 
+	void Host::ConfigureConditioner(float gateThreshold)
+	{
+		Audio::AmpFeedConditioner* conditioner = m_conditioner.load(std::memory_order_acquire);
+		if (!conditioner)
+		{
+			if (gateThreshold <= 0.0f) return;   // nothing to do until it is switched on
+			// Allocated here, on a control thread, never on the audio thread; kept for the process's life, so Publish
+			// can read the pointer without any lifetime question.
+			auto* created = new Audio::AmpFeedConditioner();
+			Audio::AmpFeedConditioner* expected = nullptr;
+			if (m_conditioner.compare_exchange_strong(expected, created, std::memory_order_acq_rel)) conditioner = created;
+			else { delete created; conditioner = expected; }
+		}
+		conditioner->Configure(gateThreshold);
+	}
+
 	bool Host::GuestConnected(LONG newestSeq) const noexcept
 	{
 		if (!m_shared || Load(&m_shared->guestPid) == 0 || m_frames <= 0) return false;
@@ -141,6 +158,14 @@ namespace AmpLink
 			int32_t* destination = m_shared->input[slot][ch];
 			if (sources[ch]) memcpy(destination, sources[ch], static_cast<size_t>(frames) * sizeof(int32_t));
 			else memset(destination, 0, static_cast<size_t>(frames) * sizeof(int32_t));
+		}
+		// The noise suppressor on the guest's copy (AmpFeedConditioner.hpp). A mono input was copied
+		// to both channels: condition it once and copy it again.
+		if (Audio::AmpFeedConditioner* conditioner = m_conditioner.load(std::memory_order_acquire); conditioner && conditioner->Enabled())
+		{
+			int32_t* channels[kChannels] = { m_shared->input[slot][0], found == 1 ? nullptr : m_shared->input[slot][1] };
+			conditioner->ProcessInt32(channels, kChannels, static_cast<uint32_t>(frames), kSampleRate);
+			if (found == 1) memcpy(m_shared->input[slot][1], m_shared->input[slot][0], static_cast<size_t>(frames) * sizeof(int32_t));
 		}
 		Store(&m_shared->pitchSemitones, m_pitchSemitones.load(std::memory_order_relaxed));
 		Store(&m_shared->inputSlotSeq[slot], seq);

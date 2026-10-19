@@ -19,7 +19,14 @@ namespace Audio::GameToneLatency
 	void Input(const float* mono, uint32_t frames, UINT64 lastSample) noexcept;
 	// Output session: the game's packet as handed to the backend; its first sample is heard at `heard` (QPC, 100 ns).
 	void Output(const float* stereo, uint32_t frames, UINT64 heard) noexcept;
-	bool Valid();      // measured from the playing in the last 60 s
+	// ASIO mode: both sides from the bridge driver, in its buffer switch (no timestamps: stamped on arrival, so the lag is
+	// the game's processing inside the PC; the driver's input and output latency are added by the readouts). Input:
+	// Player 1's raw device channel. Output: the game's output as tapped; it only counts while SetAsioGameAudible(true)
+	// (the tap includes an amp sim's return, which must not be timed as the game).
+	void AsioInput(const float* mono, uint32_t frames) noexcept;
+	void AsioOutput(const float* stereo, uint32_t frames) noexcept;
+	void SetAsioGameAudible(bool audible);
+	bool Valid();      // measured from the playing in the last 60 s (ASIO mode: the game's processing only)
 	float MedianMs();
 	// Measured, or else estimated: what the game itself adds (its two blocks at the current block size, plus a part
 	// measured once with its amp playing and remembered for every block size, or a built-in guess before that) plus what
@@ -27,6 +34,10 @@ namespace Audio::GameToneLatency
 	// designer plays (the game's amp is silenced then, nothing to time) and after a device, mode or block switch.
 	bool Available();
 	bool Guessed();    // the estimate still rests on the built-in guess: never measured on this PC
+	// What the game itself adds at a game block of `blockMs` (its two blocks plus the remembered fixed part), for a figure
+	// built from somewhere else's numbers: ASIO mode, where nothing is timed and the driver reports the rest.
+	float GameOwnMs(float blockMs);
+	bool GameOwnGuessed();   // that fixed part is still the built-in guess (never measured on the cable on this PC)
 	float CurrentMs();
 	UINT64 Now100ns();
 }

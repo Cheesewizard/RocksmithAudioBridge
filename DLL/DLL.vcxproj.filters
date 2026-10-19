@@ -719,6 +719,9 @@
     <ClInclude Include="VersioningStruct.h">
       <Filter>Main Headers</Filter>
     </ClInclude>
+    <ClInclude Include="GameAddress.hpp">
+      <Filter>Main Headers</Filter>
+    </ClInclude>
     <ClInclude Include="stdafx.h">
       <Filter>Main Headers</Filter>
     </ClInclude>
@@ -1010,9 +1013,6 @@
     </ClInclude>
     <ClInclude Include="NoteByNote\Detection\HfcOnsetDetector.hpp">
       <Filter>NoteByNote\Detection</Filter>
-    </ClInclude>
-    <ClInclude Include="AudioBridge\Input\HumRemover.hpp">
-      <Filter>AudioBridge\Input</Filter>
     </ClInclude>
     <ClInclude Include="NoteByNote\Ml\MlAudioExporter.hpp">
       <Filter>NoteByNote\Ml</Filter>

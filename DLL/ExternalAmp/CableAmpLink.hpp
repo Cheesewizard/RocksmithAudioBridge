@@ -58,4 +58,6 @@ namespace CableAmpLink
 	void Configure(bool mixOn, float returnGain);
 	void SetLatencyBlocks(int blocks);
 	void SetPitchSemitones(int semitones);
+	// The Input page's noise suppressor (linear threshold, 0 = off) for the Tone designer's input (AmpFeedConditioner.hpp).
+	void ConfigureConditioner(float gateThreshold);
 }

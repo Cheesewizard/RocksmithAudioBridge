@@ -24,8 +24,10 @@ EXPORTS
 	RSModsAsio_GetVirtualInputStats
 	RSModsAsio_ConfigureAmpLink
 	RSModsAsio_GetAmpLinkStatus
+	RSModsAsio_GetLatencies
 	RSModsAsio_SetAmpLinkLatency
 	RSModsAsio_SetAmpLinkPitch
+	RSModsAsio_ConfigureAmpFeed
 	RSModsAsio_GetBindError
 	RSModsAsio_GetRoute
 	RSModsAsio_GetChannelCount

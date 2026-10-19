@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include "GameAddress.hpp"
 
 // Guitar or bass, from the game's own note detector. Both instruments use the Player 1 detection slot *(0x0135F57C)+0x10; +0x14 is
 // player 2, not bass. The detector's open-string table at detector+0x134C (int16[6], MIDI in the
@@ -9,7 +10,7 @@
 // this, so the note decision and the ML model always agree on the instrument.
 namespace ArrangementInstrument
 {
-	constexpr uintptr_t DETECTION_ROOT = 0x0135F57C;
+	const uintptr_t DETECTION_ROOT = GameAddress(0x0135F57C, 0x00F6057C);
 	constexpr uintptr_t PLAYER_ONE_ARRANGEMENT = 0x10;
 	constexpr uintptr_t ARRANGEMENT_ENGINE = 0x08;
 	constexpr uintptr_t ENGINE_DETECTOR = 0x04;

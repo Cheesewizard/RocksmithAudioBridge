@@ -6,6 +6,9 @@
 #include "DropPedal/DropPedal.hpp"
 #include "GameState.hpp"
 #include "AudioBridge/Engine/OutputReserve.hpp"
+#include "AudioBridge/Input/InputCaptureHook.hpp"
+#include "AudioBridge/Engine/GameToneLatency.hpp"
+#include "AudioBridge/Engine/OutputTap.hpp"
 #include <atomic>
 #include <cmath>
 #include <mutex>
@@ -77,6 +80,23 @@ namespace ExternalAmp
 			return fn && fn(&status, static_cast<int>(sizeof(status))) == 1;
 		}
 
+		// ASIO mode: the driver's own input and output latency (getLatencies, as the proxy cached it at createBuffers),
+		// in ms. False with no proxy or no stream.
+		bool ReadAsioLatency(float& inMs, float& outMs)
+		{
+			inMs = outMs = 0.0f;
+			HMODULE proxy = Proxy();
+			if (!proxy) return false;
+			using LatencyFn = int(__cdecl*)(long*, long*, int*);
+			auto fn = reinterpret_cast<LatencyFn>(GetProcAddress(proxy, "RSModsAsio_GetLatencies"));
+			long in = 0, out = 0;
+			int rate = 0;
+			if (!fn || fn(&in, &out, &rate) != 1 || rate <= 0) return false;
+			inMs = static_cast<float>(in * 1000.0 / rate);
+			outMs = static_cast<float>(out * 1000.0 / rate);
+			return true;
+		}
+
 		void ConfigureProxy(bool mixOn, float gain, bool safety)
 		{
 			HMODULE proxy = Proxy();
@@ -100,6 +120,19 @@ namespace ExternalAmp
 			if (!proxy) { CableAmpLink::SetPitchSemitones(semitones); return; }
 			using PitchFn = void(__cdecl*)(int);
 			if (auto fn = reinterpret_cast<PitchFn>(GetProcAddress(proxy, "RSModsAsio_SetAmpLinkPitch"))) fn(semitones);
+		}
+
+		// The Input page's noise suppressor, for the amp sim's input too (AmpFeedConditioner.hpp): the
+		// link feeds the amp sim the raw DI, so without this a noisy interface reached a high-gain amp sim unfiltered.
+		// Read from the game's input chain, so the switch there means the same thing for both.
+		void SendConditioner()
+		{
+			const float gateDb = Audio::AsioHook::GetNoiseGateThresholdDb();   // 0 = off
+			const float gate = gateDb < 0.0f ? std::pow(10.0f, gateDb / 20.0f) : 0.0f;
+			HMODULE proxy = Proxy();
+			if (!proxy) { CableAmpLink::ConfigureConditioner(gate); return; }
+			using ConditionerFn = void(__cdecl*)(float);
+			if (auto fn = reinterpret_cast<ConditionerFn>(GetProcAddress(proxy, "RSModsAsio_ConfigureAmpFeed"))) fn(gate);
 		}
 
 		// Player 1's level as the game would play it: the louder of our game object's value and the global value.
@@ -245,6 +278,7 @@ namespace ExternalAmp
 				ConfigureProxy(enabled && !tuning, gain, g_safety.load());
 				const int pedalSemitones = DropPedal::GetAppliedInputShiftSemitones();
 				SendPedalShift(pedalSemitones);
+				SendConditioner();
 
 				const bool connected = proxyLoaded && link.linkOpen && link.connected;
 				connectedTicks = connected ? connectedTicks + 1 : 0;
@@ -286,6 +320,10 @@ namespace ExternalAmp
 				if (now >= nextRegistryCheck) { guest64 = Guest64Registered(); nextRegistryCheck = now + 5000; }
 
 				{
+					// ASIO mode's game tone timing (GameToneLatency::AsioOutput): the bridge's output tap counts only while the
+					// game's amp is the one heard; while an amp sim plays, the game's amp is held at 0 and the tap carries the sim.
+					if (Proxy()) { Audio::OutputTap::InstallGameToneSink(); Audio::GameToneLatency::SetAsioGameAudible(!mute.Muted()); }
+					else Audio::GameToneLatency::SetAsioGameAudible(false);
 					std::lock_guard<std::mutex> lock(g_snapshotMutex);
 					g_snapshot.enabled = enabled;
 					g_snapshot.toneDesigner = toneDesigner;
@@ -302,6 +340,7 @@ namespace ExternalAmp
 					g_snapshot.cableDirectUsb = CableAmpLink::IsDirectUsb();
 					g_snapshot.cableLatencyMs = CableAmpLink::RecentLatencyMs();
 					g_snapshot.cableReadMs = CableAmpLink::RecentReadMs();
+					if (!ReadAsioLatency(g_snapshot.asioInMs, g_snapshot.asioOutMs)) g_snapshot.asioInMs = g_snapshot.asioOutMs = 0.0f;
 				}
 				CableAmpLink::LogLatency();   // every 30 s while the cable hosts the link
 				CableAmpLink::SetGuestLoading(VstHostLink::IsLoading());

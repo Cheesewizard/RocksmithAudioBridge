@@ -63,7 +63,7 @@ namespace RSMods
 
                              // Mod Settings
                              ExtendedRangeTuning, CheckForNewSongInterval, RiffRepeaterSpeedInterval, TuningPedal, MidiTuningOffset,
-                             VolumeControlInterval, SecondaryMonitorXPosition, SecondaryMonitorYPosition, OverrideInputVolume, AsioInputGain, NoiseGateThreshold, CompressorStrength, HumFilter, RocksmithGateOverride, RocksmithGateThreshold, AudioBridgeLimiter, AudioBridgeLimiterLevel, AlternativeOutputSampleRate, LoopingLeadUp,
+                             VolumeControlInterval, SecondaryMonitorXPosition, SecondaryMonitorYPosition, OverrideInputVolume, AsioInputGain, NoiseGateThreshold, CompressorStrength, RocksmithGateOverride, RocksmithGateThreshold, AudioBridgeLimiter, AudioBridgeLimiterLevel, AlternativeOutputSampleRate, LoopingLeadUp,
                              RewindBy, RewindLeadup, CustomNSPTimeLimit,
 
                              // Guitar Speak
@@ -250,7 +250,6 @@ namespace RSMods
             AsioInputGainIdentifier                 = "AsioInputGain = ",
             NoiseGateThresholdIdentifier            = "NoiseGateThreshold = ",
             CompressorStrengthIdentifier            = "CompressorStrength = ",
-            HumFilterIdentifier                     = "HumFilter = ",
             RocksmithGateOverrideIdentifier         = "RocksmithGateOverride = ",
             RocksmithGateThresholdIdentifier        = "RocksmithGateThreshold = ",
             AudioBridgeLimiterIdentifier            = "AudioBridgeLimiter = ",
@@ -395,7 +394,6 @@ namespace RSMods
             AsioInputGainIdentifier,
             NoiseGateThresholdIdentifier,
             CompressorStrengthIdentifier,
-			HumFilterIdentifier,
 			RocksmithGateOverrideIdentifier,
 			RocksmithGateThresholdIdentifier,
             AudioBridgeLimiterIdentifier,
@@ -805,8 +803,6 @@ namespace RSMods
                     return FillSettingVariable(NoiseGateThresholdIdentifier, SettingType.STRING, currentLine, out NoiseGateThreshold);
                 if (IdentifierIsFound(currentLine, CompressorStrengthIdentifier, identifierToGrab))
                     return FillSettingVariable(CompressorStrengthIdentifier, SettingType.STRING, currentLine, out CompressorStrength);
-                if (IdentifierIsFound(currentLine, HumFilterIdentifier, identifierToGrab))
-                    return FillSettingVariable(HumFilterIdentifier, SettingType.STRING, currentLine, out HumFilter);
                 if (IdentifierIsFound(currentLine, RocksmithGateOverrideIdentifier, identifierToGrab))
                     return FillSettingVariable(RocksmithGateOverrideIdentifier, SettingType.STRING, currentLine, out RocksmithGateOverride);
                 if (IdentifierIsFound(currentLine, RocksmithGateThresholdIdentifier, identifierToGrab))

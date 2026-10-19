@@ -587,6 +587,28 @@ void GameOverlay::DisplayAudioDiagnostics()
 			latencyEstimate << L"GAME TONES  ~" << std::fixed << std::setprecision(0) << Audio::GameToneLatency::CurrentMs() << (Audio::GameToneLatency::Guessed() ? L" ms GUESS" : L" ms EST");
 			showLatencyReadout = true;
 		}
+		else if (!amp.cableHost && amp.asioInMs + amp.asioOutMs > 0.0f)
+		{
+			// ASIO mode: the driver's reported input and output latency, plus the amp link's blocks while an amp sim
+			// plays. With the game's amp playing, the game's own processing goes on top (its two blocks at the ASIO buffer
+			// size plus the part measured on the cable, else a guess: GameToneLatency::GameOwnMs), so the two compare.
+			const bool linkPlaying = amp.link.connected && !amp.comparing;
+			const int rate = amp.link.sampleRate > 0 ? amp.link.sampleRate : AmpLink::kSampleRate;
+			const double linkMs = linkPlaying && amp.link.frames > 0 ? amp.link.frames * (amp.link.latencyBlocks > 1 ? 2 : 1) * 1000.0 / rate : 0.0;
+			const long input = std::lround(amp.asioInMs);
+			if (linkPlaying) {
+				const long total = std::lround(amp.asioInMs + amp.asioOutMs + linkMs);
+				latencyEstimate << L"ASIO LATENCY  IN " << input << L"  OUT " << total - input << L"  TOTAL ~" << total << L" ms";
+			}
+			else {
+				const float blockMs = (amp.link.frames > 0 ? amp.link.frames : 128) * 1000.0f / rate;
+				const bool measured = Audio::GameToneLatency::Valid();   // timed from picks in the last minute (ASIO feed)
+				const float gameOwn = measured ? Audio::GameToneLatency::MedianMs() : Audio::GameToneLatency::GameOwnMs(blockMs);
+				const long total = std::lround(amp.asioInMs + amp.asioOutMs + gameOwn);
+				latencyEstimate << L"GAME TONES  ~" << total << (!measured && Audio::GameToneLatency::GameOwnGuessed() ? L" ms GUESS" : L" ms EST");
+			}
+			showLatencyReadout = true;
+		}
 	}
 
 	// Top row (the Drop Pedal "Pitch" row; that overlay draws one Pitch row per player, so the signal

@@ -47,6 +47,28 @@ namespace Audio::CableInput
 			void* hostProcessorInput;
 		};
 
+		// The full 32-byte block the game itself builds when Rocksmith.ini has ExclusiveMode=1 (the
+		// structure above plus threadPriority). With ExclusiveMode=0 the game passes no block at all,
+		// and the game's PortAudio only accepts size 0x20, hostApiType 13 (WASAPI), version 1.
+		struct GameWasapiStreamInfo
+		{
+			PaWasapiStreamInfo info;
+			int threadPriority;
+		};
+		static_assert(sizeof(GameWasapiStreamInfo) == 0x20, "must match the game's PaWasapiStreamInfo");
+
+		// Fills the block the way the game does (exclusive flag included only when asked), so an
+		// ExclusiveMode=0 open reaches PortAudio in the same shape as an ExclusiveMode=1 open.
+		GameWasapiStreamInfo MakeGameStreamInfo(unsigned long flags)
+		{
+			GameWasapiStreamInfo block{};
+			block.info.size = sizeof(GameWasapiStreamInfo);
+			block.info.hostApiType = 13;
+			block.info.version = 1;
+			block.info.flags = flags;
+			return block;
+		}
+
 		using PaOpenStream_t = int(__cdecl*)(
 			void** stream,
 			const PaStreamParameters* inputParameters,
@@ -1340,6 +1362,22 @@ namespace Audio::CableInput
 			const PaStreamParameters* outputParameters, double sampleRate, unsigned long framesPerBuffer,
 			unsigned long streamFlags, void* streamCallback, void* userData)
 		{
+			// Rocksmith.ini ExclusiveMode=0: the game sends no WASAPI block. Every cable path below
+			// needs one (routing to mark the virtual output exclusive, capture to pick its client), so
+			// supply the block the game builds itself with ExclusiveMode=1. Input gets flags 0 (the
+			// game's own shared request); each capture path sets or clears the exclusive flag as before.
+			// The real device stays owned by the bridge engine, so the ini setting no longer matters
+			// in cable mode. Without this, routing refused the output open ("No audio output device").
+			PaStreamParameters suppliedInput{};
+			GameWasapiStreamInfo suppliedInputInfo{};
+			if (inputParameters != nullptr && outputParameters == nullptr
+				&& inputParameters->hostApiSpecificStreamInfo == nullptr && !inputOwnedByAsio)
+			{
+				suppliedInput = *inputParameters;
+				suppliedInputInfo = MakeGameStreamInfo(0);
+				suppliedInput.hostApiSpecificStreamInfo = &suppliedInputInfo;
+				inputParameters = &suppliedInput;
+			}
 			auto* streamInfo = (inputParameters != nullptr)
 				? reinterpret_cast<PaWasapiStreamInfo*>(const_cast<void*>(inputParameters->hostApiSpecificStreamInfo))
 				: nullptr;
@@ -1360,12 +1398,19 @@ namespace Audio::CableInput
 			}
 			if (outputOnlyOpen && routingConfiguration.enabled)
 			{
-				if (!persistentOutputEnabled || !outputParameters->hostApiSpecificStreamInfo)
+				if (!persistentOutputEnabled)
 				{
-					LOG_ERROR("(AUDIO ROUTING) Refusing output open: permanent bridge output is not installed or stream information is missing." << std::endl);
+					LOG_ERROR("(AUDIO ROUTING) Refusing output open: permanent bridge output is not installed." << std::endl);
 					return -9999;
 				}
 				PaStreamParameters parameters = *outputParameters;
+				const GameWasapiStreamInfo suppliedOutputInfo = MakeGameStreamInfo(PA_WASAPI_EXCLUSIVE);
+				if (!parameters.hostApiSpecificStreamInfo)
+				{
+					// ExclusiveMode=0 (see the input note above): open exactly as an ExclusiveMode=1 game would.
+					parameters.hostApiSpecificStreamInfo = const_cast<GameWasapiStreamInfo*>(&suppliedOutputInfo);
+					LOG_INFO("(AUDIO ROUTING) Game sent no WASAPI stream information (ExclusiveMode=0); using the game's own exclusive block" << std::endl);
+				}
 				const auto* callerInfo = static_cast<const PaWasapiStreamInfo*>(parameters.hostApiSpecificStreamInfo);
 				if (callerInfo->size < offsetof(PaWasapiStreamInfo, flags) + sizeof(callerInfo->flags) || callerInfo->size > 4096) return -9999;
 				// Preserve fields added after the prefix known to this mod.
@@ -1611,7 +1656,7 @@ namespace Audio::CableInput
 		}
 
 		originalPaOpenStream = reinterpret_cast<PaOpenStream_t>(
-			DetourFunction(target, reinterpret_cast<byte*>(&Hook_PaOpenStream)));
+			MemUtil::DetourFunction(target, reinterpret_cast<byte*>(&Hook_PaOpenStream)));
 		if (originalPaOpenStream == nullptr)
 		{
 			if (inputOwnedByAsio) PersistentInput::Install(L"", L"", false, false, PersistentInput::EnumeratorSource::RsAsio);

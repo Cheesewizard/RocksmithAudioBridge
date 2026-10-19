@@ -44,6 +44,15 @@ namespace Audio::SharedOutput
 		// nothing to RSMods.ini (the overlay's sliders preview every drag step and save once on release).
 		thread_local bool previewOnly = false;
 
+		// The output the player picked in Switch output (op 4) this launch. The game drops and rebuilds its output
+		// client on every focus change (alt-tab, Windows key); the enumerator hook still hands CreateClient the
+		// output read from RSMods.ini at launch, so without this the rebuilt client reopened the old device and the
+		// switch looked undone. Empty until the player switches.
+		std::mutex g_pickedOutputMutex;
+		std::wstring g_pickedOutput;
+		void RememberPickedOutput(const std::wstring& endpointId) { std::lock_guard<std::mutex> guard(g_pickedOutputMutex); g_pickedOutput = endpointId; }
+		std::wstring PickedOutput() { std::lock_guard<std::mutex> guard(g_pickedOutputMutex); return g_pickedOutput; }
+
 		// NotifyCableInputFrames -> OutputSession: game blocks of cable input not yet answered with an output wake, when
 		// the last one came, and an event to wake the session's worker (auto-reset, made once for the process).
 		// Counted in frames, not blocks: after a live game block change (ResetGameOutput) the game's output block may
@@ -336,15 +345,6 @@ namespace Audio::SharedOutput
 			if (SUCCEEDED(response.result)) response.result = PersistCustomSetting("RocksmithGateOverride", on);
 			return true;
 		}
-		case 24:
-			// Mains-hum notch base frequency (0 = off, else 50 or 60).
-			if (!parseInteger(integer) || (integer != 0 && (integer < 20 || integer > 120))) response.result = E_INVALIDARG;
-			else
-			{
-				AsioHook::SetHumFilterBaseHz(static_cast<float>(integer));
-				response.result = PersistCustomSetting("HumFilter", integer);
-			}
-			return true;
 		case 25:
 		{
 			// Ask the proxy to bind the named real ASIO driver. A virtual proxy promotes. A proxy that already
@@ -577,6 +577,7 @@ namespace Audio::SharedOutput
 				// ResolveActiveOutput falls back to the Windows default when that device is not plugged in.
 				if (SUCCEEDED(response.result))
 				{
+					RememberPickedOutput(request.value);
 					wchar_t executable[MAX_PATH]{};
 					GetModuleFileNameW(nullptr, executable, MAX_PATH);
 					WritePrivateProfileStringW(L"Audio Bridge", L"OutputDevice", request.value,
@@ -1889,7 +1890,8 @@ namespace Audio::SharedOutput
 		try
 		{
 			auto session = std::make_shared<OutputSession>();
-			const HRESULT result = session->Open(endpointId);
+			const std::wstring picked = PickedOutput();   // a rebuilt client keeps this launch's Switch output pick
+			const HRESULT result = session->Open(picked.empty() ? endpointId : picked);
 			if (FAILED(result)) return result;
 			*client = new AudioClient(session);
 			{

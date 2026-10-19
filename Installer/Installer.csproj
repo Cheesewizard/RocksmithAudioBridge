@@ -104,6 +104,11 @@
     <Compile Include="GUI.Designer.cs">
       <DependentUpon>GUI.cs</DependentUpon>
     </Compile>
+    <!-- Optional developer-only file, absent from the repository. Debug builds only, so a Release installer built on
+         a machine that has the file still never contains it. -->
+    <Compile Include="GUI.Private.cs" Condition="Exists('GUI.Private.cs') And '$(Configuration)' == 'Debug'">
+      <DependentUpon>GUI.cs</DependentUpon>
+    </Compile>
     <Compile Include="MainFunction.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <EmbeddedResource Include="GUI.resx">

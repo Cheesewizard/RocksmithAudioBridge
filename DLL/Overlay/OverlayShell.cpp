@@ -19,6 +19,7 @@
 #include "AudioBridge/Engine/DeviceVolume.hpp"
 #include "AudioBridge/Engine/AppAudioMix.hpp"
 #include "AudioBridge/Engine/GameToneLatency.hpp"
+#include "AudioBridge/Input/InputCaptureHook.hpp"
 #include "AudioBridge/Devices/DeviceEnumeratorHook.hpp"
 #include "AudioBridge/Engine/CableGamePeriod.hpp"
 #include "ToneDesigner/SongLibrary.hpp"
@@ -38,6 +39,8 @@
 #include <thread>
 #include <optional>
 #include <atomic>
+#include <set>
+#include <cwctype>
 
 namespace Overlay
 {
@@ -675,82 +678,6 @@ namespace Overlay
 			}
 			EndCard();
 			Caption("Mixer levels last for this session.");
-		}
-
-		void InputPage(const LiveState& live)
-		{
-			PageHeader("Input", "Guitar signal before Rocksmith hears it. Every change applies live and is saved.");
-
-			BeginCard("Levels");
-			const bool twoPlayer = GameState::IsMultiplayer();
-			Meter(twoPlayer ? "Player 1" : "Guitar", MeterFraction(live.input.meterPeak), "Player 1's guitar level after the input gain.");
-			if (twoPlayer) Meter("Player 2", MeterFraction(live.input.playerTwoMeterPeak), "Player 2's guitar level.");
-			EndCard();
-
-			// Seeded once from the keys the DLL applies at launch, then user-driven.
-			static bool seeded = false;
-			static bool gainOn, gateOn, compOn, humOn, rgOn;
-			static int gainTenths, gateTenths, compPct, humHz, rgTenths;
-			if (!seeded) {
-				gainTenths = Settings::GetModSetting("AsioInputGain");        gainOn = gainTenths > 0;
-				gateTenths = Settings::GetModSetting("NoiseGateThreshold");   gateOn = gateTenths < 0; if (!gateOn) gateTenths = -500;
-				compPct = Settings::GetModSetting("CompressorStrength");      compOn = compPct > 0;
-				humHz = Settings::GetModSetting("HumFilter");                 humOn = humHz >= 20; if (!humOn) humHz = 50;
-				rgOn = Settings::GetModSetting("RocksmithGateOverride") != 0; rgTenths = Settings::GetModSetting("RocksmithGateThreshold"); if (rgTenths == 0) rgTenths = -593;
-				seeded = true;
-			}
-
-			BeginCard("Processing");
-			// Input make-up gain (op 15, tenths of dB; off = 0).
-			if (ToggleRow("Input gain", "Boosts a quiet guitar before the game's detection.", &gainOn)) SendInt(15, gainOn ? gainTenths : 0);
-			ImGui::BeginDisabled(!gainOn);
-			float gainDb = gainTenths / 10.0f;
-			bool gainSaved = false;
-			if (SliderRow("Gain", &gainDb, 0.0f, 20.0f, "+%.1f dB", &gainSaved, "Input gain from 0 to +20 dB.")) { gainTenths = static_cast<int>(gainDb * 10 + 0.5f); PreviewInt(15, gainTenths); }
-			if (gainSaved) SendInt(15, gainTenths);
-			ImGui::EndDisabled();
-
-			// Noise suppressor (op 19, signed tenths of dB; off = 0).
-			if (ToggleRow("Noise suppressor", "Needs a clear attack, then holds the note open down to the sustain threshold.", &gateOn)) SendInt(19, gateOn ? gateTenths : 0);
-			ImGui::BeginDisabled(!gateOn);
-			float gateDb = gateTenths / 10.0f;
-			bool gateSaved = false;
-			if (SliderRow("Sustain threshold", &gateDb, -80.0f, -20.0f, "%.1f dB", &gateSaved, "Lower values keep quieter note tails after a valid attack.")) { gateTenths = static_cast<int>(gateDb * 10 - 0.5f); PreviewInt(19, gateTenths); }
-			if (gateSaved) SendInt(19, gateTenths);
-			ImGui::EndDisabled();
-
-			// Compressor (op 20, 0..100; off = 0).
-			if (ToggleRow("Compressor", "Evens out level swings during sustained notes.", &compOn)) SendInt(20, compOn ? compPct : 0);
-			ImGui::BeginDisabled(!compOn);
-			float comp = static_cast<float>(compPct);
-			bool compSaved = false;
-			if (SliderRow("Strength", &comp, 0.0f, 100.0f, "%.0f%%", &compSaved)) { compPct = static_cast<int>(comp + 0.5f); PreviewInt(20, compPct); }
-			if (compSaved) SendInt(20, compPct);
-			ImGui::EndDisabled();
-
-			// Adaptive mains hum / buzz remover (op 24, nominal Hz; off = 0). HumRemover.hpp.
-			if (ToggleRow("Hum filter", "Measures your mains hum between notes and removes only its lines, up to 8 kHz.", &humOn)) SendInt(24, humOn ? humHz : 0);
-			ImGui::BeginDisabled(!humOn);
-			static const char* const mains[] = { "50 Hz", "60 Hz" };
-			int mainsIndex = humHz >= 55 ? 1 : 0;
-			if (SegmentedRow("Mains frequency", &mainsIndex, mains, 2, "50 Hz in the UK, EU and AU. 60 Hz in the US.")) { humHz = mainsIndex ? 60 : 50; SendInt(24, humHz); }
-			ImGui::EndDisabled();
-			EndCard();
-
-			BeginCard("Rocksmith");
-			// Rocksmith gate override (op 23, "<on>,<tenths>").
-			bool rgChanged = ToggleRow("Override Rocksmith's gate", "Stops the game's own amp gate cutting notes as they decay.", &rgOn);
-			ImGui::BeginDisabled(!rgOn);
-			float rgDb = rgTenths / 10.0f;
-			bool rgSaved = false;
-			const bool rgSlid = SliderRow("Gate threshold", &rgDb, -100.0f, 10.0f, "%.1f dB", &rgSaved, "Lower values keep the gate open for longer sustain.");
-			if (rgSlid) rgTenths = static_cast<int>(rgDb * 10 + (rgDb < 0 ? -0.5f : 0.5f));
-			ImGui::EndDisabled();
-			if (rgChanged || rgSlid || rgSaved) {
-				wchar_t v[24]; swprintf_s(v, L"%d,%d", rgOn ? 1 : 0, rgTenths);
-				if (rgChanged || rgSaved) BridgeControl(23, v); else PreviewControl(23, v);
-			}
-			EndCard();
 		}
 
 		// ---- External amp ---------------------------------------------------------------------------------
@@ -2548,9 +2475,14 @@ namespace Overlay
 							Hint("Loads it in the background every time Tone designer starts (outside songs), so tones that use it always switch at once. Costs memory while loaded.");
 							if (ImGui::MenuItem("Unload", nullptr, false, vst.hostRunning && loaded)) VstHostLink::Unload(plugin.path);
 							Hint("Frees its memory. In the chain it stays; this only unloads the spare copy.");
-							if (ImGui::MenuItem("Reload", nullptr, false, vst.hostRunning && !vst.busy && (inChain || loaded) && !Loading(vst, plugin.path)))
-								VstHostLink::Reload(plugin.path);
-							Hint("Closes the plugin completely and starts it again, keeping each pedal's settings: for when it needs a fresh start to see something new, such as tones you imported into it. The rest of the chain keeps playing while it loads.");
+							// A plugin whose background load failed has no copy to reload, so Reload is the retry: it loads it
+							// again in the background (which clears the failed mark), the same as Load in the background.
+							const bool failed = !inChain && !loaded && Listed(vst.preloadFailed, plugin.path);
+							if (ImGui::MenuItem("Reload", nullptr, false, vst.hostRunning && !vst.busy && (inChain || loaded || failed) && !Loading(vst, plugin.path))) {
+								if (failed) VstHostLink::LoadInBackground(plugin.path);
+								else VstHostLink::Reload(plugin.path);
+							}
+							Hint("Closes the plugin completely and starts it again, keeping each pedal's settings: for when it needs a fresh start to see something new, such as tones you imported into it. The rest of the chain keeps playing while it loads. If it failed to load, this tries again.");
 							ImGui::Separator();
 							if (ImGui::MenuItem("Favourite", nullptr, favourite)) VstHostLink::SetFavourite(plugin.path, !favourite);
 							if (ImGui::MenuItem("Show the file")) VstHostLink::ShowPluginFile(plugin.path);
@@ -2586,7 +2518,7 @@ namespace Overlay
 							ImGui::BeginTooltip();
 							ImGui::PushTextWrapPos(ImGui::GetFontSize() * 24.0f);
 							ImGui::TextUnformatted(why.c_str());
-							ImGui::TextDisabled("It is not loaded in the background again until you right-click it and pick Load in the background.");
+							ImGui::TextDisabled("It is not loaded in the background again until you right-click it and pick Reload.");
 							ImGui::PopTextWrapPos();
 							ImGui::EndTooltip();
 						}
@@ -3327,25 +3259,59 @@ namespace Overlay
 		// (busy in another app, a buffer size it refuses) costs nothing: the previous interface is opened again and
 		// the reason shown. Only a switch that worked is saved (HKCU Target), so the next launch starts there.
 
-		// Every 32-bit ASIO driver installed, except the bridge itself: what RS_ASIO itself could open.
-		std::vector<std::wstring> InstalledAsioDrivers()
+		// Every ASIO driver installed in one registry view, except the bridge itself.
+		std::vector<std::wstring> AsioDriversIn(REGSAM view)
 		{
-			static std::vector<std::wstring> cached;
-			static ULONGLONG readAt = 0;
-			if (readAt != 0 && GetTickCount64() - readAt < 3000) return cached;
-			readAt = GetTickCount64();
-			cached.clear();
+			std::vector<std::wstring> names;
 			HKEY asio{};
-			if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ASIO", 0, KEY_READ | KEY_WOW64_32KEY, &asio) != ERROR_SUCCESS) return cached;
+			if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\ASIO", 0, KEY_READ | view, &asio) != ERROR_SUCCESS) return names;
 			wchar_t name[256];
 			for (DWORD index = 0;; ++index) {
 				DWORD length = 256;
 				if (RegEnumKeyExW(asio, index, name, &length, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
-				if (_wcsicmp(name, L"Rocksmith Audio Bridge ASIO") != 0 && _wcsicmp(name, L"Rocksmith Audio Bridge") != 0) cached.push_back(name);
+				if (_wcsicmp(name, L"Rocksmith Audio Bridge ASIO") != 0 && _wcsicmp(name, L"Rocksmith Audio Bridge") != 0) names.push_back(name);
 			}
 			RegCloseKey(asio);
-			std::sort(cached.begin(), cached.end(), [](const std::wstring& a, const std::wstring& b) { return _wcsicmp(a.c_str(), b.c_str()) < 0; });
-			return cached;
+			return names;
+		}
+
+		// The ASIO drivers the bridge can open: every 32-bit one (what RS_ASIO itself could open) plus, with `with64`, the
+		// ones registered only as 64-bit, which the bridge runs in its 64-bit driver host (AsioProxy/Remote64.hpp).
+		// Cable mode's sound-only output (AsioOutputDevice) loads drivers inside the game, so it asks without them.
+		// g_host64Drivers (lower case): the drivers the bridge would run in the 64-bit host, by the same rule as its
+		// resolver (AsioProxyDriver ResolveAsioDriver): 64-bit only. Every other one is loaded in the game as its 32-bit
+		// build.
+		std::set<std::wstring> g_host64Drivers;
+		std::vector<std::wstring> InstalledAsioDrivers(bool with64 = true)
+		{
+			static std::vector<std::wstring> cached32, cachedAll;
+			static ULONGLONG readAt = 0;
+			if (readAt == 0 || GetTickCount64() - readAt >= 3000) {
+				readAt = GetTickCount64();
+				cached32 = AsioDriversIn(KEY_WOW64_32KEY);
+				cachedAll = cached32;
+				g_host64Drivers.clear();
+				for (const std::wstring& name : AsioDriversIn(KEY_WOW64_64KEY)) {
+					const bool has32 = std::any_of(cached32.begin(), cached32.end(), [&](const std::wstring& n) { return _wcsicmp(n.c_str(), name.c_str()) == 0; });
+					if (!has32) cachedAll.push_back(name);
+					if (has32) continue;
+					std::wstring lower = name;
+					std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
+					g_host64Drivers.insert(lower);
+				}
+				auto byName = [](const std::wstring& a, const std::wstring& b) { return _wcsicmp(a.c_str(), b.c_str()) < 0; };
+				std::sort(cached32.begin(), cached32.end(), byName);
+				std::sort(cachedAll.begin(), cachedAll.end(), byName);
+			}
+			return with64 ? cachedAll : cached32;
+		}
+
+		// True when the bridge runs this driver's 64-bit build in its driver host; false: its 32-bit build in the game.
+		bool RunsIn64BitHost(const std::wstring& name)
+		{
+			std::wstring lower = name;
+			std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
+			return g_host64Drivers.count(lower) != 0;
 		}
 
 		void SaveInterfaceTarget(const std::wstring& driver)
@@ -3643,7 +3609,10 @@ namespace Overlay
 					const bool isCurrent = _wcsicmp(driver.c_str(), asioDriver.c_str()) == 0;
 					const std::string name = Utf8(driver);
 					const std::string label = name + "##asio-" + name;
-					const bool clicked = ChoiceRow(("asio-" + name).c_str(), label.c_str(), isCurrent ? "ASIO, lowest latency" : "ASIO", isCurrent && !routing && !virtualProxy && !interfaceBusy);
+					// Which build the bridge uses: 32-bit in the game, or 64-bit in its driver host (one buffer later).
+					const bool host64 = RunsIn64BitHost(driver);
+					const char* detail = isCurrent ? (host64 ? "ASIO 64-bit, low latency" : "ASIO 32-bit, lowest latency") : (host64 ? "ASIO 64-bit" : "ASIO 32-bit");
+					const bool clicked = ChoiceRow(("asio-" + name).c_str(), label.c_str(), detail, isCurrent && !routing && !virtualProxy && !interfaceBusy);
 					if (!clicked || interfaceBusy) continue;
 					if (isCurrent && virtualProxy) {
 						pending = PendingSwitch{};
@@ -3669,7 +3638,7 @@ namespace Overlay
 			// control panel. Windows' shared audio adds its period and the USB audio driver's buffering on top; through
 			// ASIO an interface plays with the delay its owner knows from other programs. The guitar stays on the cable.
 			if (!canRoute && session) {
-				const std::vector<std::wstring> drivers = InstalledAsioDrivers();
+				const std::vector<std::wstring> drivers = InstalledAsioDrivers(false);   // loaded in the game: 32-bit only
 				if (!drivers.empty()) {
 					ImGui::Dummy(ImVec2(0, 4));
 					SectionLabel("ASIO interfaces (sound only)");
@@ -3679,7 +3648,7 @@ namespace Overlay
 					const std::wstring id = Audio::SharedOutput::AsioOutputDevice::EndpointOf(driver);
 					const bool selected = endpoint == id;
 					const std::string name = Utf8(driver);
-					const bool clicked = ChoiceRow(("asio-out-" + name).c_str(), (name + "##asio-out-" + name).c_str(), selected ? "ASIO, lowest latency" : "ASIO", selected);
+					const bool clicked = ChoiceRow(("asio-out-" + name).c_str(), (name + "##asio-out-" + name).c_str(), selected ? "ASIO 32-bit, lowest latency" : "ASIO 32-bit", selected);
 					Hint("Plays the game (and Tone designer) through this interface's own ASIO driver, at the buffer size set in its control panel. The guitar stays on the Real Tone Cable. While the game runs, other programs cannot use this ASIO driver.");
 					if (!clicked || selected) continue;
 					pending = PendingSwitch{};
@@ -4065,29 +4034,31 @@ namespace Overlay
 
 		// ---- Routing ----------------------------------------------------------------------------
 		// Each part of the game's audio picks an interface and a channel, the way RS_ASIO.ini can, but live: the output
-		// pair on the output interface (Switch output above picks that interface), and each input (Player 1, Player 2,
-		// the mic) on any ASIO interface, the output's by default. RS_ASIO.ini keeps naming the bridge at fixed
-		// channels; the bridge maps them. An input on another interface runs on that interface's clock and is kept in
-		// time with the output (SplitInput); its pill shows how well. Changes apply at once with a short gap.
-		void ChannelRoutingCard()
+		// pair on the output interface (Output page; Switch output picks that interface), and each input (Player 1,
+		// Player 2, the mic) on any ASIO interface, the output's by default (Input page, one tab per player). RS_ASIO.ini
+		// keeps naming the bridge at fixed channels; the bridge maps them. An input on another interface runs on that
+		// interface's clock and is kept in time with the output (SplitInput); its pill shows how well. Changes apply at
+		// once with a short gap.
+		struct RouteView
 		{
-			if (!Audio::OutputTap::ProxyAvailable()) return;
-			struct View
-			{
-				bool viaBridge[4]{};
-				long host[4]{};
-				long device[4]{};
-				std::vector<std::string> names[4];     // per role: its interface's channel names (role 0 = outputs)
-				std::wstring interfaceOf[4];           // per input role: its own input interface, empty = the output's
-			};
-			// The route reads open RS_ASIO.ini and the registry: once a second, and right after a change lands.
-			static View view;
+			bool viaBridge[4]{};
+			long host[4]{};
+			long device[4]{};
+			std::vector<std::string> names[4];     // per role: its interface's channel names (role 0 = outputs)
+			std::wstring interfaceOf[4];           // per input role: its own input interface, empty = the output's
+		};
+		static const char* const kRoleNames[4] = { "Output", "Player 1", "Player 2", "Mic" };
+
+		// The route reads open RS_ASIO.ini and the registry: once a second, and right after a change lands.
+		const RouteView& PolledRouteView()
+		{
+			static RouteView view;
 			static ULONGLONG polled = 0;
 			static int lastRouteState = 0, lastInterfaceState = 0;
 			const int state = g_routeState.load();
 			const int interfaceState = g_interfaceState.load();
 			if (state != 1 && interfaceState != 1 && (GetTickCount64() - polled > 1000 || state != lastRouteState || interfaceState != lastInterfaceState)) {
-				View fresh;
+				RouteView fresh;
 				for (int role = 0; role < 4; ++role) {
 					fresh.viaBridge[role] = Audio::OutputTap::ProxyRoute(role, fresh.host[role], fresh.device[role]);
 					fresh.names[role] = Audio::OutputTap::ProxyRoleChannelNames(role);
@@ -4098,136 +4069,20 @@ namespace Overlay
 			}
 			lastRouteState = state;
 			lastInterfaceState = interfaceState;
+			return view;
+		}
 
-			BeginCard("Routing");
-			bool anyNames = !view.names[0].empty();
-			for (int role = 1; role < 4; ++role) anyNames = anyNames || !view.names[role].empty();
-			if (!anyNames) {
-				Caption("Pick each part's interface and channels here once an ASIO interface is open. The bridge is on speaker mode right now.");
-				EndCard();
-				return;
-			}
-			const std::wstring outputInterface = ReadPassthroughOutputName();
-			Caption("Which interface and channel each part uses. Inputs can come from any ASIO interface; one other than the output's is kept in time with it, adding a few milliseconds. Changes apply at once and are remembered.");
+		bool RouteBusy() { return g_routeState.load() == 1 || g_interfaceState.load() == 1; }
 
-			const std::vector<std::wstring> drivers = InstalledAsioDrivers();
-			ImGui::BeginDisabled(state == 1 || interfaceState == 1);
-			if (view.viaBridge[0] && view.names[0].size() >= 2) {
-				std::vector<std::string> labels;
-				std::vector<long> channels;
-				int index = -1;
-				for (long channel = 0; channel + 1 < static_cast<long>(view.names[0].size()); channel += 2) {
-					if (channel == view.device[0]) index = static_cast<int>(labels.size());
-					labels.push_back(view.names[0][channel] + " / " + view.names[0][channel + 1]);
-					channels.push_back(channel);
-				}
-				if (index < 0 && view.device[0] + 1 < static_cast<long>(view.names[0].size())) {   // an odd pair saved earlier
-					index = static_cast<int>(labels.size());
-					labels.push_back(view.names[0][view.device[0]] + " / " + view.names[0][view.device[0] + 1]);
-					channels.push_back(view.device[0]);
-				}
-				// The output pair stands apart from the inputs: its own inset strip with a speaker icon. Most interfaces
-				// have one stereo pair, where a dropdown that can't change anything only confuses, so it only shows when
-				// there is a real choice (4+ outputs, or an odd pair saved earlier to move off).
-				if (labels.size() > 1) {
-					BeginInset(ImGui::GetFrameHeight(), Glyph::Speaker, Color::AccentHi);
-					if (DropdownRow("Output pair", &index, labels, ("The pair of outputs of " + Utf8(outputInterface) + " the game's sound plays on. The interface itself is picked in Switch output above.").c_str()))
-						ApplyRoute(0, channels[static_cast<size_t>(index)]);
-					EndInset();
-				}
-			}
-			// The inputs share one strip of tabs (Player 1 | Player 2 | Mic) and only the selected role's rows show,
-			// without the role name on every label ("Interface", not "Player 1 interface"). Each tab has a muted
-			// monogram badge and an icon; red, amber and green are kept for status, so a tab only shows a coloured
-			// dot when its role has a clock state, and a problem on another tab still shows. The selected role is
-			// kept for the session (Player 1 first); the Mic tab only exists while RS_ASIO.ini sends the mic here.
-			static const char* const roleNames[4] = { "Output", "Player 1", "Player 2", "Mic" };
-			static const char* const roleBadges[4] = { "", "P1", "P2", "MIC" };
-			static const ImU32 roleTints[4] = { Color::AccentHi, Color::TintBlue, Color::TintCyan, Color::TintViolet };
-			static int selectedRole = 1;
-			std::string missing;   // the roles RS_ASIO.ini does not send through the bridge, named in the note below
-			std::vector<int> present;
-			for (int role = 1; role < 4; ++role) {
-				if (view.viaBridge[role]) { present.push_back(role); continue; }
-				const std::string name = role == 3 ? "the mic" : roleNames[role];
-				missing += missing.empty() ? name : " and " + name;
-			}
-			if (!present.empty()) {
-				ImGui::Spacing();
-				SectionLabel("Inputs");
-				std::vector<RoleTab> tabs;
-				std::vector<std::string> hints;
-				hints.reserve(present.size());
-				int tabIndex = 0;
-				for (size_t i = 0; i < present.size(); ++i) {
-					const int role = present[i];
-					if (role == selectedRole) tabIndex = static_cast<int>(i);
-					const ClockView clock = InputClockState(role);
-					hints.push_back(std::string("Where ") + (role == 3 ? "the mic" : roleNames[role]) + "'s input comes from."
-						+ (clock.shown ? std::string(clock.settled ? " In sync. " : " Catching up. ") + clock.detail : std::string()));
-					RoleTab tab;
-					tab.label = roleNames[role];
-					tab.badge = roleBadges[role];
-					tab.tint = roleTints[role];
-					tab.icon = role == 3 ? RoleIcon::Mic : RoleIcon::Guitar;
-					tab.hasStatus = clock.shown;
-					tab.status = clock.settled ? Color::Good : Color::Warn;
-					tabs.push_back(tab);
-				}
-				for (size_t i = 0; i < tabs.size(); ++i) tabs[i].hint = hints[i].c_str();
-				if (std::find(present.begin(), present.end(), selectedRole) == present.end()) tabIndex = 0;
-				RoleTabs("##roles", tabs.data(), static_cast<int>(tabs.size()), &tabIndex);
-				selectedRole = present[static_cast<size_t>(tabIndex)];
-
-				const int role = selectedRole;
-				ImGui::PushID(role);
-				// RS_ASIO.ini gives this role the same Channel as an earlier one, so there is one input for both and it
-				// follows that role. Picking it separately needs its own Channel= in RS_ASIO.ini.
-				int sharesWith = 0;
-				for (int earlier = 1; earlier < role; ++earlier)
-					if (view.viaBridge[earlier] && view.host[earlier] == view.host[role]) { sharesWith = earlier; break; }
-				// Interface: "Same as output" or any ASIO interface.
-				std::vector<std::string> interfaceLabels{ "Same as output" };
-				int interfaceIndex = 0;
-				for (size_t i = 0; i < drivers.size(); ++i) {
-					interfaceLabels.push_back(Utf8(drivers[i]));
-					if (!view.interfaceOf[role].empty() && _wcsicmp(drivers[i].c_str(), view.interfaceOf[role].c_str()) == 0) interfaceIndex = static_cast<int>(i) + 1;
-				}
-				const std::vector<std::string>& inputs = view.names[role];
-				int index = view.device[role] >= 0 && view.device[role] < static_cast<long>(inputs.size()) ? static_cast<int>(view.device[role]) : -1;
-
-				BeginTabBody();
-				ImGui::BeginDisabled(sharesWith != 0);
-				if (DropdownRow("Interface", &interfaceIndex, interfaceLabels, "Where this part's input comes from. Same as output: the interface the sound plays on.") && sharesWith == 0)
-					SwitchInputInterface(role, interfaceIndex == 0 ? std::wstring() : drivers[static_cast<size_t>(interfaceIndex - 1)]);
-				// Channel on that interface.
-				if (DropdownRow("Input channel", &index, inputs, "The input on that interface this part listens to.") && sharesWith == 0)
-					ApplyRoute(role, index);
-				ImGui::EndDisabled();
-				if (sharesWith != 0)
-					Caption((std::string(roleNames[role]) + " follows " + roleNames[sharesWith] + ": it has the same Channel in RS_ASIO.ini. Give it its own Channel there to pick it here.").c_str());
-				InputClockPill(role, "Clock");
-				EndTabBody();
-				ImGui::PopID();
-			}
-			ImGui::EndDisabled();
-			if (!missing.empty()) {
-				missing[0] = static_cast<char>(toupper(static_cast<unsigned char>(missing[0])));
-				Caption((missing + " show" + (missing.find(" and ") == std::string::npos ? "s" : "") + " up here once RS_ASIO.ini sends "
-					+ (missing.find(" and ") == std::string::npos ? "it" : "them") + " to Rocksmith Audio Bridge ASIO too.").c_str());
-			}
-
+		// The bridge's reason an input interface would not open, then the result of the last route or interface change.
+		void RouteStatusMessage()
+		{
 			const std::string inputError = Audio::OutputTap::ProxyInputError();
-			if (!inputError.empty()) {
-				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Color::Warn));
-				ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + RowWidth());
-				ImGui::TextUnformatted(inputError.c_str());
-				ImGui::PopTextWrapPos();
-				ImGui::PopStyleColor();
-			}
+			if (!inputError.empty()) WarnCaption(inputError.c_str());
+			const int state = g_routeState.load();
 			std::string message;
 			ImU32 color = Color::Muted;
-			if (state == 1 || interfaceState == 1) message = "Applying...";
+			if (RouteBusy()) message = "Applying...";
 			else {
 				{
 					std::lock_guard<std::mutex> lock(g_interfaceMessageMutex);
@@ -4235,23 +4090,279 @@ namespace Overlay
 				}
 				if (state == 2) message = "Applied.";
 				else if (state == 3) message = "Saved. It applies when the interface opens.";
-				else if (state == 4) { message = "The interface would not take that channel. Check the Playing to card above."; color = Color::Bad; }
+				else if (state == 4) { message = "The interface would not take that channel. Check Playing to on the Output page."; color = Color::Bad; }
 			}
-			if (!message.empty()) {
-				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(color));
-				ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + RowWidth());
-				ImGui::TextUnformatted(message.c_str());
-				ImGui::PopTextWrapPos();
-				ImGui::PopStyleColor();
+			if (message.empty()) return;
+			ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(color));
+			ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + RowWidth());
+			ImGui::TextUnformatted(message.c_str());
+			ImGui::PopTextWrapPos();
+			ImGui::PopStyleColor();
+		}
+
+		// Output page: the pair of outputs the game plays on. Most interfaces have one stereo pair, where a dropdown that
+		// can't change anything only confuses, so the card only shows when there is a real choice (4+ outputs, or an odd
+		// pair saved earlier to move off). Each player's input is picked on the Input page.
+		void OutputPairCard()
+		{
+			if (!Audio::OutputTap::ProxyAvailable()) return;
+			const RouteView& view = PolledRouteView();
+			if (!view.viaBridge[0] || view.names[0].size() < 2) return;
+			std::vector<std::string> labels;
+			std::vector<long> channels;
+			int index = -1;
+			for (long channel = 0; channel + 1 < static_cast<long>(view.names[0].size()); channel += 2) {
+				if (channel == view.device[0]) index = static_cast<int>(labels.size());
+				labels.push_back(view.names[0][channel] + " / " + view.names[0][channel + 1]);
+				channels.push_back(channel);
 			}
+			if (index < 0 && view.device[0] + 1 < static_cast<long>(view.names[0].size())) {   // an odd pair saved earlier
+				index = static_cast<int>(labels.size());
+				labels.push_back(view.names[0][view.device[0]] + " / " + view.names[0][view.device[0] + 1]);
+				channels.push_back(view.device[0]);
+			}
+			if (labels.size() <= 1) return;
+			const std::wstring outputInterface = ReadPassthroughOutputName();
+			BeginCard("Output pair");
+			ImGui::BeginDisabled(RouteBusy());
+			if (DropdownRow("Output pair", &index, labels, ("The pair of outputs of " + Utf8(outputInterface) + " the game's sound plays on. The interface itself is picked in Switch output above.").c_str()))
+				ApplyRoute(0, channels[static_cast<size_t>(index)]);
+			ImGui::EndDisabled();
+			RouteStatusMessage();
 			EndCard();
+		}
+
+		// One input role's ASIO source: its interface (the output's or any other) and channel, and the clock pill when it
+		// runs on another interface's clock.
+		void InputSourceRows(int role, const RouteView& view)
+		{
+			const std::vector<std::wstring> drivers = InstalledAsioDrivers();
+			// RS_ASIO.ini gives this role the same Channel as an earlier one, so there is one input for both and it follows
+			// that role. Picking it separately needs its own Channel= in RS_ASIO.ini.
+			int sharesWith = 0;
+			for (int earlier = 1; earlier < role; ++earlier)
+				if (view.viaBridge[earlier] && view.host[earlier] == view.host[role]) { sharesWith = earlier; break; }
+			std::vector<std::string> interfaceLabels{ "Same as output" };
+			int interfaceIndex = 0;
+			for (size_t i = 0; i < drivers.size(); ++i) {
+				interfaceLabels.push_back(Utf8(drivers[i]));
+				if (!view.interfaceOf[role].empty() && _wcsicmp(drivers[i].c_str(), view.interfaceOf[role].c_str()) == 0) interfaceIndex = static_cast<int>(i) + 1;
+			}
+			const std::vector<std::string>& inputs = view.names[role];
+			int index = view.device[role] >= 0 && view.device[role] < static_cast<long>(inputs.size()) ? static_cast<int>(view.device[role]) : -1;
+			ImGui::BeginDisabled(sharesWith != 0 || RouteBusy());
+			if (DropdownRow("Interface", &interfaceIndex, interfaceLabels, "Where this input comes from. Same as output: the interface the sound plays on.") && sharesWith == 0)
+				SwitchInputInterface(role, interfaceIndex == 0 ? std::wstring() : drivers[static_cast<size_t>(interfaceIndex - 1)]);
+			if (DropdownRow("Input channel", &index, inputs, "The input on that interface this player listens to.") && sharesWith == 0)
+				ApplyRoute(role, index);
+			ImGui::EndDisabled();
+			if (sharesWith != 0)
+				Caption((std::string(kRoleNames[role]) + " follows " + kRoleNames[sharesWith] + ": it has the same Channel in RS_ASIO.ini. Give it its own Channel there to pick it here.").c_str());
+			InputClockPill(role, "Clock");
+			RouteStatusMessage();
+		}
+
+		// ---- Input --------------------------------------------------------------------------------
+		// One tab per player (and the mic while RS_ASIO.ini sends it through the bridge), each the same component: what the
+		// input is (ASIO interface or Real Tone Cable), its level, that source's own settings, then the processing. The
+		// processing controls are the same whatever the source: they work alike on ASIO and on the cable. The input chain
+		// only runs on Player 1 so far (InputCaptureHook, route 0); Player 2's is planned.
+		enum class InputSource { None, Asio, Cable, CableStandIn, GameCable };
+
+		// Player 1's processing: input gain, noise suppressor, compressor, then the game's own amp gate.
+		void PlayerOneProcessing()
+		{
+			// Seeded once from the keys the DLL applies at launch, then user-driven.
+			static bool seeded = false;
+			static bool gainOn, gateOn, compOn, rgOn;
+			static int gainTenths, gateTenths, compPct, rgTenths;
+			if (!seeded) {
+				gainTenths = Settings::GetModSetting("AsioInputGain");        gainOn = gainTenths > 0;
+				gateTenths = Settings::GetModSetting("NoiseGateThreshold");   gateOn = gateTenths < 0; if (!gateOn) gateTenths = -500;
+				compPct = Settings::GetModSetting("CompressorStrength");      compOn = compPct > 0;
+				rgOn = Settings::GetModSetting("RocksmithGateOverride") != 0; rgTenths = Settings::GetModSetting("RocksmithGateThreshold"); if (rgTenths == 0) rgTenths = -593;
+				seeded = true;
+			}
+
+			BeginCard("Processing");
+			// The capture hook is installed at launch only when one of these is on (ModManager); switching the first one
+			// on mid-session has no effect until the game restarts.
+			if ((gainOn || gateOn || compOn) && !Audio::AsioHook::InputChainRunning())
+				WarnCaption("Not running this launch: restart the game once to start the input processing.");
+			// Input make-up gain (op 15, tenths of dB; off = 0).
+			if (ToggleRow("Input gain", "Raises a quiet guitar.", &gainOn)) SendInt(15, gainOn ? gainTenths : 0);
+			ImGui::BeginDisabled(!gainOn);
+			float gainDb = gainTenths / 10.0f;
+			bool gainSaved = false;
+			if (SliderRow("Gain", &gainDb, 0.0f, 20.0f, "+%.1f dB", &gainSaved, "Input gain from 0 to +20 dB.")) { gainTenths = static_cast<int>(gainDb * 10 + 0.5f); PreviewInt(15, gainTenths); }
+			if (gainSaved) SendInt(15, gainTenths);
+			ImGui::EndDisabled();
+
+			// Noise suppressor (op 19, signed tenths of dB; off = 0). Also applied to the amp sim's feed (AmpFeedConditioner.hpp).
+			if (ToggleRow("Noise suppressor", "Silent between notes: a clear attack opens it, and the note rings down to the sustain threshold.", &gateOn)) SendInt(19, gateOn ? gateTenths : 0);
+			ImGui::BeginDisabled(!gateOn);
+			float gateDb = gateTenths / 10.0f;
+			bool gateSaved = false;
+			if (SliderRow("Sustain threshold", &gateDb, -80.0f, -20.0f, "%.1f dB", &gateSaved, "Lower values keep quieter note tails after a valid attack.")) { gateTenths = static_cast<int>(gateDb * 10 - 0.5f); PreviewInt(19, gateTenths); }
+			if (gateSaved) SendInt(19, gateTenths);
+			ImGui::EndDisabled();
+
+			// Compressor (op 20, 0..100; off = 0).
+			if (ToggleRow("Compressor", "Evens out level swings during sustained notes.", &compOn)) SendInt(20, compOn ? compPct : 0);
+			ImGui::BeginDisabled(!compOn);
+			float comp = static_cast<float>(compPct);
+			bool compSaved = false;
+			if (SliderRow("Strength", &comp, 0.0f, 100.0f, "%.0f%%", &compSaved)) { compPct = static_cast<int>(comp + 0.5f); PreviewInt(20, compPct); }
+			if (compSaved) SendInt(20, compPct);
+			ImGui::EndDisabled();
+			EndCard();
+
+			// The game's own amp gate (op 23, "<on>,<tenths>"): Player 1's noise floor. While an amp sim plays, the game's
+			// amp is held at 0 (ExternalAmp gameAmpMuted), so the gate has nothing to act on.
+			const bool ampSimPlays = ExternalAmp::GetSnapshot().gameAmpMuted;
+			BeginCard("Rocksmith");
+			if (ampSimPlays) Caption("The game's amp is muted while the amp sim plays, so its gate has nothing to do.");
+			ImGui::BeginDisabled(ampSimPlays);
+			bool rgChanged = ToggleRow("Override Rocksmith's gate", "Stops the game's own amp gate cutting notes as they decay.", &rgOn);
+			ImGui::BeginDisabled(!rgOn);
+			float rgDb = rgTenths / 10.0f;
+			bool rgSaved = false;
+			const bool rgSlid = SliderRow("Gate threshold", &rgDb, -100.0f, 10.0f, "%.1f dB", &rgSaved, "Lower values keep the gate open for longer sustain.");
+			if (rgSlid) rgTenths = static_cast<int>(rgDb * 10 + (rgDb < 0 ? -0.5f : 0.5f));
+			ImGui::EndDisabled();
+			if (rgChanged || rgSlid || rgSaved) {
+				wchar_t v[24]; swprintf_s(v, L"%d,%d", rgOn ? 1 : 0, rgTenths);
+				if (rgChanged || rgSaved) BridgeControl(23, v); else PreviewControl(23, v);
+			}
+			ImGui::EndDisabled();
+			EndCard();
+		}
+
+		void InputPage(const LiveState& live)
+		{
+			PageHeader("Input", "Each player's guitar before Rocksmith hears it. Every change applies live and is saved.");
+			const bool asioMode = Audio::CableInput::IsAsioPath();   // RS_ASIO owns the input (else Cable mode)
+			const RouteView& view = PolledRouteView();
+			static bool p2CableSeeded = false, p2Cable = false;
+			if (!p2CableSeeded) { p2Cable = Settings::ReturnSettingValue("CableForPlayerTwo") == "on"; p2CableSeeded = true; }
+
+			// Tabs: Player 1, Player 2, and the mic while RS_ASIO.ini sends it through the bridge. A tab shows a coloured dot
+			// only when its input runs on another clock (InputClockState), the Output page's convention.
+			static const char* const badges[4] = { "", "P1", "P2", "MIC" };
+			static const ImU32 tints[4] = { Color::AccentHi, Color::TintBlue, Color::TintCyan, Color::TintViolet };
+			std::vector<int> roles{ 1, 2 };
+			if (asioMode && view.viaBridge[3]) roles.push_back(3);
+			static int selectedRole = 1;
+			std::vector<RoleTab> tabs;
+			int tabIndex = 0;
+			for (size_t i = 0; i < roles.size(); ++i) {
+				const int role = roles[i];
+				if (role == selectedRole) tabIndex = static_cast<int>(i);
+				const ClockView clock = InputClockState(role);
+				RoleTab tab;
+				tab.label = kRoleNames[role];
+				tab.badge = badges[role];
+				tab.tint = tints[role];
+				tab.icon = role == 3 ? RoleIcon::Mic : RoleIcon::Guitar;
+				tab.hasStatus = clock.shown;
+				tab.status = clock.settled ? Color::Good : Color::Warn;
+				tabs.push_back(tab);
+			}
+			if (std::find(roles.begin(), roles.end(), selectedRole) == roles.end()) tabIndex = 0;
+			RoleTabs("##input-roles", tabs.data(), static_cast<int>(tabs.size()), &tabIndex);
+			selectedRole = roles[static_cast<size_t>(tabIndex)];
+			const int role = selectedRole;
+			ImGui::PushID(role);
+
+			// What this input is.
+			InputSource source = InputSource::None;
+			if (role == 1) {
+				if (!asioMode) source = InputSource::Cable;
+				// The bridge on its virtual clock (no interface open) plays the Real Tone Cable as Player 1. Not ProxyInputMode:
+				// that is 2 for a real ASIO stream as well.
+				else if (Audio::OutputTap::ProxyOutputMode() == 1) source = InputSource::CableStandIn;
+				else source = InputSource::Asio;
+			}
+			else if (role == 2) {
+				if (!asioMode) source = InputSource::GameCable;
+				else if (p2Cable) source = InputSource::Cable;
+				else if (view.viaBridge[2]) source = InputSource::Asio;
+			}
+			else source = InputSource::Asio;
+
+			std::string line;
+			if (source == InputSource::Asio && !view.viaBridge[role]) line = "ASIO input set in RS_ASIO.ini";
+			else if (source == InputSource::Asio) {
+				const std::wstring iface = view.interfaceOf[role].empty() ? ReadPassthroughOutputName() : view.interfaceOf[role];
+				const std::vector<std::string>& names = view.names[role];
+				line = Utf8(iface);
+				if (view.device[role] >= 0 && view.device[role] < static_cast<long>(names.size())) line += ", " + names[static_cast<size_t>(view.device[role])];
+			}
+			else if (source == InputSource::Cable) line = role == 1 ? (CableAmpLink::IsDirectUsb() ? "Real Tone Cable, read directly over USB" : "Real Tone Cable, through Windows") : "Real Tone Cable, added for Player 2";
+			else if (source == InputSource::CableStandIn) line = "Real Tone Cable, while no ASIO input is open";
+			else if (source == InputSource::GameCable) line = "A second Real Tone Cable, opened by Rocksmith";
+			if (source != InputSource::None) {
+				BeginCard();
+				StatusPill(source == InputSource::Asio ? "ASIO" : "REAL TONE CABLE", source == InputSource::Asio ? Color::Good : Color::AccentHi);
+				ImGui::SameLine(0.0f, 12.0f);
+				ImGui::TextUnformatted(line.c_str());
+				EndCard();
+			}
+
+			// Level.
+			if (role != 3) {
+				BeginCard("Level");
+				Meter(kRoleNames[role], MeterFraction(role == 1 ? live.input.meterPeak : live.input.playerTwoMeterPeak), role == 1 ? "Player 1's level after the input gain." : "Player 2's level.");
+				EndCard();
+			}
+
+			// Source settings.
+			if (role == 2 && asioMode) {
+				BeginCard("Source");
+				// Op 26: the cable after the ASIO input, as Player 2 (the hot-swap device, always listed; the switch gates it).
+				if (ToggleRow("Real Tone Cable for Player 2", "Player 2 plays on a Real Tone Cable instead of an ASIO input. RS_ASIO.ini is not changed.", &p2Cable))
+					BridgeControl(26, p2Cable ? L"1" : L"0");
+				if (!p2Cable && view.viaBridge[2]) InputSourceRows(2, view);
+				else if (!p2Cable) Caption("Player 2 has no ASIO input: RS_ASIO.ini does not send Player 2 to Rocksmith Audio Bridge ASIO. Switch on the cable above, or add Player 2 there.");
+				EndCard();
+			}
+			else if (source == InputSource::Asio) {
+				BeginCard("Source");
+				if (view.viaBridge[role]) InputSourceRows(role, view);
+				else Caption((std::string(kRoleNames[role]) + "'s input is set in RS_ASIO.ini, not through Rocksmith Audio Bridge ASIO. Send it to Rocksmith Audio Bridge ASIO there to pick its interface and channel here.").c_str());
+				EndCard();
+			}
+			else if (source == InputSource::Cable && role == 1) {
+				BeginCard("Source");
+				InfoRow("Read", CableAmpLink::IsDirectUsb() ? "Directly over USB, about 1 ms packets" : "Through Windows, 10 ms packets");
+				EndCard();
+			}
+			else if (source == InputSource::CableStandIn) {
+				BeginCard("Source");
+				Caption("No ASIO input is open, so the bridge plays the Real Tone Cable as Player 1. Pick an interface in Switch output on the Output page to use it instead.");
+				EndCard();
+			}
+			else if (source == InputSource::GameCable) {
+				BeginCard("Source");
+				Caption("In Cable mode Rocksmith opens a second Real Tone Cable for Player 2 itself.");
+				EndCard();
+			}
+
+			// Processing.
+			if (role == 1) PlayerOneProcessing();
+			else if (role == 2) {
+				BeginCard("Processing");
+				Caption("Player 2's own input gain, noise suppressor and compressor are coming in the next build.");
+				EndCard();
+			}
+			ImGui::PopID();
 		}
 
 		void OutputPage(const LiveState& live)
 		{
 			PageHeader("Output", "Where the game's sound goes and how loud it can get.");
 			OutputDeviceCard(live);
-			ChannelRoutingCard();
+			OutputPairCard();
 			OutputBufferCard(live);
 			GameBlockCard(live);
 
@@ -4393,10 +4504,7 @@ namespace Overlay
 
 		void GeneralPage()
 		{
-			PageHeader("General", "Overlays, second player and library tools.");
-			static bool seeded = false;
-			static bool p2Cable = false;
-			if (!seeded) { p2Cable = Settings::ReturnSettingValue("CableForPlayerTwo") == "on"; seeded = true; }
+			PageHeader("General", "Overlays and library tools.");
 
 			// Here rather than under Amp sim: it silences the game's amp, Tone designer and an external app alike.
 			BeginCard("Tuner");
@@ -4414,14 +4522,6 @@ namespace Overlay
 				"Requires Audio diagnostics HUD. Software timing plus reported output delay; cable hardware and USB delivery are excluded. Hidden when no estimate is available."))
 				SetLatencyReadoutEnabled(latencyReadout);
 			EndCard();
-
-			// The cable is added as Player 2 next to an ASIO Player 1; in Cable mode it already is Player 1.
-			if (Audio::CableInput::IsAsioPath()) {
-				BeginCard("Two player");
-				if (ToggleRow("Real Tone Cable for Player 2", "Adds the cable after your ASIO input. RS_ASIO.ini is not changed.", &p2Cable))
-					BridgeControl(26, p2Cable ? L"1" : L"0");
-				EndCard();
-			}
 
 			BeginCard("Library");
 			Caption("Picks up newly added CDLC without restarting. Open the song list once first if nothing changes.");
@@ -4479,6 +4579,7 @@ namespace Overlay
 				ImGui::EndDisabled();
 				EndCard();
 			}
+
 		}
 
 		// ---- Chrome -----------------------------------------------------------------------------------------
@@ -4540,23 +4641,52 @@ namespace Overlay
 			LatencyReadout(right, origin.y);
 		}
 
-		// Guitar to ear, on every page: the Tone designer's delay (measured per sample, CableAmpLink) and the
-		// game tones' (measured from picks and attacks, GameToneLatency), the one being heard brighter. Cable mode only:
-		// both are timed from the cable.
+		// ASIO mode's figures: the driver's reported input and output latency (they include its buffers), plus the amp
+		// link's blocks when an amp sim plays, or the game's own processing for the game tones (its two blocks at the ASIO
+		// buffer size plus the part measured on the cable, else a guess: GameToneLatency::GameOwnMs). Rounded once and
+		// subtracted so the parts add up, like CableSplit.
+		struct AsioSplit { int input, ampOutput, ampTotal, gameTotal; };
+		AsioSplit SplitAsioLatency(const ExternalAmp::Snapshot& amp)
+		{
+			const AmpLink::Status& link = amp.link;
+			const int rate = link.sampleRate > 0 ? link.sampleRate : AmpLink::kSampleRate;
+			const double linkMs = link.frames > 0 ? link.frames * (link.latencyBlocks > 1 ? 2 : 1) * 1000.0 / rate : 0.0;
+			const int input = static_cast<int>(std::lround(amp.asioInMs));
+			const int ampTotal = static_cast<int>(std::lround(amp.asioInMs + amp.asioOutMs + linkMs));
+			const float blockMs = static_cast<float>((link.frames > 0 ? link.frames : 128) * 1000.0 / rate);
+			// The game's own part: timed from picks in the last minute (GameToneLatency ASIO feed), else remembered or guessed.
+			const float gameOwn = Audio::GameToneLatency::Valid() ? Audio::GameToneLatency::MedianMs() : Audio::GameToneLatency::GameOwnMs(blockMs);
+			const int gameTotal = static_cast<int>(std::lround(amp.asioInMs + amp.asioOutMs + gameOwn));
+			return { input, ampTotal - input, ampTotal, gameTotal };
+		}
+
+		// Guitar to ear, on every page, the one being heard brighter. Cable mode: the Tone designer's delay (measured
+		// per sample, CableAmpLink) and the game tones' (measured from picks and attacks, GameToneLatency), both timed
+		// from the cable. ASIO mode: nothing is timed; the driver's own reported latency, plus the amp link's blocks for
+		// the amp sim, or the game's own processing for the game tones (estimated from the cable, else guessed).
 		void LatencyReadout(float right, float top)
 		{
 			const ExternalAmp::Snapshot amp = ExternalAmp::GetSnapshot();
-			if (!amp.cableHost) return;
-			const bool toneDesignerPlays = amp.toneDesigner && amp.enabled && !amp.comparing;
+			const bool asio = !amp.cableHost && amp.asioInMs + amp.asioOutMs > 0.0f;
+			if (!amp.cableHost && !asio) return;
 			char designer[96], game[48];
-			if (amp.cableLatencyMs > 0.0f) {
+			bool toneDesignerPlays = amp.toneDesigner && amp.enabled && !amp.comparing;
+			if (asio) {
+				const AsioSplit split = SplitAsioLatency(amp);
+				const bool ampSim = amp.link.guestPresent && !amp.toneDesigner;
+				toneDesignerPlays = amp.link.connected && !amp.comparing;
+				sprintf_s(designer, "%s in %d  out %d  total %d ms", ampSim ? "Amp sim" : "Tone designer", split.input, split.ampOutput, split.ampTotal);
+				sprintf_s(game, !Audio::GameToneLatency::Valid() && Audio::GameToneLatency::GameOwnGuessed() ? "Game tones ~%d ms (guess)" : "Game tones ~%d ms (est.)", split.gameTotal);
+			}
+			else if (amp.cableLatencyMs > 0.0f) {
 				const CableSplit split = SplitCableLatency(amp);
 				sprintf_s(designer, "Tone designer in %d  out %d  total %d ms", split.input, split.output, split.total);
 			}
 			else sprintf_s(designer, "Tone designer -");
 			// Measured now, or the remembered game part plus the live output part (e.g. while the Tone designer plays).
 			// Both are worked out from picks, so the figure always reads as an estimate.
-			if (Audio::GameToneLatency::Valid()) sprintf_s(game, "Game tones ~%.0f ms (est.)", Audio::GameToneLatency::MedianMs());
+			if (asio) {}
+			else if (Audio::GameToneLatency::Valid()) sprintf_s(game, "Game tones ~%.0f ms (est.)", Audio::GameToneLatency::MedianMs());
 			else if (Audio::GameToneLatency::Available())
 				sprintf_s(game, Audio::GameToneLatency::Guessed() ? "Game tones ~%.0f ms (guess)" : "Game tones ~%.0f ms (est.)", Audio::GameToneLatency::CurrentMs());
 			else sprintf_s(game, "Game tones -");
@@ -4572,7 +4702,8 @@ namespace Overlay
 			ImGui::PopFont();
 			ImGui::SetCursorScreenPos(ImVec2(x, top + 10.0f));
 			ImGui::InvisibleButton("##latency", ImVec2(designerW + gap + gameW, 38.0f));
-			Hint("Latency estimates: software timing plus the output driver's reported delay. Input is how long the guitar waits for each packet from the cable (about 1 ms read directly over USB, 10 ms through Windows), plus any measured wait when packets arrive in batches; output is the Tone designer, its buffers and the output device (exclusive mode lowers this part); total is the two together. Tone designer tracks audio blocks; game tones are a rougher estimate, matching your picks to output attacks; until a few picks have been timed with the game amp playing, the game tones figure is a guess from the game block size. The cable's own converter and the USB bus are excluded. This is not a calibrated guitar-to-ear measurement.");
+			if (asio) Hint("Latency estimates from your ASIO driver: input and output are the delays the driver reports for its buffers and converters; the amp sim or Tone designer adds the amp link's blocks to the output part. Game tones also pass through the game's own processing, which is not measured in ASIO mode, so their figure is the least they can be. Nothing here is timed from your playing; it is not a calibrated guitar-to-ear measurement.");
+			else Hint("Latency estimates: software timing plus the output driver's reported delay. Input is how long the guitar waits for each packet from the cable (about 1 ms read directly over USB, 10 ms through Windows), plus any measured wait when packets arrive in batches; output is the Tone designer, its buffers and the output device (exclusive mode lowers this part); total is the two together. Tone designer tracks audio blocks; game tones are a rougher estimate, matching your picks to output attacks; until a few picks have been timed with the game amp playing, the game tones figure is a guess from the game block size. The cable's own converter and the USB bus are excluded. This is not a calibrated guitar-to-ear measurement.");
 		}
 
 		void Sidebar(Page& page)

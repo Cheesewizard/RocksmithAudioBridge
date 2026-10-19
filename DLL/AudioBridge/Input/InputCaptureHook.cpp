@@ -9,7 +9,7 @@
 #include "NoteByNote/Detection/RawPitchVerifier.hpp"
 #include "Recorder/DrySignalRecording.hpp"
 #include "AudioBridge/Devices/DeviceEnumeratorHook.hpp"
-#include "HumRemover.hpp"
+#include "AudioBridge/Engine/GameToneLatency.hpp"
 #include <wrl/client.h>
 
 #include <algorithm>
@@ -47,12 +47,6 @@ namespace Audio::AsioHook
 		// BEATING out of the signal BEFORE the game amp, so the amp no longer magnifies that wobble into
 		// an audible warble on a quiet, undriven interface input (heard as the gate coming in and out).
 		std::atomic<float> g_compressorStrength{ 0.0f };
-
-		// Mains-hum notch base frequency in Hz: 0 = disabled (feature off, input untouched), else 50 or 60.
-		// A grounded interface injects a stable ground-loop hum (a 50/60 Hz harmonic comb) that a single-USB
-		// Real Tone Cable never has; a bank of narrow notches at the fundamental and its harmonics removes it
-		// continuously (even during notes, unlike a gate) with negligible tone loss.
-		std::atomic<float> g_humFilterBaseHz{ 0.0f };
 
 		// Latency round-trip capture: when armed, raw route-0 input (the proxy's probe looped back through a
 		// physical out->in loop) is copied into a fixed buffer until full, then the host cross-correlates it
@@ -191,6 +185,7 @@ namespace Audio::AsioHook
 		StagePeak stageProxyRaw;          // the real device's buffers inside the proxy, before RS_ASIO
 		StagePeak stageCaptureRaw;        // what RS_ASIO handed the game, before the conditioner
 		StagePeak stageAfterConditioner;  // what the game and detection actually hear
+		std::atomic<uint64_t> chainSeenTick{ 0 };   // GetTickCount64 of the last packet through the hook (InputChainRunning)
 		std::atomic<uint32_t> stageSilentFlagPackets{ 0 };      // game packets flagged silent by the capture
 		std::atomic<uint32_t> stageReplacedWithSilence{ 0 };    // packets this hook swapped for zeros
 		std::atomic<uint32_t> proxyInputRate{ 0 };
@@ -562,91 +557,6 @@ namespace Audio::AsioHook
 
 	}
 
-	namespace Detail
-	{
-		void NoiseSuppressor::Reset()
-		{
-			configuredThreshold = -1.0f;
-			energy = 0.0f;
-			appliedGain = rangeGain;
-			openConfirmCount = 0;
-			isOpen = false;
-		}
-
-		void NoiseSuppressor::Configure(uint32_t sampleRate, float threshold)
-		{
-			if (sampleRate == 0) return;
-			if (sampleRate == configuredRate && threshold == configuredThreshold) return;
-
-			configuredRate = sampleRate;
-			configuredThreshold = threshold;
-			const double fs = static_cast<double>(sampleRate);
-			detectorAttackCoef = static_cast<float>(1.0 - std::exp(-1.0 / (DETECTOR_ATTACK_SECONDS * fs)));
-			detectorReleaseCoef = static_cast<float>(1.0 - std::exp(-1.0 / (DETECTOR_RELEASE_SECONDS * fs)));
-			gainAttackCoef = static_cast<float>(1.0 - std::exp(-1.0 / (GAIN_ATTACK_SECONDS * fs)));
-			gainReleaseCoef = static_cast<float>(1.0 - std::exp(-1.0 / (GAIN_RELEASE_SECONDS * fs)));
-			rangeGain = std::pow(10.0f, EXPANDER_RANGE_DB / 20.0f);
-			attackThreshold = threshold * std::pow(10.0f, ATTACK_ABOVE_THRESHOLD_DB / 20.0f);
-			openConfirmSamples = std::max<uint32_t>(1, static_cast<uint32_t>(std::lround(OPEN_CONFIRM_SECONDS * sampleRate)));
-			energy = 0.0f;
-			appliedGain = rangeGain;
-			openConfirmCount = 0;
-			isOpen = false;
-		}
-
-		float NoiseSuppressor::NextGain(float sidechain, float threshold)
-		{
-			if (!std::isfinite(sidechain) || threshold <= 0.0f) return 1.0f;
-			const float magnitude = std::fabs(sidechain);
-			const float sampleEnergy = magnitude * magnitude;
-			const float detectorCoef = sampleEnergy > energy ? detectorAttackCoef : detectorReleaseCoef;
-			energy += (sampleEnergy - energy) * detectorCoef;
-			const float envelope = std::sqrt(std::max(energy, 0.0f));
-
-			if (!isOpen)
-			{
-				if (envelope >= attackThreshold)
-					openConfirmCount = std::min(openConfirmCount + 1, openConfirmSamples);
-				else
-					openConfirmCount = 0;
-				if (openConfirmCount >= openConfirmSamples)
-					isOpen = true;
-			}
-			else if (envelope < threshold * CLOSE_HYSTERESIS)
-			{
-				isOpen = false;
-				openConfirmCount = 0;
-			}
-
-			float target = 1.0f;
-			if (!isOpen)
-			{
-				if (envelope < threshold)
-				{
-					const float belowDb = 20.0f * std::log10(std::max(envelope, 1e-9f) / threshold);
-					const float reductionDb = belowDb * (EXPANDER_RATIO - 1.0f);
-					target = reductionDb <= EXPANDER_RANGE_DB
-						? rangeGain
-						: std::pow(10.0f, reductionDb / 20.0f);
-				}
-				else
-					target = rangeGain;
-			}
-
-			const float coefficient = target > appliedGain ? gainAttackCoef : gainReleaseCoef;
-			appliedGain += (target - appliedGain) * coefficient;
-			return appliedGain;
-		}
-
-		void NoiseSuppressor::Process(float* samples, size_t sampleCount, uint32_t sampleRate, float threshold)
-		{
-			if (samples == nullptr || sampleCount == 0 || threshold <= 0.0f) return;
-			Configure(sampleRate, threshold);
-			for (size_t index = 0; index < sampleCount; ++index)
-				samples[index] *= NextGain(samples[index], threshold);
-		}
-	}
-
 	namespace
 	{
 		Detail::NoiseSuppressor g_noiseSuppressor;
@@ -994,114 +904,6 @@ namespace Audio::AsioHook
 			}
 		}
 
-		// Adaptive mains hum / buzz remover (HumRemover.hpp): measures the hum between notes on a background
-		// thread and notches only the harmonics that are actually present, each ~1.5-5 Hz wide, up to 8 kHz.
-		// (A fixed constant-Q comb cuts the upper mids audibly and misses buzz above its top notch.) The
-		// analysis thread starts the first time the filter is switched on.
-		Audio::HumRemover g_humRemover;
-		std::atomic<bool> g_humWorkerStarted{ false };
-
-		void HumAnalysisWorker()
-		{
-			Audio::HumRemover::Status logged{};
-			for (;;)
-			{
-				Sleep(50);
-				if (!g_humRemover.Analyze()) continue;
-				const auto status = g_humRemover.GetStatus();
-				const bool firstLock = logged.lines == 0 && status.lines > 0;
-				if (firstLock || std::abs(status.lines - logged.lines) >= 5 || std::fabs(status.fundamentalHz - logged.fundamentalHz) >= 0.02)
-				{
-					LOG_INFO("(HUM FILTER) " << (firstLock ? "locked" : "updated") << ": mains " << std::fixed << std::setprecision(3)
-						<< status.fundamentalHz << " Hz, notching " << status.lines << " line(s) up to " << std::setprecision(0)
-						<< status.highestHz << " Hz, strongest " << std::setprecision(1) << status.strongestDb << " dB above its surroundings" << std::endl);
-					logged = status;
-				}
-			}
-		}
-
-		std::string HumStatusText()
-		{
-			if (g_humFilterBaseHz.load(std::memory_order_relaxed) <= 0.0f) return " | hum filter off";
-			const auto status = g_humRemover.GetStatus();
-			if (status.lines == 0) return " | hum filter measuring";
-			std::ostringstream text;
-			text << " | hum filter " << std::fixed << std::setprecision(3) << status.fundamentalHz << " Hz, "
-				<< status.lines << " line(s) to " << std::setprecision(0) << status.highestHz << " Hz";
-			return text.str();
-		}
-
-		void EnsureHumWorker()
-		{
-			if (g_humWorkerStarted.exchange(true)) return;
-			std::thread(HumAnalysisWorker).detach();
-		}
-
-		// Runs the hum remover over the raw capture buffer in place, front of chain, so every downstream stage
-		// and the game see the de-hummed signal. Samples are always read (the analysis needs the quiet stretches)
-		// but only written once a hum has been measured, so until then the input stays bit-exact.
-		void ProcessHumFilterInPlace(BYTE* packet, const CaptureFormat& format, uint32_t frameCount, float baseHz)
-		{
-			const size_t channelCount = format.channelCount;
-			if (channelCount == 0 || channelCount > MAX_FILTER_CHANNELS || frameCount > Audio::HumRemover::MAX_BLOCK_FRAMES) return;
-			g_humRemover.BeginBlock(format.sampleRate, baseHz, channelCount);
-			const bool write = g_humRemover.Active();
-
-			switch (format.sampleFormat)
-			{
-			case SampleFormat::Float32:
-			{
-				float* samples = reinterpret_cast<float*>(packet);
-				for (uint32_t frame = 0; frame < frameCount; ++frame)
-					for (size_t channel = 0; channel < channelCount; ++channel)
-					{
-						const size_t index = static_cast<size_t>(frame) * channelCount + channel;
-						const float filtered = g_humRemover.Process(channel, samples[index]);
-						if (write) samples[index] = ClampSample(filtered);
-					}
-				break;
-			}
-			case SampleFormat::Int32:
-			{
-				int32_t* samples = reinterpret_cast<int32_t*>(packet);
-				for (uint32_t frame = 0; frame < frameCount; ++frame)
-					for (size_t channel = 0; channel < channelCount; ++channel)
-					{
-						const size_t index = static_cast<size_t>(frame) * channelCount + channel;
-						const float filtered = g_humRemover.Process(channel, static_cast<float>(samples[index]) * INT32_TO_FLOAT);
-						if (write) samples[index] = FloatToSignedInteger<int32_t, 32>(filtered);
-					}
-				break;
-			}
-			case SampleFormat::Int24:
-			{
-				for (uint32_t frame = 0; frame < frameCount; ++frame)
-					for (size_t channel = 0; channel < channelCount; ++channel)
-					{
-						const size_t index = static_cast<size_t>(frame) * channelCount + channel;
-						const float filtered = g_humRemover.Process(channel, static_cast<float>(ReadInt24(packet + index * 3)) * INT24_TO_FLOAT);
-						if (write) WriteInt24(FloatToSignedInteger<int32_t, 24>(filtered), packet + index * 3);
-					}
-				break;
-			}
-			case SampleFormat::Int16:
-			{
-				int16_t* samples = reinterpret_cast<int16_t*>(packet);
-				for (uint32_t frame = 0; frame < frameCount; ++frame)
-					for (size_t channel = 0; channel < channelCount; ++channel)
-					{
-						const size_t index = static_cast<size_t>(frame) * channelCount + channel;
-						const float filtered = g_humRemover.Process(channel, static_cast<float>(samples[index]) * INT16_TO_FLOAT);
-						if (write) samples[index] = FloatToSignedInteger<int16_t, 16>(filtered);
-					}
-				break;
-			}
-			default:
-				break;
-			}
-			g_humRemover.EndBlock();
-		}
-
 		int FindCaptureRoute(IAudioCaptureClient* captureClient)
 		{
 			for (size_t routeIndex = 0; routeIndex < INPUT_ROUTE_COUNT; ++routeIndex)
@@ -1141,8 +943,11 @@ namespace Audio::AsioHook
 				if (sampleFormat == SampleFormat::Unsupported) return;
 
 				{
-					// Stage meter 1: the real device's samples, before RS_ASIO and the game see them.
+					// Stage meter 1: the real device's samples, before RS_ASIO and the game see them. The same samples time the
+					// game tones in ASIO mode (GameToneLatency::AsioInput: picks against the game's output on the bridge's clock).
 					float peak = 0.0f;
+					static thread_local std::vector<float> latencyMono;
+					latencyMono.resize(static_cast<size_t>(frames));
 					for (long frame = 0; frame < frames; ++frame)
 					{
 						float value = 0.0f;
@@ -1155,8 +960,10 @@ namespace Audio::AsioHook
 						default: break;
 						}
 						peak = std::max(peak, std::fabs(value));
+						latencyMono[static_cast<size_t>(frame)] = value;
 					}
 					stageProxyRaw.Note(peak);
+					if (sampleRate == 48000.0) GameToneLatency::AsioInput(latencyMono.data(), static_cast<uint32_t>(frames));
 				}
 				proxyInputRate.store(static_cast<uint32_t>(sampleRate), std::memory_order_release);
 				proxyInputSampleFormat.store(static_cast<int>(sampleFormat), std::memory_order_release);
@@ -1292,12 +1099,6 @@ namespace Audio::AsioHook
 				&& routeFormats[routeIndex].IsUsable()
 				&& !(flags && (*flags & AUDCLNT_BUFFERFLAGS_SILENT)))
 			{
-				// Mains-hum notch runs first, on the raw input, so the suppressor/compressor/gain and the game all
-				// see the de-hummed signal (and the suppressor keys off a level no longer inflated by the hum).
-				const float humBaseHz = g_humFilterBaseHz.load(std::memory_order_relaxed);
-				if (humBaseHz > 0.0f)
-					ProcessHumFilterInPlace(*data, routeFormats[routeIndex], *frameCount, humBaseHz);
-
 				const uint32_t gateThresholdRevision = g_gateThresholdRevision.load(std::memory_order_acquire);
 				if (gateThresholdRevision != g_processedGateThresholdRevision)
 				{
@@ -1401,6 +1202,7 @@ namespace Audio::AsioHook
 				}
 				CableInput::ReportTapPacket(peak, silent, *frameCount, routeFormats[routeIndex].sampleRate);
 				stageAfterConditioner.Note(silent ? 0.0f : peak);   // stage meter 3
+				chainSeenTick.store(GetTickCount64(), std::memory_order_relaxed);
 
 				// Latency loopback capture: copy the raw input (before any processor) while a measurement is armed.
 				const int latTarget = g_latencyTarget.load(std::memory_order_relaxed);
@@ -1686,7 +1488,7 @@ namespace Audio::AsioHook
 					return UnmarshalHookInstallResult::Retry;
 				}
 
-				const PBYTE trampoline = DetourFunction(
+				const PBYTE trampoline = MemUtil::DetourFunction(
 					reinterpret_cast<PBYTE>(unmarshalPatchedTarget),
 					reinterpret_cast<PBYTE>(&Hook_UnmarshalStreamComPointers));
 				if (trampoline == nullptr)
@@ -2018,21 +1820,13 @@ namespace Audio::AsioHook
 			<< " | replaced with silence: " << replaced
 			<< " | suppressor threshold " << std::fixed << std::setprecision(1) << GetNoiseGateThresholdDb()
 			<< " dBFS (opens 6 dB above it), gain " << GetInputGainDb() << " dB, compressor "
-			<< std::setprecision(2) << GetCompressorStrength() << HumStatusText() << std::endl);
+			<< std::setprecision(2) << GetCompressorStrength() << std::endl);
 	}
 
-	void SetHumFilterBaseHz(float baseHz)
+	bool InputChainRunning()
 	{
-		// 0 (or <20) = off; else the mains fundamental (50 or 60). Clamped so a stray value can't build a
-		// nonsensical notch bank. Any positive base arms the front-of-chain notch cascade.
-		if (!std::isfinite(baseHz) || baseHz < 20.0f) { g_humFilterBaseHz.store(0.0f, std::memory_order_relaxed); return; }
-		EnsureHumWorker();
-		g_humFilterBaseHz.store(std::clamp(baseHz, 20.0f, 120.0f), std::memory_order_relaxed);
-	}
-
-	float GetHumFilterBaseHz()
-	{
-		return g_humFilterBaseHz.load(std::memory_order_relaxed);
+		const uint64_t seen = chainSeenTick.load(std::memory_order_relaxed);
+		return seen != 0 && GetTickCount64() - seen < 2000;
 	}
 
 	namespace

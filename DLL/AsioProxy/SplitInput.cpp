@@ -1,4 +1,5 @@
 #include "SplitInput.hpp"
+#include "Remote64Driver.hpp"
 #include <algorithm>
 #include <cstring>
 #include <thread>
@@ -23,7 +24,7 @@ namespace AsioProxy
 	}
 
 	bool SplitInput::Open(const std::wstring& driverName, const std::wstring& dllPath, const CLSID& clsid, void* sysHandle,
-		const std::vector<long>& channels, LogFn log, std::string& failure)
+		const std::vector<long>& channels, LogFn log, std::string& failure, bool remote64)
 	{
 		if (m_quarantined.load(std::memory_order_acquire)) { failure = "a previous driver is still stuck on this slot"; return false; }
 		Close();
@@ -38,20 +39,30 @@ namespace AsioProxy
 		}
 		if (m_slotIndex < 0) return fail("three input interfaces are open already");
 
-		m_module = LoadLibraryW(dllPath.c_str());
-		if (!m_module) return fail("its driver file would not load, Windows error " + std::to_string(GetLastError()));
-		// Pinned, as the bridge pins the output driver (AsioProxyDriver LoadReal): a driver thread that outlives
-		// Release() must never find its code unmapped.
-		HMODULE pinned = nullptr;
-		GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, reinterpret_cast<LPCWSTR>(m_module), &pinned);
-		using GetClassObject = HRESULT(STDAPICALLTYPE*)(REFCLSID, REFIID, void**);
-		auto getClassObject = reinterpret_cast<GetClassObject>(GetProcAddress(m_module, "DllGetClassObject"));
-		IClassFactory* factory = nullptr;
-		if (!getClassObject || FAILED(getClassObject(clsid, IID_IClassFactory, reinterpret_cast<void**>(&factory))) || !factory)
-			return fail("its driver file is not a working ASIO driver");
-		const HRESULT created = factory->CreateInstance(nullptr, clsid, reinterpret_cast<void**>(&m_driver));
-		factory->Release();
-		if (FAILED(created) || !m_driver) { m_driver = nullptr; return fail("the driver could not be created"); }
+		if (remote64)
+		{
+			// A 64-bit-only driver runs in the 64-bit host; its stand-in is used like a loaded driver (Remote64Driver.hpp).
+			std::string why;
+			m_driver = Remote64::Create(driverName, dllPath, clsid, log, why);
+			if (!m_driver) return fail(why);
+		}
+		else
+		{
+			m_module = LoadLibraryW(dllPath.c_str());
+			if (!m_module) return fail("its driver file would not load, Windows error " + std::to_string(GetLastError()));
+			// Pinned, as the bridge pins the output driver (AsioProxyDriver LoadReal): a driver thread that outlives
+			// Release() must never find its code unmapped.
+			HMODULE pinned = nullptr;
+			GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, reinterpret_cast<LPCWSTR>(m_module), &pinned);
+			using GetClassObject = HRESULT(STDAPICALLTYPE*)(REFCLSID, REFIID, void**);
+			auto getClassObject = reinterpret_cast<GetClassObject>(GetProcAddress(m_module, "DllGetClassObject"));
+			IClassFactory* factory = nullptr;
+			if (!getClassObject || FAILED(getClassObject(clsid, IID_IClassFactory, reinterpret_cast<void**>(&factory))) || !factory)
+				return fail("its driver file is not a working ASIO driver");
+			const HRESULT created = factory->CreateInstance(nullptr, clsid, reinterpret_cast<void**>(&m_driver));
+			factory->Release();
+			if (FAILED(created) || !m_driver) { m_driver = nullptr; return fail("the driver could not be created"); }
+		}
 		if (!m_driver->init(sysHandle))
 		{
 			char message[128]{};
