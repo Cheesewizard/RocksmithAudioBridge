@@ -4636,23 +4636,52 @@ namespace Overlay
 			LatencyReadout(right, origin.y);
 		}
 
-		// Guitar to ear, on every page: the Tone designer's delay (measured per sample, CableAmpLink) and the
-		// game tones' (measured from picks and attacks, GameToneLatency), the one being heard brighter. Cable mode only:
-		// both are timed from the cable.
+		// ASIO mode's figures: the driver's reported input and output latency (they include its buffers), plus the amp
+		// link's blocks when an amp sim plays, or the game's own processing for the game tones (its two blocks at the ASIO
+		// buffer size plus the part measured on the cable, else a guess: GameToneLatency::GameOwnMs). Rounded once and
+		// subtracted so the parts add up, like CableSplit.
+		struct AsioSplit { int input, ampOutput, ampTotal, gameTotal; };
+		AsioSplit SplitAsioLatency(const ExternalAmp::Snapshot& amp)
+		{
+			const AmpLink::Status& link = amp.link;
+			const int rate = link.sampleRate > 0 ? link.sampleRate : AmpLink::kSampleRate;
+			const double linkMs = link.frames > 0 ? link.frames * (link.latencyBlocks > 1 ? 2 : 1) * 1000.0 / rate : 0.0;
+			const int input = static_cast<int>(std::lround(amp.asioInMs));
+			const int ampTotal = static_cast<int>(std::lround(amp.asioInMs + amp.asioOutMs + linkMs));
+			const float blockMs = static_cast<float>((link.frames > 0 ? link.frames : 128) * 1000.0 / rate);
+			// The game's own part: timed from picks in the last minute (GameToneLatency ASIO feed), else remembered or guessed.
+			const float gameOwn = Audio::GameToneLatency::Valid() ? Audio::GameToneLatency::MedianMs() : Audio::GameToneLatency::GameOwnMs(blockMs);
+			const int gameTotal = static_cast<int>(std::lround(amp.asioInMs + amp.asioOutMs + gameOwn));
+			return { input, ampTotal - input, ampTotal, gameTotal };
+		}
+
+		// Guitar to ear, on every page, the one being heard brighter. Cable mode: the Tone designer's delay (measured
+		// per sample, CableAmpLink) and the game tones' (measured from picks and attacks, GameToneLatency), both timed
+		// from the cable. ASIO mode: nothing is timed; the driver's own reported latency, plus the amp link's blocks for
+		// the amp sim, or the game's own processing for the game tones (estimated from the cable, else guessed).
 		void LatencyReadout(float right, float top)
 		{
 			const ExternalAmp::Snapshot amp = ExternalAmp::GetSnapshot();
-			if (!amp.cableHost) return;
-			const bool toneDesignerPlays = amp.toneDesigner && amp.enabled && !amp.comparing;
+			const bool asio = !amp.cableHost && amp.asioInMs + amp.asioOutMs > 0.0f;
+			if (!amp.cableHost && !asio) return;
 			char designer[96], game[48];
-			if (amp.cableLatencyMs > 0.0f) {
+			bool toneDesignerPlays = amp.toneDesigner && amp.enabled && !amp.comparing;
+			if (asio) {
+				const AsioSplit split = SplitAsioLatency(amp);
+				const bool ampSim = amp.link.guestPresent && !amp.toneDesigner;
+				toneDesignerPlays = amp.link.connected && !amp.comparing;
+				sprintf_s(designer, "%s in %d  out %d  total %d ms", ampSim ? "Amp sim" : "Tone designer", split.input, split.ampOutput, split.ampTotal);
+				sprintf_s(game, !Audio::GameToneLatency::Valid() && Audio::GameToneLatency::GameOwnGuessed() ? "Game tones ~%d ms (guess)" : "Game tones ~%d ms (est.)", split.gameTotal);
+			}
+			else if (amp.cableLatencyMs > 0.0f) {
 				const CableSplit split = SplitCableLatency(amp);
 				sprintf_s(designer, "Tone designer in %d  out %d  total %d ms", split.input, split.output, split.total);
 			}
 			else sprintf_s(designer, "Tone designer -");
 			// Measured now, or the remembered game part plus the live output part (e.g. while the Tone designer plays).
 			// Both are worked out from picks, so the figure always reads as an estimate.
-			if (Audio::GameToneLatency::Valid()) sprintf_s(game, "Game tones ~%.0f ms (est.)", Audio::GameToneLatency::MedianMs());
+			if (asio) {}
+			else if (Audio::GameToneLatency::Valid()) sprintf_s(game, "Game tones ~%.0f ms (est.)", Audio::GameToneLatency::MedianMs());
 			else if (Audio::GameToneLatency::Available())
 				sprintf_s(game, Audio::GameToneLatency::Guessed() ? "Game tones ~%.0f ms (guess)" : "Game tones ~%.0f ms (est.)", Audio::GameToneLatency::CurrentMs());
 			else sprintf_s(game, "Game tones -");
@@ -4668,7 +4697,8 @@ namespace Overlay
 			ImGui::PopFont();
 			ImGui::SetCursorScreenPos(ImVec2(x, top + 10.0f));
 			ImGui::InvisibleButton("##latency", ImVec2(designerW + gap + gameW, 38.0f));
-			Hint("Latency estimates: software timing plus the output driver's reported delay. Input is how long the guitar waits for each packet from the cable (about 1 ms read directly over USB, 10 ms through Windows), plus any measured wait when packets arrive in batches; output is the Tone designer, its buffers and the output device (exclusive mode lowers this part); total is the two together. Tone designer tracks audio blocks; game tones are a rougher estimate, matching your picks to output attacks; until a few picks have been timed with the game amp playing, the game tones figure is a guess from the game block size. The cable's own converter and the USB bus are excluded. This is not a calibrated guitar-to-ear measurement.");
+			if (asio) Hint("Latency estimates from your ASIO driver: input and output are the delays the driver reports for its buffers and converters; the amp sim or Tone designer adds the amp link's blocks to the output part. Game tones also pass through the game's own processing, which is not measured in ASIO mode, so their figure is the least they can be. Nothing here is timed from your playing; it is not a calibrated guitar-to-ear measurement.");
+			else Hint("Latency estimates: software timing plus the output driver's reported delay. Input is how long the guitar waits for each packet from the cable (about 1 ms read directly over USB, 10 ms through Windows), plus any measured wait when packets arrive in batches; output is the Tone designer, its buffers and the output device (exclusive mode lowers this part); total is the two together. Tone designer tracks audio blocks; game tones are a rougher estimate, matching your picks to output attacks; until a few picks have been timed with the game amp playing, the game tones figure is a guess from the game block size. The cable's own converter and the USB bus are excluded. This is not a calibrated guitar-to-ear measurement.");
 		}
 
 		void Sidebar(Page& page)

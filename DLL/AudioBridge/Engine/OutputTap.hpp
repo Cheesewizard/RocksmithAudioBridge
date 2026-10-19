@@ -88,6 +88,8 @@ namespace Audio::OutputTap
 	using ProxySinkFn = void(__cdecl*)(const void* interleaved, long frames, long channels, long asioSampleType, double sampleRate);
 	// Register a routing sink; returns false if the proxy driver is not loaded (no ASIO bridge in the chain).
 	bool AddProxySink(ProxySinkFn sink);
+	// Taps the game's output for GameToneLatency's ASIO mode once the proxy is loaded (true once done; retry until then).
+	bool InstallGameToneSink();
 	void RemoveProxySink(ProxySinkFn sink);
 	// Mute (redirect) or unmute the proxy's forward to the real ASIO device. Muting makes routing a true
 	// switch (the game's bound device falls silent) rather than an additive second output. No-op if the

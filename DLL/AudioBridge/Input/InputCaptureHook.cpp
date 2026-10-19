@@ -9,6 +9,7 @@
 #include "NoteByNote/Detection/RawPitchVerifier.hpp"
 #include "Recorder/DrySignalRecording.hpp"
 #include "AudioBridge/Devices/DeviceEnumeratorHook.hpp"
+#include "AudioBridge/Engine/GameToneLatency.hpp"
 #include <wrl/client.h>
 
 #include <algorithm>
@@ -942,8 +943,11 @@ namespace Audio::AsioHook
 				if (sampleFormat == SampleFormat::Unsupported) return;
 
 				{
-					// Stage meter 1: the real device's samples, before RS_ASIO and the game see them.
+					// Stage meter 1: the real device's samples, before RS_ASIO and the game see them. The same samples time the
+					// game tones in ASIO mode (GameToneLatency::AsioInput: picks against the game's output on the bridge's clock).
 					float peak = 0.0f;
+					static thread_local std::vector<float> latencyMono;
+					latencyMono.resize(static_cast<size_t>(frames));
 					for (long frame = 0; frame < frames; ++frame)
 					{
 						float value = 0.0f;
@@ -956,8 +960,10 @@ namespace Audio::AsioHook
 						default: break;
 						}
 						peak = std::max(peak, std::fabs(value));
+						latencyMono[static_cast<size_t>(frame)] = value;
 					}
 					stageProxyRaw.Note(peak);
+					if (sampleRate == 48000.0) GameToneLatency::AsioInput(latencyMono.data(), static_cast<uint32_t>(frames));
 				}
 				proxyInputRate.store(static_cast<uint32_t>(sampleRate), std::memory_order_release);
 				proxyInputSampleFormat.store(static_cast<int>(sampleFormat), std::memory_order_release);

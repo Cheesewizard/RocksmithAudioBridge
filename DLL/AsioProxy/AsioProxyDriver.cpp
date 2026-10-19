@@ -181,6 +181,21 @@ extern "C" __declspec(dllexport) int RSModsAsio_GetAmpLinkStatus(AmpLink::Status
 	return 1;
 }
 
+// The driver's own latency figures (getLatencies, in frames) and the stream's rate, cached each time buffers are
+// created (Real or Virtual) so the overlay's ASIO latency readout never calls into the driver from another thread.
+// 0 = no stream. Returns 1 when a stream is up and the figures are known.
+static std::atomic<long> g_latencyIn{ 0 }, g_latencyOut{ 0 };
+static std::atomic<int> g_latencyRate{ 0 };
+extern "C" __declspec(dllexport) int RSModsAsio_GetLatencies(long* inFrames, long* outFrames, int* sampleRate)
+{
+	const long in = g_latencyIn.load(), out = g_latencyOut.load();
+	const int rate = g_latencyRate.load();
+	if (inFrames) *inFrames = in;
+	if (outFrames) *outFrames = out;
+	if (sampleRate) *sampleRate = rate;
+	return rate > 0 && (in > 0 || out > 0) ? 1 : 0;
+}
+
 namespace
 {
 	bool AmpLinkHostEnabled()
@@ -885,7 +900,7 @@ public:
 		return 0;
 	}
 	ASIOError getChannelInfo(ASIOChannelInfo* info) override { if (m_mode.load() == OutputMode::Virtual && info && info->channel > 1 && ProbeRealBeforeBind()) { const ASIOError e = m_real->getChannelInfo(info); if (e == 0) info->type = ASIOSTInt32LSB; return e; } if (m_mode.load() == OutputMode::Virtual) { if (!info || info->channel < 0 || info->channel > 1) return -1; info->isActive = 1; info->channelGroup = 0; info->type = ASIOSTInt32LSB; strcpy_s(info->name, 32, info->isInput ? (info->channel == 0 ? "Virtual Capture Left" : "Virtual Capture Right") : (info->channel == 0 ? "Virtual Left" : "Virtual Right")); return 0; } if (!m_real) return -1; const ASIOError e = m_real->getChannelInfo(info); if (e == 0 && info) info->type = ASIOSTInt32LSB; return e; }
-	ASIOError disposeBuffers() override { std::lock_guard<std::mutex> transition(m_transitionMutex); ProxyLog("disposeBuffers: mode %s", m_mode.load() == OutputMode::Virtual ? "Virtual" : "Real"); if (m_mode.load() == OutputMode::Virtual) { StopVirtual(); m_virtualCable.Stop(); FreeVirtualBuffers(); } DisableRealCallbacksAndWait(); m_bufferInfos = nullptr; m_numChannels = 0; m_callbackSeen.store(false); if (s_active == this) s_active = nullptr; const ASIOError e = m_real ? m_real->disposeBuffers() : 0; FreeBridge(); return e; }
+	ASIOError disposeBuffers() override { std::lock_guard<std::mutex> transition(m_transitionMutex); ProxyLog("disposeBuffers: mode %s", m_mode.load() == OutputMode::Virtual ? "Virtual" : "Real"); if (m_mode.load() == OutputMode::Virtual) { StopVirtual(); m_virtualCable.Stop(); FreeVirtualBuffers(); } DisableRealCallbacksAndWait(); m_bufferInfos = nullptr; m_numChannels = 0; m_callbackSeen.store(false); if (s_active == this) s_active = nullptr; g_latencyRate.store(0); const ASIOError e = m_real ? m_real->disposeBuffers() : 0; FreeBridge(); return e; }
 	ASIOError controlPanel() override { return m_real ? m_real->controlPanel() : 0; }
 	ASIOError future(long selector, void* opt) override { return m_real ? m_real->future(selector, opt) : -1; }
 	ASIOError outputReady() override { return m_real ? m_real->outputReady() : 0; }
@@ -1390,7 +1405,18 @@ private:
 		g_trim.Configure(g_trimGain.load());
 		ConfigureGuard();
 		OpenAmpLink();
+		CacheLatencies();
 		s_active = this;
+	}
+
+	// RSModsAsio_GetLatencies: the figures as the host would get them, on the control thread that made the buffers.
+	void CacheLatencies()
+	{
+		long in = 0, out = 0;
+		if (getLatencies(&in, &out) != 0) in = out = 0;
+		g_latencyIn.store(in);
+		g_latencyOut.store(out);
+		g_latencyRate.store(static_cast<int>(m_sampleRate > 0.0 ? m_sampleRate : 48000.0));
 	}
 
 	void OpenAmpLink()
@@ -1533,6 +1559,7 @@ private:
 		// and a Virtual re-create at a larger size does not overrun the scratch sized for the last Real bind.
 		ConfigureGuard();
 		OpenAmpLink();
+		CacheLatencies();
 		s_active = this;
 		return 0;
 	}

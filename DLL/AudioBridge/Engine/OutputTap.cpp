@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "OutputTap.hpp"
+#include "GameToneLatency.hpp"
 #include "Recorder/GameAudioRecorder.hpp"
 #include <audioclient.h>
 #include <mmdeviceapi.h>
@@ -697,6 +698,37 @@ namespace Audio::OutputTap
 		if (auto get = reinterpret_cast<GetFn>(GetProcAddress(proxy, "RSModsAsio_GetOutputLevels"))) get(peak, rms, maxCh);
 	}
 	uint64_t ObservedFrames() { return g_observedFrames.load(std::memory_order_relaxed); }
+
+	namespace
+	{
+		// The game's output as the bridge taps it, for GameToneLatency's ASIO mode (picks timed against it).
+		void __cdecl GameToneSink(const void* data, long frames, long channels, long asioType, double sampleRate) noexcept
+		{
+			if (!data || frames <= 0 || channels <= 0 || sampleRate != 48000.0) return;
+			const int bytes = AsioSampleBytes(asioType);
+			if (bytes == 0) return;
+			static thread_local std::vector<float> stereo;
+			stereo.resize(static_cast<size_t>(frames) * 2);
+			const BYTE* base = reinterpret_cast<const BYTE*>(data);
+			for (long f = 0; f < frames; ++f)
+			{
+				const BYTE* fb = base + static_cast<size_t>(f) * channels * bytes;
+				const float left = AsioToFloat(fb, asioType);
+				stereo[static_cast<size_t>(f) * 2] = left;
+				stereo[static_cast<size_t>(f) * 2 + 1] = channels > 1 ? AsioToFloat(fb + bytes, asioType) : left;
+			}
+			GameToneLatency::AsioOutput(stereo.data(), static_cast<uint32_t>(frames));
+		}
+	}
+
+	bool InstallGameToneSink()
+	{
+		static std::atomic<bool> installed{ false };
+		if (installed.load()) return true;
+		if (!AddProxySink(&GameToneSink)) return false;
+		installed.store(true);
+		return true;
+	}
 
 	bool AddProxySink(ProxySinkFn sink)
 	{

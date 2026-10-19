@@ -2,6 +2,7 @@
 #include "GameToneLatency.hpp"
 #include "CableGamePeriod.hpp"
 #include "AudioBridgeEngine.hpp"
+#include "AudioBridge/Cable/CableInput.hpp"
 
 #include <algorithm>
 #include <array>
@@ -70,6 +71,17 @@ namespace Audio::GameToneLatency
 		std::atomic<float> g_fixedMs{ -1.0f };        // what the game adds beyond its two blocks (any block size)
 		std::atomic<bool> g_fixedMeasured{ false };   // false: still the built-in guess, never measured on this PC
 
+		// ASIO mode (RS_ASIO owns the input): both sides come from the bridge driver, stamped in the same buffer switch
+		// (AsioInput: Player 1's raw device channel; AsioOutput: the game's output as the bridge taps it). The lag is then
+		// the game's processing inside the PC (RS_ASIO's buffering, the game's blocks, Wwise, the amp chain); the driver's
+		// own input and output latency are reported by the driver and added by the readouts. Its fixed part is kept apart
+		// (GameToneFixedAsio1): RS_ASIO's buffering is not in the cable path. The tap is taken after the amp sim's return
+		// is mixed in, so the output only counts while the game's amp is the one heard (SetAsioGameAudible).
+		bool Asio() { return CableInput::IsAsioPath(); }
+		std::atomic<bool> g_asioAudible{ false };
+		std::atomic<uint32_t> g_asioBlockFrames{ 0 };
+		const wchar_t* FixedValueName() { return Asio() ? L"GameToneFixedAsio1" : L"GameToneFixed5"; }
+
 		// What the game adds splits into two blocks (one to gather the input, one to render the output) and a part that
 		// does not follow the block (Wwise, the amp chain, the hand-off to us). Only that part is remembered, so a value
 		// measured at one block size serves every other one, and a new block size never shows a blank readout.
@@ -82,6 +94,7 @@ namespace Audio::GameToneLatency
 
 		float BlockMs()
 		{
+			if (Asio() && g_asioBlockFrames.load()) return g_asioBlockFrames.load() * 1000.0f / 48000.0f;
 			const UINT32 running = SharedOutput::GameOutputBlockFrames();
 			return static_cast<float>(running ? running : CableGamePeriod::Frames()) * 1000.0f / 48000.0f;
 		}
@@ -91,7 +104,7 @@ namespace Audio::GameToneLatency
 			float fixed = g_fixedMs.load();
 			if (fixed >= 0.0f) return fixed;
 			DWORD tenths = 0, size = sizeof(tenths);
-			if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\RSMods\\AsioProxy", L"GameToneFixed5", RRF_RT_REG_DWORD, nullptr, &tenths, &size) == ERROR_SUCCESS
+			if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\RSMods\\AsioProxy", FixedValueName(), RRF_RT_REG_DWORD, nullptr, &tenths, &size) == ERROR_SUCCESS
 				&& tenths <= static_cast<DWORD>(kMaxFixedMs * 10.0f))
 			{
 				fixed = tenths / 10.0f;
@@ -156,14 +169,14 @@ namespace Audio::GameToneLatency
 				LOG_INFO("(GAME TONE LATENCY) pick answered after " << lag << " ms; output part " << g_outputMs.load()
 					<< " ms; median of " << g_resultCount << ": " << sorted[g_resultCount / 2] << " ms" << std::endl);
 				// Remember what the game adds beyond its two blocks (the measured whole minus the output part and the blocks).
-				const float output = g_outputMs.load();
+				const float output = Asio() ? 0.0f : g_outputMs.load();   // ASIO: the driver's output is added by the readouts
 				const float fixed = sorted[g_resultCount / 2] - output - 2.0f * BlockMs();
 				if (g_resultCount >= 3 && output >= 0.0f && fixed >= 0.0f && fixed <= kMaxFixedMs)
 				{
 					g_fixedMs.store(fixed);
 					g_fixedMeasured.store(true);
 					const DWORD tenths = static_cast<DWORD>(fixed * 10.0f + 0.5f);
-					RegSetKeyValueW(HKEY_CURRENT_USER, L"Software\\RSMods\\AsioProxy", L"GameToneFixed5", REG_DWORD, &tenths, sizeof(tenths));
+					RegSetKeyValueW(HKEY_CURRENT_USER, L"Software\\RSMods\\AsioProxy", FixedValueName(), REG_DWORD, &tenths, sizeof(tenths));
 				}
 			}
 		}
@@ -197,6 +210,26 @@ namespace Audio::GameToneLatency
 		g_output.Feed(stereo, frames, 2, heard);
 	}
 
+	void AsioInput(const float* mono, uint32_t frames) noexcept
+	{
+		if (!mono || !frames) return;
+		const UINT64 now = Now100ns();
+		std::lock_guard<std::mutex> lock(g_mutex);
+		g_input.Feed(mono, frames, 1, now - static_cast<UINT64>(frames - 1) * 10000000 / 48000);
+	}
+
+	void AsioOutput(const float* stereo, uint32_t frames) noexcept
+	{
+		if (!stereo || !frames) return;
+		g_asioBlockFrames.store(frames, std::memory_order_relaxed);
+		if (!g_asioAudible.load(std::memory_order_relaxed)) return;
+		const UINT64 now = Now100ns();
+		std::lock_guard<std::mutex> lock(g_mutex);
+		g_output.Feed(stereo, frames, 2, now);
+	}
+
+	void SetAsioGameAudible(bool audible) { g_asioAudible.store(audible, std::memory_order_relaxed); }
+
 	// Called by the overlay: the comparison runs there, once a second, never on an audio thread.
 	bool Valid()
 	{
@@ -212,6 +245,10 @@ namespace Audio::GameToneLatency
 	bool Available() { return Valid() || g_outputMs.load() >= 0.0f; }
 
 	bool Guessed() { return !Valid() && (Fixed(), !g_fixedMeasured.load()); }
+
+	float GameOwnMs(float blockMs) { return Fixed() + 2.0f * blockMs; }
+
+	bool GameOwnGuessed() { return (Fixed(), !g_fixedMeasured.load()); }
 
 	float CurrentMs() { return Valid() ? MedianMs() : Internal() + g_outputMs.load(); }
 }
