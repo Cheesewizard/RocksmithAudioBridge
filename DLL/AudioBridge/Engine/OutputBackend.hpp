@@ -88,6 +88,10 @@ namespace Audio::SharedOutput
 
 		void Launch()
 		{
+			// Every backend after the launch's first is the game rebuilding its output client (it does on each focus
+			// change). The one it replaces may still hold the device for a moment; see Open.
+			static std::atomic<unsigned> launches{ 0 };
+			if (launches.fetch_add(1) > 0) handOverUntil = GetTickCount64() + kHandOverMs;
 			std::thread([self = shared_from_this()]()
 			{
 				try { self->Run(); }
@@ -336,6 +340,10 @@ namespace Audio::SharedOutput
 			HRESULT result = OpenAttempt(endpoint, desired);
 			if (SUCCEEDED(result)) fallbackReported = false;
 			if (SUCCEEDED(result) || endpoint.empty() || !allowDefaultFallback) return result;
+			// A rebuilt client's output can still be held by the backend it replaces (an ASIO driver opens once per
+			// process, an exclusive device once per system). Falling back here adopted the Windows default for good, so
+			// an alt-tab undid the player's Switch output pick: keep retrying the pick (every second) for a short while.
+			if (GetTickCount64() < handOverUntil) return result;
 
 			// Retried every second while no output is available; report it once until an output opens again.
 			if (!fallbackReported)
@@ -1013,5 +1021,7 @@ namespace Audio::SharedOutput
 		ULONGLONG nextRetry = 0, lastPump = 0;
 		bool started = false;
 		bool fallbackReported = false;
+		static constexpr ULONGLONG kHandOverMs = 4000;
+		ULONGLONG handOverUntil = 0;   // Launch: no default fallback before this (a rebuilt client's hand-over)
 	};
 }
