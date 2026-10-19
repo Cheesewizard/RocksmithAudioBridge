@@ -1231,7 +1231,9 @@ namespace
 		}
 		// Forcing spans every phase of an owned hold; handing the transition phases back to native
 		// lets upcoming markers flip lit for several frames between holds. A practice-loop restart
-		// releases the hold, so the ownsNativeHold gate above restores native answers there. If
+		// releases the hold, so the ownsNativeHold gate above restores native answers there; the
+		// controller resets the marched window start on the wrap (RestoreNativeSectionStart), or
+		// those native answers would grey the whole new pass. If
 		// dense-advance rebuilds glitch under forcing, exclude the rebuild phases specifically.
 		const bool isSteadyHold =
 			state.gatePhase == ResearchProtocol::GatePhase::Holding;
