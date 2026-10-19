@@ -1,3 +1,35 @@
+# Rocksmith Audio Bridge 4.3 release notes
+
+This is a beta. The mod now runs on the **Learn & Play** edition of Rocksmith 2014 Remastered, ASIO interfaces whose driver is 64-bit only can be used, and the latency readout works in ASIO mode too. The Input page now has a tab for each player. To update, run the installer over your existing install; your `RSMods.ini` settings and key bindings are kept.
+
+## RS_ASIO
+ASIO users need [RS_ASIO](https://github.com/mdias/rs_asio/releases) 0.6.1 or newer; 0.7.2 or newer is recommended. The settings app's Audit tab checks this for you.
+
+## New
+
+### Learn & Play support
+The mod now supports the Learn & Play edition of Rocksmith 2014 Remastered (the December 2024 update) with every feature: the Audio Bridge, the Tone designer, Note by Note, Drop Pedal and Speaker Mode, Riff Repeater and the Real Tone Cable. The September build of the game keeps working as before.
+
+### 64-bit ASIO drivers (new in this beta, feedback welcome)
+Some interfaces only install a 64-bit ASIO driver, which 32-bit Rocksmith cannot load. The bridge now runs such a driver in a separate 64-bit program and plays the game through it.
+- **Switch output** on the Output page now lists these interfaces too, and labels every ASIO interface **ASIO 32-bit** or **ASIO 64-bit**. Pick a 64-bit one and the bridge opens it live, like any other.
+- A 64-bit driver plays one buffer later than a 32-bit one. When an interface has both builds, the bridge keeps using the 32-bit one.
+- This needs `RS_ASIO.ini` pointed at the Audio Bridge (the Audit tab's **Set up for me** does this). In Cable mode, the ASIO output for the game's sound still lists 32-bit drivers only.
+
+### Latency readout in ASIO mode (new in this beta, feedback welcome)
+The guitar to ear readout in the overlay header now works on an ASIO interface, not only on the Real Tone Cable. It shows your driver's reported input and output delay, plus the amp link's blocks while the Tone designer or an external amp sim plays (**in**, **out** and **total**). The game tones figure adds the game's own processing: timed from your picks when the game's amp is heard, otherwise estimated, and marked **guess** when it has nothing to go on. Treat it as a guide, not a calibrated measurement. General > Display > **Latency readout** shows a compact one on the game screen (it needs the Audio diagnostics HUD).
+
+## Changes
+- **Input page, one tab per player.** The Input page has a tab for Player 1, Player 2, and the mic while `RS_ASIO.ini` sends it through the bridge. Each tab shows what the input is (ASIO interface or Real Tone Cable), its level, that source's settings, then the processing. Picking each input's interface and channel moves here from the Output page, where an **Output pair** card remains for interfaces with more than one pair of outputs. The **Real Tone Cable for Player 2** switch moves here from the General page.
+- **Input processing for Player 1 only, for now.** Input gain, noise suppressor and compressor run on Player 1. Player 2's own processing is planned.
+- **"Not running this launch".** Input processing starts at game launch only when one of its switches is on. If you switch the first one on mid-session, the Processing card now says so: restart the game once to start it.
+- **The noise suppressor now also cleans the amp sim's input.** The Tone designer and external amp sims used to get the raw guitar signal, so a noisy interface reached a high-gain amp unfiltered. With the Input page's **Noise suppressor** on, the amp sim gets the same cleaned signal, on ASIO and on the Real Tone Cable alike. The game's own input is not changed.
+- **The hum filter is removed.** It thinned the tone and left a faint echo after each pick, worst on palm mutes and light notes on the high E, and removed little real hum. The noise suppressor already silences hum between notes. If you had it on, it now stays off, and its controls are gone from the overlay and the settings app.
+
+## Fixes
+- **Real Tone Cable routing works with `ExclusiveMode=0` in `Rocksmith.ini`.** The game could fail to open its output ("No audio output device"). The bridge now owns the real device in Cable mode, so that setting no longer matters there.
+- **Tone designer: Reload retries a plugin that failed to load in the background.** Reload used to be greyed out for such a plugin; it now loads it again.
+
 # Rocksmith Audio Bridge 4.2 release notes
 
 Two big additions: the **Tone designer**, which plays your guitar through your own VST3 plugins (amp sims, pedals, NAM captures) inside Rocksmith, and **live audio routing**, which lets you pick any interface and channel for each player while the game runs. Real Tone Cable players get both, plus much lower latency. To update, run the installer over your existing install; your `RSMods.ini` settings and key bindings are kept.
