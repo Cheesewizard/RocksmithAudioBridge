@@ -12,7 +12,7 @@ void Offsets::Initialize() {
 	ptr_disableTrueTuning_jmpBck = { {0x004DCCF8, baseHandle + 0x00DD978 } };			// Code | Bytes 33 c0 after the mask below (roughly 0x37 bytes away)
 	ptr_disableTrueTuning_forceTT = { {0x004DCCC1, baseHandle + 0x00DD941 } };			// Code | 83 7d 08 00 53 57 74 ? db 45 08 (db is the byte we want)
 	ptr_disableTrueTuningGate = { {0x004DCCBF, baseHandle + 0x00DD93F } };				// Code | 83 7d 08 00 53 57 74 ? db 45 08 (74 is the byte we want)
-	func_tuningReferenceBuilder = { {0x004DCCB0, baseHandle + 0x002AD930} };			// Code | Converts an arrangement cent offset to the note-detection reference, 440 * 2^(cents / 1200), and stamps it at [detection + 0x135C].
+	func_tuningReferenceBuilder = { {0x004DCCB0, baseHandle + 0x000DD930} };			// Code | Converts an arrangement cent offset to the note-detection reference, 440 * 2^(cents / 1200), and stamps it at [detection + 0x135C].
 	ptr_tuningText = { {0x00F5F62C, 0x00F6062C} };										// Memory | Copied from loft
 	ptr_guitarSpeak = { {0x00F5F57C, 0x00F6057C} };										// Memory | Copied from timer
 	func_ForceEnumeration = { {0x008c9cb0, baseHandle + 0x004C9310 } };					// Code | c6 86 dc 00 00 00 01 38 5e 05 (we want addresss of the start of the function)
@@ -55,8 +55,8 @@ void Offsets::Initialize() {
 	ptr_AdvancedDisplayCrash = { {0x0091FB73, baseHandle + 0x0051E343} };				// Code | 8a 51 04 57 8b 7e 0c 88 10 2b 01 33 d2 (first opcode)
 	ptr_AdvancedDisplayCrashJmpBck = { {0x0091FB7A, baseHandle + 0x0051E34A} };			// Code | 8a 51 04 57 8b 7e 0c 88 10 2b 01 33 d2 (fourth opcode)
 	ptr_PortAudioInCrash = { {0x00C43AF5, baseHandle + 0x00842C25} };		// Code | 8b 85 c8 fe ff ff 80 b8 df 1b 00 00 00 (two opcodes before this - cmp)
-	func_PortAudioOpenStream = { {0x00E70550, 0} };								// Code | PortAudio Pa_OpenStream entry used by SoundInputPortAudio.
-	func_PortAudioGetClosestFormat = { {0x00E71A70, 0} };						// Code | Bundled PortAudio WASAPI GetClosestFormat entry.
+	func_PortAudioOpenStream = { {0x00E70550, baseHandle + 0x00A6F580} };		// Code | PortAudio Pa_OpenStream entry used by SoundInputPortAudio. L&P: same body, ported.
+	func_PortAudioGetClosestFormat = { {0x00E71A70, baseHandle + 0x00A70AA0} };	// Code | Bundled PortAudio WASAPI GetClosestFormat entry. L&P: ported.
 	ptr_AdditionalAudioDevicesCrash = { { 0x00E7CF70, baseHandle + 0x00A7BFD0 } };   // Code 8b 8d c4 fd ff ff 8b 1c 81
 	ptr_ModdedPtrCrashFix = { {0x0001C640, 0x0001C8A0} };		// Code | 89 46 1c 89 46 2c 89 7e 28 (MOV for ForceSuccess)
 	ptr_IsWindowInFocus = { {0x1251A78, baseHandle + 0x00E52A78} };						// Static Memory | 00 00 00 80 01 00 00 00 04 00 00 00 01 00 00 00 (second variable)

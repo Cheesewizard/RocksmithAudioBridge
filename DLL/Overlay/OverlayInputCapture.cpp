@@ -12,7 +12,19 @@
 //
 // The game creates its DirectInput interface before Install() runs, so hooking DirectInput8Create is too late.
 // Install() instead makes a throwaway mouse device of its own and patches GetDeviceState / GetDeviceData in
-// dinput8.dll's device vtables, which every device object shares, so devices created earlier are covered too.
+// the device vtable it gets, which every device object of that class shares, so devices created earlier are covered too.
+//
+// Other programs hook the same interfaces. The Steam in-game overlay gives DirectInput devices its own vtable
+// (inside gameoverlayrenderer.dll), and on Learn & Play the Ubisoft wrapper also hooks ntdll!NtProtectVirtualMemory;
+// with both in the process, calling VirtualProtect on Steam's vtable jumped to an unmapped address
+// (a fault inside the hooked protect, called from PatchSlot). So the patching:
+//  - chains to whatever the slot holds when it is patched, never to an assumed dinput8 original;
+//  - writes the slot with a compare-and-swap, so a slot another hooker changed in between is never overwritten;
+//  - changes page protection only when the page is not already writable, and then through the direct syscall
+//    (MemUtil::HookedVirtualProtect), never the hooked VirtualProtect;
+//  - gives each patched vtable its own hook functions that know their originals, instead of looking the original up
+//    by the object's current vtable, so a hooker that later copies our pointer into its own table still chains;
+//  - on Shutdown restores a slot only if it still holds our hook; otherwise the hook stays and passes through.
 namespace OverlayInputCapture
 {
 	namespace
@@ -20,6 +32,7 @@ namespace OverlayInputCapture
 		constexpr size_t GET_CAPABILITIES_SLOT = 3;
 		constexpr size_t GET_DEVICE_STATE_SLOT = 9;
 		constexpr size_t GET_DEVICE_DATA_SLOT = 10;
+		constexpr int MAX_VTABLES = 2;   // the A and W device classes have their own vtables
 
 		using DirectInput8CreateFunction = HRESULT(WINAPI*)(HINSTANCE, DWORD, REFIID, LPVOID*, LPUNKNOWN);
 		using GetCapabilitiesFunction = HRESULT(STDMETHODCALLTYPE*)(IUnknown*, LPDIDEVCAPS);
@@ -33,15 +46,17 @@ namespace OverlayInputCapture
 		const GUID SYS_MOUSE_GUID =
 		{ 0x6f1d2b60, 0xd5a0, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00 } };
 
-		// One patched vtable per character set (the A and W device classes have their own vtables).
+		// The functions each patched vtable held before our hooks went in; the hooks chain to these.
 		struct PatchedVtable
 		{
 			void** vtable = nullptr;
 			GetCapabilitiesFunction getCapabilities = nullptr;
 			GetDeviceStateFunction getDeviceState = nullptr;
 			GetDeviceDataFunction getDeviceData = nullptr;
+			bool stateHooked = false;
+			bool dataHooked = false;
 		};
-		PatchedVtable patched[2];
+		PatchedVtable patched[MAX_VTABLES];
 		int patchedCount = 0;
 
 		std::atomic<bool> mouseCaptured{ false };
@@ -52,13 +67,7 @@ namespace OverlayInputCapture
 		std::atomic<bool> loggedCaptureEnabled{ false };
 		std::atomic<bool> loggedKeyboardRead{ false };
 
-		const PatchedVtable* Find(IUnknown* self)
-		{
-			void** vtable = *reinterpret_cast<void***>(self);
-			for (int i = 0; i < patchedCount; ++i)
-				if (patched[i].vtable == vtable) return &patched[i];
-			return nullptr;
-		}
+		void* ReadSlot(void** slot) { return *reinterpret_cast<void* volatile*>(slot); }
 
 		// The shared vtable also serves joysticks, so only mouse and keyboard devices are filtered.
 		// The device type is cached per device object (the game keeps a handful for its whole life).
@@ -83,13 +92,11 @@ namespace OverlayInputCapture
 				LOG_INFO("[OverlayInputCapture] Blocking Rocksmith's DirectInput keyboard while an overlay text field is active." << std::endl);
 		}
 
-		HRESULT STDMETHODCALLTYPE HookGetDeviceState(IUnknown* self, DWORD size, LPVOID data)
+		HRESULT FilterDeviceState(const PatchedVtable& table, IUnknown* self, DWORD size, LPVOID data)
 		{
-			const PatchedVtable* table = Find(self);
-			if (table == nullptr) return DIERR_GENERIC;   // cannot happen: only patched vtables point here
-			const HRESULT result = table->getDeviceState(self, size, data);
+			const HRESULT result = table.getDeviceState(self, size, data);
 			if (FAILED(result) || data == nullptr) return result;
-			if (keyboardCaptured.load(std::memory_order_relaxed) && size == 256 && IsKeyboard(self, *table))
+			if (keyboardCaptured.load(std::memory_order_relaxed) && size == 256 && IsKeyboard(self, table))
 			{
 				// Every key reads as up.
 				LogKeyboardBlocked();
@@ -98,7 +105,7 @@ namespace OverlayInputCapture
 			}
 			if (!mouseCaptured.load(std::memory_order_relaxed)) return result;
 			if (size != sizeof(DIMOUSESTATE) && size != sizeof(DIMOUSESTATE2)) return result;   // not a mouse format
-			if (!IsMouse(self, *table)) return result;
+			if (!IsMouse(self, table)) return result;
 			if (!loggedStateRead.exchange(true, std::memory_order_relaxed))
 				LOG_INFO("[OverlayInputCapture] Blocking Rocksmith's DirectInput mouse state under the overlay." << std::endl);
 			// No buttons, no wheel (otherwise scrolling a panel scrolls the song list behind it) and no movement.
@@ -108,20 +115,18 @@ namespace OverlayInputCapture
 			return result;
 		}
 
-		HRESULT STDMETHODCALLTYPE HookGetDeviceData(IUnknown* self, DWORD size, LPDIDEVICEOBJECTDATA data, LPDWORD itemCount, DWORD flags)
+		HRESULT FilterDeviceData(const PatchedVtable& table, IUnknown* self, DWORD size, LPDIDEVICEOBJECTDATA data, LPDWORD itemCount, DWORD flags)
 		{
-			const PatchedVtable* table = Find(self);
-			if (table == nullptr) return DIERR_GENERIC;
-			const HRESULT result = table->getDeviceData(self, size, data, itemCount, flags);
+			const HRESULT result = table.getDeviceData(self, size, data, itemCount, flags);
 			if (FAILED(result) || data == nullptr || itemCount == nullptr) return result;
-			if (keyboardCaptured.load(std::memory_order_relaxed) && IsKeyboard(self, *table))
+			if (keyboardCaptured.load(std::memory_order_relaxed) && IsKeyboard(self, table))
 			{
 				LogKeyboardBlocked();
 				*itemCount = 0;
 				return result;
 			}
 			if (!mouseCaptured.load(std::memory_order_relaxed)) return result;
-			if (!IsMouse(self, *table)) return result;
+			if (!IsMouse(self, table)) return result;
 			if (!loggedDataRead.exchange(true, std::memory_order_relaxed))
 				LOG_INFO("[OverlayInputCapture] Blocking Rocksmith's buffered DirectInput mouse events under the overlay." << std::endl);
 			// Every buffered mouse event (buttons, wheel, movement) is dropped, so a press and its release are
@@ -130,14 +135,76 @@ namespace OverlayInputCapture
 			return result;
 		}
 
-		bool PatchSlot(void** slot, void* hook)
+		template <int Index>
+		HRESULT STDMETHODCALLTYPE HookGetDeviceState(IUnknown* self, DWORD size, LPVOID data)
 		{
-			DWORD oldProtection = 0;
-			if (!VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &oldProtection)) return false;
-			*slot = hook;
-			DWORD unused = 0;
-			VirtualProtect(slot, sizeof(void*), oldProtection, &unused);
-			return true;
+			return FilterDeviceState(patched[Index], self, size, data);
+		}
+
+		template <int Index>
+		HRESULT STDMETHODCALLTYPE HookGetDeviceData(IUnknown* self, DWORD size, LPDIDEVICEOBJECTDATA data, LPDWORD itemCount, DWORD flags)
+		{
+			return FilterDeviceData(patched[Index], self, size, data, itemCount, flags);
+		}
+
+		void* const STATE_HOOKS[MAX_VTABLES] = { reinterpret_cast<void*>(&HookGetDeviceState<0>), reinterpret_cast<void*>(&HookGetDeviceState<1>) };
+		void* const DATA_HOOKS[MAX_VTABLES] = { reinterpret_cast<void*>(&HookGetDeviceData<0>), reinterpret_cast<void*>(&HookGetDeviceData<1>) };
+
+		enum class SwapResult { Swapped, SlotChanged, Failed };
+
+		// Writes `replacement` into the slot only while it still holds `expected`.
+		SwapResult SwapSlot(void** slot, void* expected, void* replacement)
+		{
+			MEMORY_BASIC_INFORMATION page{};
+			if (!NT_SUCCESS(MemUtil::HookedQueryVirtualMemory(slot, &page, sizeof(page))) || page.State != MEM_COMMIT) return SwapResult::Failed;
+			const DWORD protection = page.Protect & 0xFF;
+			const bool writable = (page.Protect & PAGE_GUARD) == 0 && (protection == PAGE_READWRITE || protection == PAGE_EXECUTE_READWRITE);
+			ULONG previous = 0;
+			if (!writable)
+			{
+				// Keep the execute bit if the page has one: other code may share it.
+				const bool executable = protection == PAGE_EXECUTE || protection == PAGE_EXECUTE_READ || protection == PAGE_EXECUTE_WRITECOPY;
+				if (!NT_SUCCESS(MemUtil::HookedVirtualProtect(slot, sizeof(void*), executable ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE, previous)))
+					return SwapResult::Failed;
+			}
+			const bool swapped = InterlockedCompareExchangePointer(slot, replacement, expected) == expected;
+			if (!writable)
+			{
+				ULONG unused = 0;
+				MemUtil::HookedVirtualProtect(slot, sizeof(void*), previous, unused);
+			}
+			return swapped ? SwapResult::Swapped : SwapResult::SlotChanged;
+		}
+
+		// Records what the slot holds now as the function to chain to, then swaps in the hook. A slot that changes
+		// between the read and the swap (another hooker patching at the same time) is re-read and tried again.
+		template <typename Function>
+		bool HookSlot(void** slot, void* hook, Function& original)
+		{
+			for (int attempt = 0; attempt < 4; ++attempt)
+			{
+				void* current = ReadSlot(slot);
+				if (current == nullptr || current == hook) return false;
+				original = reinterpret_cast<Function>(current);
+				const SwapResult result = SwapSlot(slot, current, hook);
+				if (result == SwapResult::Swapped) return true;
+				if (result == SwapResult::Failed) return false;
+			}
+			return false;
+		}
+
+		std::string OwnerModule(const void* address)
+		{
+			HMODULE module = nullptr;
+			wchar_t path[MAX_PATH] = {};
+			if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, static_cast<LPCWSTR>(address), &module)
+				|| GetModuleFileNameW(module, path, MAX_PATH) == 0)
+				return "no module";
+			const wchar_t* name = wcsrchr(path, L'\\');
+			name = name ? name + 1 : path;
+			std::string narrow;
+			for (; *name; ++name) narrow += static_cast<char>(*name < 0x80 ? *name : '?');
+			return narrow;
 		}
 
 		// Creates a throwaway system-mouse device for one character set and patches its class vtable.
@@ -155,23 +222,37 @@ namespace OverlayInputCapture
 				void** vtable = *reinterpret_cast<void***>(device);
 				bool known = false;
 				for (int i = 0; i < patchedCount; ++i) known |= patched[i].vtable == vtable;
-				if (!known && patchedCount < 2)
+				if (!known && patchedCount < MAX_VTABLES)
 				{
-					PatchedVtable entry;
+					const int index = patchedCount;
+					PatchedVtable& entry = patched[index];
 					entry.vtable = vtable;
-					entry.getCapabilities = reinterpret_cast<GetCapabilitiesFunction>(vtable[GET_CAPABILITIES_SLOT]);
-					entry.getDeviceState = reinterpret_cast<GetDeviceStateFunction>(vtable[GET_DEVICE_STATE_SLOT]);
-					entry.getDeviceData = reinterpret_cast<GetDeviceDataFunction>(vtable[GET_DEVICE_DATA_SLOT]);
-					// Record first so a game thread that lands in a hook mid-patch always finds its originals.
-					patched[patchedCount++] = entry;
-					if (!PatchSlot(&vtable[GET_DEVICE_STATE_SLOT], reinterpret_cast<void*>(&HookGetDeviceState))
-						|| !PatchSlot(&vtable[GET_DEVICE_DATA_SLOT], reinterpret_cast<void*>(&HookGetDeviceData)))
-						LOG_ERROR("[OverlayInputCapture] Could not patch the DirectInput mouse vtable." << std::endl);
+					entry.getCapabilities = reinterpret_cast<GetCapabilitiesFunction>(ReadSlot(&vtable[GET_CAPABILITIES_SLOT]));
+					// Each original is recorded before its hook goes in, so a game thread that lands in a hook always finds it.
+					entry.stateHooked = HookSlot(&vtable[GET_DEVICE_STATE_SLOT], STATE_HOOKS[index], entry.getDeviceState);
+					entry.dataHooked = HookSlot(&vtable[GET_DEVICE_DATA_SLOT], DATA_HOOKS[index], entry.getDeviceData);
+					// Where the vtable and the chained functions live shows which other hookers are in the chain.
+					LOG_INFO("[OverlayInputCapture] DirectInput device vtable is in " << OwnerModule(vtable)
+						<< "; GetDeviceState chains to " << OwnerModule(reinterpret_cast<void*>(entry.getDeviceState))
+						<< ", GetDeviceData to " << OwnerModule(reinterpret_cast<void*>(entry.getDeviceData)) << "." << std::endl);
+					if (!entry.stateHooked || !entry.dataHooked)
+						LOG_ERROR("[OverlayInputCapture] Could not patch every DirectInput device vtable slot (GetDeviceState "
+							<< (entry.stateHooked ? "ok" : "failed") << ", GetDeviceData " << (entry.dataHooked ? "ok" : "failed") << ")." << std::endl);
+					if (entry.stateHooked || entry.dataHooked) ++patchedCount;
+					else entry = PatchedVtable{};
 				}
 				device->Release();
 			}
 			else LOG_ERROR("[OverlayInputCapture] Could not create a DirectInput mouse device to find its vtable." << std::endl);
 			directInput->Release();
+		}
+
+		// Puts the original back only if the slot still holds our hook; a slot someone else has changed since keeps
+		// their pointer (which may chain to our hook, so the hook stays in place and passes everything through).
+		void UnhookSlot(void** slot, void* hook, void* original, const char* name)
+		{
+			if (SwapSlot(slot, hook, original) != SwapResult::Swapped)
+				LOG_INFO("[OverlayInputCapture] Left the DirectInput " << name << " slot alone: another hook replaced ours." << std::endl);
 		}
 	}
 
@@ -210,11 +291,13 @@ namespace OverlayInputCapture
 	{
 		mouseCaptured.store(false, std::memory_order_relaxed);
 		keyboardCaptured.store(false, std::memory_order_relaxed);
-		// Put the original methods back; the table entries stay so a call already inside a hook still resolves.
+		// The table entries stay so a call already inside a hook still finds its original.
 		for (int i = 0; i < patchedCount; ++i)
 		{
-			PatchSlot(&patched[i].vtable[GET_DEVICE_STATE_SLOT], reinterpret_cast<void*>(patched[i].getDeviceState));
-			PatchSlot(&patched[i].vtable[GET_DEVICE_DATA_SLOT], reinterpret_cast<void*>(patched[i].getDeviceData));
+			if (patched[i].stateHooked)
+				UnhookSlot(&patched[i].vtable[GET_DEVICE_STATE_SLOT], STATE_HOOKS[i], reinterpret_cast<void*>(patched[i].getDeviceState), "GetDeviceState");
+			if (patched[i].dataHooked)
+				UnhookSlot(&patched[i].vtable[GET_DEVICE_DATA_SLOT], DATA_HOOKS[i], reinterpret_cast<void*>(patched[i].getDeviceData), "GetDeviceData");
 		}
 		installed.store(false, std::memory_order_release);
 	}

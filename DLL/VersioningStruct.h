@@ -35,6 +35,9 @@ private:
 // unknown exe (after a message box), so code patching fixed addresses of one build must ask this instead.
 bool IsExactGameBuild(VersionType type);
 
+// GameAddress / GameRva: fixed addresses that exist in both supported builds.
+#include "GameAddress.hpp"
+
 template <typename T> VersioningStruct<T>::VersioningStruct()
 	: myVersions(std::vector<T>(static_cast<int>(VersionType::Count), 0))
 {

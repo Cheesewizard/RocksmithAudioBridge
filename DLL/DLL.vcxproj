@@ -454,6 +454,7 @@
     <ClInclude Include="Tuning.h" />
     <ClInclude Include="Twitch.hpp" />
     <ClInclude Include="VersioningStruct.h" />
+    <ClInclude Include="GameAddress.hpp" />
     <ClInclude Include="VoiceOver.h" />
     <ClInclude Include="Wwise\Logging.hpp" />
     <ClInclude Include="Wwise\MemoryMgr.hpp" />

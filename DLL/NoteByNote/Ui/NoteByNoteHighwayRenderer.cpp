@@ -10,37 +10,40 @@
 #include <iomanip>
 #include <sstream>
 #include <cmath>
+#include "GameAddress.hpp"
 
 // Non-destructive presentation focus for Note by Note. Rocksmith's presentability
 // predicate is deliberately left untouched because its false path also retires scoring
 // records. Visual filtering happens only after native state updates have completed.
 namespace
 {
-	constexpr uintptr_t NATIVE_NOTEWAY_SETUP = 0x7E22F0;
-	constexpr uintptr_t NATIVE_DRAW_DESCRIPTORS = 0x7A4B50;
-	constexpr uintptr_t NATIVE_DRAW_GEOMETRY = 0x7A52C0;
-	constexpr uintptr_t NATIVE_DRAW_SUBMIT = 0x7A6160;
+	const uintptr_t NATIVE_NOTEWAY_SETUP = GameAddress(0x7E22F0, 0x003E2CC0);
+	const uintptr_t NATIVE_DRAW_DESCRIPTORS = GameAddress(0x7A4B50, 0x003A5A60);
+	const uintptr_t NATIVE_DRAW_GEOMETRY = GameAddress(0x7A52C0, 0x003A61D0);
+	const uintptr_t NATIVE_DRAW_SUBMIT = GameAddress(0x7A6160, 0x003A7070);
 	// The neck diagram grid write. Reached from eight call sites inside 0x7A5D50, two of
 	// which are downstream of a path that skips the presentability predicate entirely.
-	constexpr uintptr_t NATIVE_FRETBOARD_GRID_WRITE = 0x7AA140;
+	const uintptr_t NATIVE_FRETBOARD_GRID_WRITE = GameAddress(0x7AA140, 0x003AB060);
 	// Consumes the finished per-frame fretboard buffer, which arrives in EDI. Plain RET, no
 	// stack arguments. This is the only point where the completed state exists: render
 	// preparation 0x7E4870 initialises the buffer at 0x7AA0B0, fills it by looping the owner
 	// note vector through 0x7A5D50, and then calls this. Reading the buffer anywhere else in
 	// the frame returns the previous frame's residue.
-	constexpr uintptr_t NATIVE_FRETBOARD_BUFFER_CONSUME = 0x7AA1B0;
+	const uintptr_t NATIVE_FRETBOARD_BUFFER_CONSUME = GameAddress(0x7AA1B0, 0x003AB0D0);
 	// The sub-element placement setups of the note-visual class (vtable 0x11CF1D8): run-once
 	// state machines, one per quad type, that anchor a quad on the neck. The note visual
 	// (sub-element +0x8) carries its string at +0xC and fret at +0xD as bytes. All share the
 	// __fastcall(subElement) shape. Sites 0x7A8CE0/0x7A8E90 place the highway visuals, so the
 	// runtime site mask decides which sites target mode may act on.
-	constexpr uintptr_t NECK_PLACEMENT_SITES[] =
-		{ 0x7A8B10, 0x7A8CE0, 0x7A8E90, 0x7A90B0, 0x7A9290, 0x7A93C0, 0x7A94F0 };
+	const uintptr_t NECK_PLACEMENT_SITES[] =
+		{ GameAddress(0x7A8B10, 0x003A9920), GameAddress(0x7A8CE0, 0x003A9AF0), GameAddress(0x7A8E90, 0x003A9CB0),
+		  GameAddress(0x7A90B0, 0x003A9ED0), GameAddress(0x7A9290, 0x003AA0A0), GameAddress(0x7A93C0, 0x003AA1D0),
+		  GameAddress(0x7A94F0, 0x003AA300) };
 	constexpr size_t NECK_PLACEMENT_SITE_COUNT =
 		sizeof(NECK_PLACEMENT_SITES) / sizeof(NECK_PLACEMENT_SITES[0]);
 	// Slot +0x5C, __thiscall(this, byte): the marker sub-element's deleting destructor, hooked
 	// to evict the remembered stale-marker visual.
-	constexpr uintptr_t NECK_VISIBILITY_SITE = 0x7A9220;
+	const uintptr_t NECK_VISIBILITY_SITE = GameAddress(0x7A9220, 0x003AA030);
 	// FUN_0079D070 is the per-frame marker updater: it tests whether the current time is inside
 	// the note's active window via FUN_007E9ED0(visual+0x38) and, on change, rebroadcasts the
 	// lit/dim bank to the marker quads. With the transport frozen, upcoming notes' windows
@@ -48,8 +51,8 @@ namespace
 	// detour forces the "outside window" answer for non-whitelisted visuals while a hold is
 	// owned. Relocation (above) is diagnostics only, since visual position is the highway
 	// position.
-	constexpr uintptr_t NECK_MARKER_UPDATER = 0x79D070;
-	constexpr uintptr_t NECK_WINDOW_CONDITION = 0x7E9ED0;
+	const uintptr_t NECK_MARKER_UPDATER = GameAddress(0x79D070, 0x0039DF80);
+	const uintptr_t NECK_WINDOW_CONDITION = GameAddress(0x7E9ED0, 0x003EA8C0);
 	// 16-bit dimension counts the consumer's own nested loop bounds against, read rather than
 	// assumed to be six by twenty-six.
 	constexpr uintptr_t FRETBOARD_BUFFER_STRING_COUNT = 0xD00;
@@ -1057,7 +1060,7 @@ namespace
 	// is not enough: it is a probe-requested hook, so a probe reload opens a gap where a dying
 	// visual is not evicted and a dim could land on an unrelated element.
 	uintptr_t staleCandidateVtable = 0;
-	constexpr uintptr_t UPDATER_VISUAL_VTABLE = 0x11CF1D8;
+	const uintptr_t UPDATER_VISUAL_VTABLE = GameAddress(0x11CF1D8, 0x00DD0A00);
 	volatile long syntheticDimActive = 0;
 	volatile long staleDimLogBudget = 20;
 
@@ -1205,7 +1208,7 @@ namespace
 	// The per-frame marker updater's return site (the caller at 0x79D092 that keeps
 	// the note visual in EDX). Queries returning there drive the 3D fretboard string
 	// markers; every other return site is one of the four rebuild initializers.
-	constexpr uint32_t WINDOW_UPDATER_RETURN = 0x0079D092;
+	const uint32_t WINDOW_UPDATER_RETURN = static_cast<uint32_t>(GameAddress(0x0079D092, 0x0039DFA2));
 
 	uint16_t __cdecl WindowConditionHelper(void* windowStruct, float time, uint32_t native,
 		void* edxVisual, uint32_t returnAddress)
@@ -1629,7 +1632,7 @@ bool NoteByNoteHighwayRenderer::InstallPresentationGate()
 {
 	if (isGateInstalled) return true;
 
-	originalNotewaySetup = reinterpret_cast<NativeNotewaySetup>(DetourFunction(
+	originalNotewaySetup = reinterpret_cast<NativeNotewaySetup>(MemUtil::DetourFunction(
 		reinterpret_cast<PBYTE>(NATIVE_NOTEWAY_SETUP),
 		reinterpret_cast<PBYTE>(&NotewaySetupDetour)));
 	if (originalNotewaySetup == nullptr)
@@ -1639,7 +1642,7 @@ bool NoteByNoteHighwayRenderer::InstallPresentationGate()
 		return false;
 	}
 
-	originalDrawDescriptors = reinterpret_cast<NativeDrawDescriptors>(DetourFunction(
+	originalDrawDescriptors = reinterpret_cast<NativeDrawDescriptors>(MemUtil::DetourFunction(
 		reinterpret_cast<PBYTE>(NATIVE_DRAW_DESCRIPTORS),
 		reinterpret_cast<PBYTE>(&DrawDescriptorsDetour)));
 	if (originalDrawDescriptors == nullptr)
@@ -1649,10 +1652,10 @@ bool NoteByNoteHighwayRenderer::InstallPresentationGate()
 		return false;
 	}
 
-	originalDrawGeometry = reinterpret_cast<NativeDrawGeometry>(DetourFunction(
+	originalDrawGeometry = reinterpret_cast<NativeDrawGeometry>(MemUtil::DetourFunction(
 		reinterpret_cast<PBYTE>(NATIVE_DRAW_GEOMETRY),
 		reinterpret_cast<PBYTE>(&DrawGeometryDetour)));
-	originalDrawSubmit = reinterpret_cast<NativeDrawSubmit>(DetourFunction(
+	originalDrawSubmit = reinterpret_cast<NativeDrawSubmit>(MemUtil::DetourFunction(
 		reinterpret_cast<PBYTE>(NATIVE_DRAW_SUBMIT),
 		reinterpret_cast<PBYTE>(&DrawSubmitDetour)));
 	if (originalDrawGeometry == nullptr || originalDrawSubmit == nullptr)
@@ -1666,7 +1669,7 @@ bool NoteByNoteHighwayRenderer::InstallPresentationGate()
 
 	// Where the finished per-frame fretboard buffer is consumed, which is the only valid point
 	// to read it.
-	originalBufferConsume = reinterpret_cast<NativeBufferConsume>(DetourFunction(
+	originalBufferConsume = reinterpret_cast<NativeBufferConsume>(MemUtil::DetourFunction(
 		reinterpret_cast<PBYTE>(NATIVE_FRETBOARD_BUFFER_CONSUME),
 		reinterpret_cast<PBYTE>(&BufferConsumeDetour)));
 	if (originalBufferConsume == nullptr)
@@ -1677,7 +1680,7 @@ bool NoteByNoteHighwayRenderer::InstallPresentationGate()
 	}
 
 	// Below both paths into the neck diagram, including the one that skips the predicate.
-	originalGridWrite = reinterpret_cast<NativeGridWrite>(DetourFunction(
+	originalGridWrite = reinterpret_cast<NativeGridWrite>(MemUtil::DetourFunction(
 		reinterpret_cast<PBYTE>(NATIVE_FRETBOARD_GRID_WRITE),
 		reinterpret_cast<PBYTE>(&GridWriteDetour)));
 	if (originalGridWrite == nullptr)
@@ -1690,7 +1693,7 @@ bool NoteByNoteHighwayRenderer::InstallPresentationGate()
 
 	for (size_t site = 0; site < NECK_PLACEMENT_SITE_COUNT; ++site)
 	{
-		originalNeckPlacements[site] = reinterpret_cast<NativeNeckPlacement>(DetourFunction(
+		originalNeckPlacements[site] = reinterpret_cast<NativeNeckPlacement>(MemUtil::DetourFunction(
 			reinterpret_cast<PBYTE>(NECK_PLACEMENT_SITES[site]),
 			reinterpret_cast<PBYTE>(NECK_PLACEMENT_DETOURS[site])));
 		if (originalNeckPlacements[site] == nullptr)
@@ -1701,7 +1704,7 @@ bool NoteByNoteHighwayRenderer::InstallPresentationGate()
 			return false;
 		}
 	}
-	originalNeckVisibility = reinterpret_cast<NativeNeckVisibility>(DetourFunction(
+	originalNeckVisibility = reinterpret_cast<NativeNeckVisibility>(MemUtil::DetourFunction(
 		reinterpret_cast<PBYTE>(NECK_VISIBILITY_SITE),
 		reinterpret_cast<PBYTE>(&NeckVisibilityDetour)));
 	if (originalNeckVisibility == nullptr)
@@ -1715,7 +1718,7 @@ bool NoteByNoteHighwayRenderer::InstallPresentationGate()
 	// side-channel) crashes on song load when hooked. Only the condition is hooked; its
 	// __thiscall(this, float) contract is verified, and notes are identified by onset time.
 	(void)&originalMarkerUpdater;
-	originalWindowCondition = reinterpret_cast<NativeWindowCondition>(DetourFunction(
+	originalWindowCondition = reinterpret_cast<NativeWindowCondition>(MemUtil::DetourFunction(
 		reinterpret_cast<PBYTE>(NECK_WINDOW_CONDITION),
 		reinterpret_cast<PBYTE>(&WindowConditionNakedDetour)));
 	if (originalWindowCondition == nullptr)

@@ -3,13 +3,14 @@
 
 #include <cstdint>
 #include <cstring>
+#include "GameAddress.hpp"
 
 namespace
 {
 	// ShowNotification (VA 0x7524A0 in the September 2022 Remastered build), as an RVA so a relocated exe (Mandatory
 	// ASLR) still finds it. Custom convention: EDX = notification type, ESI = out id string, caller cleans 0x30 bytes;
 	// [esp+0x04] context, [esp+0x08] title, [esp+0x0C] body (const game string*), [esp+0x10] duration.
-	constexpr uintptr_t SHOW_NOTIFICATION_RVA = 0x003524A0;
+	const uintptr_t SHOW_NOTIFICATION_RVA = GameRva(0x003524A0, 0x00352F80);
 	constexpr uint32_t TYPE_TONE_CHANGE = 7;
 	const byte PROLOGUE[] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x38 };
 	// Unique body bytes 0x10 in, so a different function that happens to start the same way is not hooked.
@@ -39,11 +40,11 @@ namespace
 	// (GamePlaysongLAS+0x500, read by the readout producer at 0x7E8040); setting it brings the native readout up, and the detour
 	// above names our tone in it. The song object is reached through the per-frame tone component, captured by a
 	// one-instruction detour on its Update (component+0x0C = song object).
-	constexpr uintptr_t TONES_UPDATE_RVA = 0x000649E0;          // GameComponentTones::Update, VA 0x4649E0
+	const uintptr_t TONES_UPDATE_RVA = GameRva(0x000649E0, 0x00064E50);       // GameComponentTones::Update, VA 0x4649E0
 	const byte TONES_UPDATE_PROLOGUE[] = { 0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF8, 0x81, 0xEC, 0x94, 0x00, 0x00, 0x00 };
 	const byte TONES_UPDATE_OWNER_READ[] = { 0x8B, 0x71, 0x0C };   // MOV ESI,[ECX+0xC] at +0x22
-	constexpr uintptr_t TONES_COMPONENT_VTABLE_RVA = 0x00D9FF9C; // GameComponentTones vtable, VA 0x119FF9C
-	constexpr uintptr_t PLAYSONG_VTABLE_RVA = 0x00DD1430;        // GamePlaysongLAS vtable, VA 0x11D1430
+	const uintptr_t TONES_COMPONENT_VTABLE_RVA = GameRva(0x00D9FF9C, 0x00DA17AC); // GameComponentTones vtable, VA 0x119FF9C
+	const uintptr_t PLAYSONG_VTABLE_RVA = GameRva(0x00DD1430, 0x00DD2C60);     // GamePlaysongLAS vtable, VA 0x11D1430
 	constexpr uintptr_t COMPONENT_OWNER = 0x0C;
 	constexpr uintptr_t READOUT_COUNTDOWN = 0x500;                // the game arms 0.5 s; ShowNow sets 0.05 s so the readout lands with the switch
 	constexpr uintptr_t SONG_CLOCK = 0x3B4;                       // float seconds into the song
@@ -177,7 +178,7 @@ void ToneSwitchPopup::Initialize()
 	{
 		const uintptr_t update = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)) + TONES_UPDATE_RVA;
 		if (MatchesBytes(update, TONES_UPDATE_PROLOGUE, sizeof(TONES_UPDATE_PROLOGUE)) && MatchesBytes(update + 0x22, TONES_UPDATE_OWNER_READ, sizeof(TONES_UPDATE_OWNER_READ)))
-			g_originalTonesUpdate = DetourFunction(reinterpret_cast<byte*>(update), reinterpret_cast<byte*>(&TonesUpdateDetour));
+			g_originalTonesUpdate = MemUtil::DetourFunction(reinterpret_cast<byte*>(update), reinterpret_cast<byte*>(&TonesUpdateDetour));
 		if (!g_originalTonesUpdate)
 			LOG_WARNING("(TONE POPUP) The game's tone component does not match the expected build; the readout cannot be shown on demand."
 				<< " Found " << MemUtil::DescribeCodeBytes(update, sizeof(TONES_UPDATE_PROLOGUE)) << "." << std::endl);
@@ -190,7 +191,7 @@ void ToneSwitchPopup::Initialize()
 			<< " the game's own text. Found " << MemUtil::DescribeCodeBytes(target, sizeof(PROLOGUE)) << "." << std::endl);
 		return;
 	}
-	g_original = DetourFunction(reinterpret_cast<byte*>(target), reinterpret_cast<byte*>(&ShowNotificationDetour));
+	g_original = MemUtil::DetourFunction(reinterpret_cast<byte*>(target), reinterpret_cast<byte*>(&ShowNotificationDetour));
 	if (!g_original)
 	{
 		LOG_ERROR("(TONE POPUP) Could not hook the game's notification function." << std::endl);

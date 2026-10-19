@@ -11,16 +11,23 @@ namespace RS2014_Mod_Installer
         public GUI()
         {
             InitializeComponent();
+            AddLocalOptions();
             RefreshMode();
         }
+
+        // Developer-only additions compiled from an optional local file that is not part of the repository. Without
+        // it this partial method has no body and the compiler removes the call.
+        partial void AddLocalOptions();
+        partial void OnFolderRefreshed(string rsPath);
 
         // Install, or Reinstall / Repair plus Uninstall when Rocksmith Audio Bridge is already in the game folder.
         private void RefreshMode()
         {
-            string rsPath = RSMods.Util.GenUtil.GetRSDirectory();
+            string rsPath = WhereIsRocksmith();
             bool installed = Uninstaller.IsInstalled(rsPath);
             UseModsButton.Text = installed ? "Reinstall / Repair" : "Install";
             UninstallButton.Visible = installed;
+            OnFolderRefreshed(rsPath);
         }
 
         private static bool IsGameRunning() => Process.GetProcessesByName("Rocksmith2014").Length != 0;

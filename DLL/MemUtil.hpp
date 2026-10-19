@@ -10,6 +10,12 @@ namespace MemUtil {
 	bool PlaceHook(VersioningStruct<uintptr_t>& hookSpot, void* ourFunct, int len, bool addBaseHandle = false);
 	bool PlaceHook(void* hookSpot, void* ourFunct, int len);
 	PBYTE TrampHook(PBYTE src, PBYTE dst, unsigned int len);
+	// Detours 1.5 DetourFunction, with a fallback for the Learn & Play executable: its DRM wrapper hooks
+	// NtProtectVirtualMemory and refuses protection changes on the game's own code, so Detours (which calls
+	// VirtualProtect) fails there. The fallback builds the same trampoline with Detours' instruction copier and
+	// changes protection through the direct syscall that PatchAdr and PlaceHook already use. Returns the
+	// trampoline (call it to run the original), or nullptr.
+	PBYTE DetourFunction(PBYTE target, PBYTE detour);
 	bool IsBadReadPtr(void* pointer);
 	uintptr_t FindDMAAddy(uintptr_t ptr, const std::vector<unsigned int>& offsets, bool safe = false);
 	uintptr_t FindDMAAddyGuarded(uintptr_t ptr, const std::vector<unsigned int>& offsets, bool checkLinks = true);

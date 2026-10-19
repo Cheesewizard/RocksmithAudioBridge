@@ -6,11 +6,12 @@
 
 #include <cstdint>
 #include <cstring>
+#include "GameAddress.hpp"
 
 namespace
 {
-	constexpr uintptr_t LOC_RESOLVER = 0x00832530;
-	constexpr uintptr_t STRING_ASSIGN = 0x004079D0;
+	const uintptr_t LOC_RESOLVER = GameAddress(0x00832530, 0x00432800);
+	const uintptr_t STRING_ASSIGN = GameAddress(0x004079D0, 0x00007920);
 	constexpr uintptr_t CTX_LOC_ID_OFFSET = 0x2C;
 	constexpr uint32_t MISSED_LOC_ID = 35863;
 	const char NBN_LABEL[] = "NOTE BY NOTE";
@@ -109,7 +110,7 @@ void NoteByNoteHudLabel::Initialize()
 		return;
 	}
 
-	originalResolve = reinterpret_cast<ResolveFn>(DetourFunction(
+	originalResolve = reinterpret_cast<ResolveFn>(MemUtil::DetourFunction(
 		reinterpret_cast<byte*>(LOC_RESOLVER),
 		reinterpret_cast<byte*>(ResolveDetour)));
 	if (originalResolve == nullptr)
