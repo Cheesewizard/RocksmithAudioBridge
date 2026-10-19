@@ -166,6 +166,12 @@ extern "C" __declspec(dllexport) void RSModsAsio_SetAmpLinkPitch(int semitones)
 {
 	g_ampLink.SetPitchSemitones(semitones);
 }
+// The Input page's noise suppressor threshold (linear, 0 = off) for the amp sim's input (AmpFeedConditioner.hpp).
+// ExternalAmp.cpp sends it every tick.
+extern "C" __declspec(dllexport) void RSModsAsio_ConfigureAmpFeed(float gateThreshold)
+{
+	g_ampLink.ConfigureConditioner(gateThreshold);
+}
 // Fills `status` (sizeof(AmpLink::Status) bytes, checked against `size`). Returns 1 when filled.
 extern "C" __declspec(dllexport) int RSModsAsio_GetAmpLinkStatus(AmpLink::Status* status, int size)
 {

@@ -318,7 +318,6 @@
     <ClInclude Include="Shared\ShellOpenAsync.hpp" />
     <ClInclude Include="Recorder\GameAudioRecorder.hpp" />
     <ClInclude Include="Recorder\DrySignalRecording.hpp" />
-    <ClInclude Include="AudioBridge\Input\HumRemover.hpp" />
     <ClInclude Include="NoteByNote\Detection\HfcOnsetDetector.hpp" />
     <ClInclude Include="Recorder\AudioPacketQueue.hpp" />
     <ClInclude Include="AudioBridge\Engine\AudioControl.hpp" />

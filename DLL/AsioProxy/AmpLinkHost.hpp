@@ -8,6 +8,8 @@
 #include "AsioInterface.h"
 #include <atomic>
 
+namespace Audio { class AmpFeedConditioner; }
+
 namespace AmpLink
 {
 	class Host
@@ -28,6 +30,9 @@ namespace AmpLink
 		void SetLatencyBlocks(int blocks);
 		// The Drop Pedal's input shift in semitones, passed to the guest through the shared block. Clamped to +-24.
 		void SetPitchSemitones(int semitones);
+		// The Input page's noise suppressor for the amp sim's input (AmpFeedConditioner.hpp): gateThreshold linear,
+		// 0 = off. Applied in Publish to the copy the guest gets; the host's own buffers (the game's input) stay untouched.
+		void ConfigureConditioner(float gateThreshold);
 
 		// Start of a buffer, after the host's input buffers hold this block's samples (Int32LSB): copy up to two
 		// input channels into the next slot and wake the guest.
@@ -73,5 +78,6 @@ namespace AmpLink
 		std::atomic<uint32_t> m_late{ 0 };
 		std::atomic<float> m_inputPeak{ 0.0f };
 		std::atomic<float> m_returnPeak{ 0.0f };
+		std::atomic<Audio::AmpFeedConditioner*> m_conditioner{ nullptr };   // created on first use, never freed
 	};
 }

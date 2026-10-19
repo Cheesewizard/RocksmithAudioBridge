@@ -1014,9 +1014,6 @@
     <ClInclude Include="NoteByNote\Detection\HfcOnsetDetector.hpp">
       <Filter>NoteByNote\Detection</Filter>
     </ClInclude>
-    <ClInclude Include="AudioBridge\Input\HumRemover.hpp">
-      <Filter>AudioBridge\Input</Filter>
-    </ClInclude>
     <ClInclude Include="NoteByNote\Ml\MlAudioExporter.hpp">
       <Filter>NoteByNote\Ml</Filter>
     </ClInclude>

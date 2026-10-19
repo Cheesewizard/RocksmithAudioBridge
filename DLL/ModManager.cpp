@@ -270,19 +270,16 @@ namespace ModManager {
 		const int inputGainTenths = Settings::GetModSetting("AsioInputGain");
 		const int suppressorThresholdTenths = Settings::GetModSetting("NoiseGateThreshold");
 		const int compressorStrength = Settings::GetModSetting("CompressorStrength");
-		const int humFilterBaseHz = Settings::GetModSetting("HumFilter");
 		Audio::AsioHook::SetInputGainDb(inputGainTenths / 10.0f);
 		Audio::AsioHook::SetNoiseGateThresholdDb(suppressorThresholdTenths / 10.0f);
 		Audio::AsioHook::SetCompressorStrength(compressorStrength / 100.0f);
-		Audio::AsioHook::SetHumFilterBaseHz(static_cast<float>(humFilterBaseHz));
 		LOG_INFO("[InputCapture] Startup conditioner configured: gain " << inputGainTenths / 10.0f
 			<< " dB, suppressor " << suppressorThresholdTenths / 10.0f
-			<< " dBFS, compressor " << compressorStrength
-			<< "%, hum filter " << humFilterBaseHz << " Hz." << std::endl);
+			<< " dBFS, compressor " << compressorStrength << "%." << std::endl);
 
 		// The conditioner shares the Drop Pedal capture hook, but it must also run when Drop Pedal is off.
 		if (!skipAudio && (inputGainTenths != 0 || suppressorThresholdTenths != 0
-			|| compressorStrength != 0 || humFilterBaseHz != 0))
+			|| compressorStrength != 0))
 		{
 			Audio::AsioHook::Install();
 			inputConditionerHookActive = true;

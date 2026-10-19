@@ -112,15 +112,6 @@ namespace RSMods.Audio
 		private (bool on, int tenths)? pendingRocksmithGate;
 		private bool persistedRgOverride;
 		private int persistedRgTenths;
-		// Mains-hum notch (DLL, front of chain). One value in RSMods.ini: 0 = off, else the base frequency in
-		// Hz (typically 50 or 60, but any 20..120 the DLL honors). Removes the ground-loop hum comb a grounded
-		// interface injects and a cable does not. Slider and box share the value in whole Hz.
-		private readonly StudioCheck humFilterCheck = new StudioCheck("Hum filter");
-		private readonly StudioSlider humFilterSlider = new StudioSlider { Minimum = 20, Maximum = 120, SmallChange = 1, LargeChange = 10, AccessibleName = "Hum filter base frequency in hertz" };
-		private readonly StudioNumber humFilterInput = new StudioNumber { DecimalPlaces = 0, Increment = 1, Minimum = 20, Maximum = 120, Value = 50 };
-		private bool syncingHumFilter;
-		private int? pendingHumFilter;
-		private int persistedHumFilter;
 		// Guitar input compressor (DLL). One "strength" macro 0..100 (0 = Off) flattens the natural
 		// string-beat wobble before the game amp, so a quiet interface input doesn't warble the way a hot
 		// cable's amp-compressed signal doesn't. RSMods.ini and the DLL store the 0-100 value directly.
@@ -304,13 +295,6 @@ namespace RSMods.Audio
 			SetRgThreshold(persistedRgTenths);
 			ApplyRgGateVisibility();
 			syncingRgGate = false;
-			// The mains-hum notch also lives in RSMods.ini (0 = off, else base Hz 50/60).
-			syncingHumFilter = true;
-			persistedHumFilter = ReadHumFilter();
-			humFilterCheck.Checked = persistedHumFilter >= 20;
-			SetHumFilter(persistedHumFilter >= 20 ? persistedHumFilter : 50);
-			ApplyHumFilterVisibility();
-			syncingHumFilter = false;
 			// The compressor strength also lives in RSMods.ini (shared with the game DLL).
 			syncingCompressor = true;
 			persistedCompressor = ReadCompressorStrength();
@@ -978,8 +962,6 @@ namespace RSMods.Audio
 				"Rejects idle noise and false signal bursts while preserving sustained notes. This level controls when an opened note closes.");
 			AddFeature(grid, compressorEnableCheck, compressorSlider, compInput, "%",
 				"Evens out level swings during sustained notes, the way a hot cable's signal already is.");
-			AddFeature(grid, humFilterCheck, humFilterSlider, humFilterInput, "Hz",
-				"Removes mains hum from a grounded interface. 50 Hz in the UK, EU and AU; 60 Hz in the US.");
 			AddFeature(grid, rgEnableCheck, rgGateSlider, rgGateInput, "dB",
 				"Overrides Rocksmith's own amp gate so decaying notes are not cut off. Lower values keep notes ringing longer.");
 			card.Add(grid);
@@ -1230,18 +1212,6 @@ namespace RSMods.Audio
 				lastMixerEdit = DateTime.UtcNow;
 				PersistRocksmithGate();
 			};
-			humFilterSlider.ValueChanged += OnHumSliderChanged;
-			humFilterSlider.MouseUp += (sender, args) => PersistHumFilter();
-			humFilterSlider.KeyUp += (sender, args) => PersistHumFilter();
-			humFilterInput.ValueChanged += OnHumInputChanged;
-			humFilterCheck.CheckedChanged += (sender, args) =>
-			{
-				if (syncingHumFilter) return;
-				ApplyHumFilterVisibility();
-				pendingHumFilter = HumEffectiveHz();
-				lastMixerEdit = DateTime.UtcNow;
-				PersistHumFilter();
-			};
 			recordingDirectory.Leave += (sender, args) => { takes.Load(recordingDirectory.Text, true); RefreshDiskSpace(); UpdateState(); };
 			statusTimer.Tick += PollStatus;
 			UpdateRecordingHotkeyHints();
@@ -1260,9 +1230,6 @@ namespace RSMods.Audio
 			tips.SetToolTip(compressorEnableCheck, "Compresses the guitar input to even out level swings during sustained notes. Applies live.");
 			tips.SetToolTip(compressorSlider, "Compressor strength from 0 to 100%. Type an exact value in the box.");
 			tips.SetToolTip(compInput, "Compressor strength from 0 to 100%. Type an exact value or nudge by 1.");
-			tips.SetToolTip(humFilterCheck, "Measures your mains hum and buzz between notes, then removes only its lines (up to 8 kHz), continuously and even during notes. Applies live.");
-			tips.SetToolTip(humFilterSlider, "Mains frequency from 20 to 120 Hz. 50 Hz in the UK, EU and AU; 60 Hz in the US.");
-			tips.SetToolTip(humFilterInput, "Mains frequency from 20 to 120 Hz. Type an exact value or nudge by 1 Hz.");
 			tips.SetToolTip(rgEnableCheck, "Takes over Rocksmith's own amp noise gate so the game stops cutting a note as it decays. Applies live.");
 			tips.SetToolTip(rgGateSlider, "Rocksmith gate threshold from -100 to +10 dB. Lower values keep the gate open for longer sustain.");
 			tips.SetToolTip(rgGateInput, "Rocksmith gate threshold from -100 to +10 dB. Lower values keep the gate open for longer sustain.");
@@ -1483,7 +1450,6 @@ namespace RSMods.Audio
 					if (!pendingNoiseGateTenths.HasValue) pendingNoiseGateTenths = persistedNoiseGateTenths;
 					if (!pendingCompressor.HasValue) pendingCompressor = persistedCompressor;
 					if (!pendingRocksmithGate.HasValue) pendingRocksmithGate = (persistedRgOverride, persistedRgTenths);
-					if (!pendingHumFilter.HasValue) pendingHumFilter = persistedHumFilter;
 				}
 				// The bridge hosts its control pipe even when it is not routing audio (passthrough),
 				// so a live connection does not imply an owned output. In that state there is no
@@ -1618,8 +1584,7 @@ namespace RSMods.Audio
 			bool hasPendingCompressor = pendingCompressor.HasValue;
 			bool hasPendingLimiter = pendingLimiter != null;
 			bool hasPendingRg = pendingRocksmithGate.HasValue;
-			bool hasPendingHum = pendingHumFilter.HasValue;
-			if (!hasPendingVolume && !hasPendingGain && !hasPendingGate && !hasPendingCompressor && !hasPendingLimiter && !hasPendingRg && !hasPendingHum) return;
+			if (!hasPendingVolume && !hasPendingGain && !hasPendingGate && !hasPendingCompressor && !hasPendingLimiter && !hasPendingRg) return;
 			isCommandRunning = true;
 			isApplyingMixer = true;
 			var requestedVolumes = (int?[])pendingVolumes.Clone();
@@ -1628,14 +1593,12 @@ namespace RSMods.Audio
 			int? requestedCompressor = pendingCompressor;
 			string requestedLimiter = pendingLimiter;
 			(bool on, int tenths)? requestedRg = pendingRocksmithGate;
-			int? requestedHum = pendingHumFilter;
 			Array.Clear(pendingVolumes, 0, pendingVolumes.Length);
 			pendingInputGainTenths = null;
 			pendingNoiseGateTenths = null;
 			pendingCompressor = null;
 			pendingLimiter = null;
 			pendingRocksmithGate = null;
-			pendingHumFilter = null;
 			UpdateMixer();
 			try
 			{
@@ -1661,9 +1624,6 @@ namespace RSMods.Audio
 				// Operation 23 = Rocksmith gate override, "<on>,<tenths>" (on 0/1; tenths = P1_NoiseFloor).
 				if (requestedRg.HasValue)
 					latestStatus = await client.SendAsync(23, (requestedRg.Value.on ? "1," : "0,") + requestedRg.Value.tenths.ToString(System.Globalization.CultureInfo.InvariantCulture));
-				// Operation 24 = mains-hum notch base frequency (0 = off, else 50 or 60).
-				if (requestedHum.HasValue)
-					latestStatus = await client.SendAsync(24, requestedHum.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
 			}
 			catch (Exception error)
 			{
@@ -1679,7 +1639,6 @@ namespace RSMods.Audio
 				if (requestedCompressor.HasValue && !pendingCompressor.HasValue) pendingCompressor = requestedCompressor;
 				if (requestedLimiter != null && pendingLimiter == null) pendingLimiter = requestedLimiter;
 				if (requestedRg.HasValue && !pendingRocksmithGate.HasValue) pendingRocksmithGate = requestedRg;
-				if (requestedHum.HasValue && !pendingHumFilter.HasValue) pendingHumFilter = requestedHum;
 				client = null;
 				latestStatus = null;
 				if (!IsDisposed) SetStatus("Live audio controls: " + error.Message, ChipTone.Bad);
@@ -2568,73 +2527,6 @@ namespace RSMods.Audio
 				if (lines[i].StartsWith(identifier, StringComparison.Ordinal)) { lines[i] = desired; return; }
 			}
 			lines.Add(desired);
-		}
-
-		// Reads the saved mains-hum notch base frequency: 0 = off, else the fundamental in Hz. Any value in
-		// the DLL's honored range (20..120) is accepted, not just 50/60, so a hand-picked notch survives a
-		// reload. Out-of-range or unparseable = off.
-		private static int ReadHumFilter()
-		{
-			string raw = RSMods.ReadSettings.ProcessSettings(RSMods.ReadSettings.HumFilterIdentifier);
-			return int.TryParse(raw, out int hz) && hz >= 20 && hz <= 120 ? hz : 0;
-		}
-
-		// The effective value to apply/persist: the selected base Hz when enabled, else 0 (off).
-		private int HumEffectiveHz() => humFilterCheck.Checked ? (int)humFilterInput.Value : 0;
-
-		private void ApplyHumFilterVisibility()
-		{
-			humFilterSlider.Enabled = humFilterInput.Enabled = humFilterCheck.Checked;
-		}
-
-		// Set both hum controls from a frequency in Hz without them re-triggering each other (caller holds syncingHumFilter).
-		private void SetHumFilter(int hz)
-		{
-			int clamped = Math.Max(20, Math.Min(120, hz));
-			humFilterSlider.Value = clamped;
-			humFilterInput.Value = clamped;
-		}
-
-		// Slider moved: mirror to the box, apply live. Persist happens on mouse/key release.
-		private void OnHumSliderChanged(object sender, EventArgs args)
-		{
-			if (syncingHumFilter) return;
-			syncingHumFilter = true;
-			humFilterInput.Value = humFilterSlider.Value;
-			syncingHumFilter = false;
-			pendingHumFilter = HumEffectiveHz();
-			lastMixerEdit = DateTime.UtcNow;
-		}
-
-		// Box typed/spun: mirror to the slider, apply live and persist (a discrete commit, unlike a drag).
-		private void OnHumInputChanged(object sender, EventArgs args)
-		{
-			if (syncingHumFilter) return;
-			syncingHumFilter = true;
-			humFilterSlider.Value = (int)humFilterInput.Value;
-			syncingHumFilter = false;
-			pendingHumFilter = HumEffectiveHz();
-			lastMixerEdit = DateTime.UtcNow;
-			PersistHumFilter();
-		}
-
-		private void PersistHumFilter()
-		{
-			int hz = HumEffectiveHz();
-			if (hz == persistedHumFilter) return;
-			try
-			{
-				string iniPath = Path.Combine(RSMods.Util.GenUtil.GetRSDirectory(), "RSMods.ini");
-				var lines = File.Exists(iniPath) ? new List<string>(File.ReadAllLines(iniPath)) : new List<string>();
-				ReplaceOrAppendIni(lines, RSMods.ReadSettings.HumFilterIdentifier, hz.ToString(System.Globalization.CultureInfo.InvariantCulture));
-				File.WriteAllLines(iniPath, lines);
-				persistedHumFilter = hz;
-				SetStatus("Hum filter " + (hz == 0 ? "off" : hz + " Hz") + " saved and applied.", ChipTone.Good);
-			}
-			catch (Exception error)
-			{
-				SetStatus("Could not save the hum filter: " + error.Message, ChipTone.Bad);
-			}
 		}
 
 		// Compressor slider: 0-100 strength stored verbatim in RSMods.ini and the DLL (0 = off).

@@ -336,15 +336,6 @@ namespace Audio::SharedOutput
 			if (SUCCEEDED(response.result)) response.result = PersistCustomSetting("RocksmithGateOverride", on);
 			return true;
 		}
-		case 24:
-			// Mains-hum notch base frequency (0 = off, else 50 or 60).
-			if (!parseInteger(integer) || (integer != 0 && (integer < 20 || integer > 120))) response.result = E_INVALIDARG;
-			else
-			{
-				AsioHook::SetHumFilterBaseHz(static_cast<float>(integer));
-				response.result = PersistCustomSetting("HumFilter", integer);
-			}
-			return true;
 		case 25:
 		{
 			// Ask the proxy to bind the named real ASIO driver. A virtual proxy promotes. A proxy that already

@@ -68,7 +68,6 @@ namespace ModManager {
     void HandleAsioInputGain();
     void HandleNoiseGate();
     void HandleCompressor();
-    void HandleHumFilter();
     void HandleRocksmithGate();
     void HandleAudioBridgeLimiter();
     void HandleAudioBackgroundToggle();
