@@ -920,6 +920,16 @@ namespace RS2014_Mod_Installer.Properties {
         /// <summary>
         ///   Looks up a localized resource of type System.Byte[].
         /// </summary>
+        internal static byte[] RocksmithAudioBridgeDriverHost {
+            get {
+                object obj = ResourceManager.GetObject("RocksmithAudioBridgeDriverHost", resourceCulture);
+                return ((byte[])(obj));
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized resource of type System.Byte[].
+        /// </summary>
         internal static byte[] RocksmithAudioBridgeLibrary {
             get {
                 object obj = ResourceManager.GetObject("RocksmithAudioBridgeLibrary", resourceCulture);
