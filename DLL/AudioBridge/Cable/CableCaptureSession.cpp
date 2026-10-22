@@ -679,8 +679,12 @@ namespace Audio::PersistentInput
 		HRESULT STDMETHODCALLTYPE Initialize(AUDCLNT_SHAREMODE mode, DWORD flags, REFERENCE_TIME duration, REFERENCE_TIME periodicity, const WAVEFORMATEX* format, LPCGUID) override
 		{
 			if (session->IsGatedByPlayerTwoToggle()) LOG_INFO("(P2 CABLE SCAN) client Initialize mode " << mode << " flags 0x" << std::hex << flags << std::dec << std::endl);
-			if (mode != AUDCLNT_SHAREMODE_EXCLUSIVE || periodicity < 0 || (periodicity && periodicity != duration)) return E_INVALIDARG;
-			return session->Initialize(format, flags, duration);
+			const HRESULT result = mode != AUDCLNT_SHAREMODE_EXCLUSIVE || periodicity < 0 || (periodicity && periodicity != duration)
+				? E_INVALIDARG : session->Initialize(format, flags, duration);
+			if (FAILED(result)) LOG_ERROR("(PERSISTENT INPUT) Game capture initialization failed, HRESULT " << std::hex << result
+				<< ", flags 0x" << flags << std::dec << ", mode " << mode
+				<< ", duration " << duration << ", periodicity " << periodicity << std::endl);
+			return result;
 		}
 		HRESULT STDMETHODCALLTYPE GetBufferSize(UINT32* frames) override
 		{

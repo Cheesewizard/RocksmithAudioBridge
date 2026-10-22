@@ -26,6 +26,7 @@ namespace Audio::SharedOutput
 
 	Configuration ReadConfiguration();
 	HRESULT CreateClient(const std::wstring& endpointId, IAudioClient** client);
+	void ReportGameOutputOpenResult(int result);
 	// Authoritative live recording state used by the in-game overlay. These queries
 	// unify the managed output session and passive output-tap backends.
 	bool IsRecording();

@@ -49,15 +49,11 @@ namespace RSMods
 		}
 
 		// ---- 1. Rocksmith settings ---------------------------------------------------------------------------------
-		// The values each mode needs. ASIO: RS_ASIO's README asks for ExclusiveMode=1 and Win32UltraLowLatencyMode=1, and
-		// ExclusiveMode=0 makes the game ask RS_ASIO for shared mode, which it refuses (no guitar, RØDECaster report).
-		// Cable: ExclusiveMode is not checked. The bridge's cable input drops the exclusive flag itself
-		// (DLL/AudioBridge/Cable/CableInput.cpp), and the cable's -9996 error was proven not to be exclusive mode
-		// (2026-09-04), so the stock ExclusiveMode=1 is fine. Both: a MaxOutputBufferSize smaller than the interface's
-		// buffer leaves the game silent; 0 lets Rocksmith pick.
+		// Low-latency mode avoids the game's large default latency requests, which make PortAudio select polling.
+		// ASIO also requires ExclusiveMode=1. Cable mode supplies its own exclusive virtual stream information.
 		public static (string Key, string Value)[] RocksmithWanted(bool asio) => asio
 			? new[] { ("ExclusiveMode", "1"), ("Win32UltraLowLatencyMode", "1"), ("MaxOutputBufferSize", "0") }
-			: new[] { ("MaxOutputBufferSize", "0") };
+			: new[] { ("Win32UltraLowLatencyMode", "1"), ("MaxOutputBufferSize", "0") };
 
 		public static AuditCheck CheckRocksmithSettings(string gameDirectory, bool asio)
 		{
@@ -78,7 +74,7 @@ namespace RSMods
 			}
 			check.State = wrong.Length == 0 ? AuditState.Ok : AuditState.Problem;
 			check.Detail = wrong.Length == 0
-				? "Rocksmith.ini's audio settings suit " + (asio ? "an ASIO interface." : "the Real Tone Cable. ExclusiveMode and Win32UltraLowLatencyMode do not matter for the cable.")
+				? "Rocksmith.ini's audio settings suit " + (asio ? "an ASIO interface." : "the Real Tone Cable. Low-latency mode is enabled; ExclusiveMode can be either value.")
 				: "Rocksmith.ini: " + wrong + ". Fix sets them (a backup is kept).";
 			return check;
 		}

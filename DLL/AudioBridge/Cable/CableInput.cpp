@@ -1,5 +1,7 @@
 #include "stdafx.h"
 #include "CableInput.hpp"
+#include "PortAudioStream.hpp"
+#include "AudioBridge/Engine/CableGamePeriod.hpp"
 #include "AudioBridge/Engine/AudioBridgeEngine.hpp"
 #include "AudioBridge/Engine/OutputTap.hpp"
 #include "AudioBridge/Devices/DeviceEnumeratorHook.hpp"
@@ -27,26 +29,6 @@ namespace Audio::CableInput
 
 		// PortAudio v19 (2012) public structs, 32-bit layout, matching the game's
 		// Pa_OpenStream calls.
-		struct PaStreamParameters
-		{
-			int device;
-			int channelCount;
-			unsigned long sampleFormat;
-			double suggestedLatency;
-			void* hostApiSpecificStreamInfo;
-		};
-
-		struct PaWasapiStreamInfo
-		{
-			unsigned long size;
-			int hostApiType;
-			unsigned long version;
-			unsigned long flags;
-			unsigned long channelMask;
-			void* hostProcessorOutput;
-			void* hostProcessorInput;
-		};
-
 		// The full 32-byte block the game itself builds when Rocksmith.ini has ExclusiveMode=1 (the
 		// structure above plus threadPriority). With ExclusiveMode=0 the game passes no block at all,
 		// and the game's PortAudio only accepts size 0x20, hostApiType 13 (WASAPI), version 1.
@@ -1401,6 +1383,7 @@ namespace Audio::CableInput
 				if (!persistentOutputEnabled)
 				{
 					LOG_ERROR("(AUDIO ROUTING) Refusing output open: permanent bridge output is not installed." << std::endl);
+					SharedOutput::ReportGameOutputOpenResult(-9999);
 					return -9999;
 				}
 				PaStreamParameters parameters = *outputParameters;
@@ -1412,16 +1395,22 @@ namespace Audio::CableInput
 					LOG_INFO("(AUDIO ROUTING) Game sent no WASAPI stream information (ExclusiveMode=0); using the game's own exclusive block" << std::endl);
 				}
 				const auto* callerInfo = static_cast<const PaWasapiStreamInfo*>(parameters.hostApiSpecificStreamInfo);
-				if (callerInfo->size < offsetof(PaWasapiStreamInfo, flags) + sizeof(callerInfo->flags) || callerInfo->size > 4096) return -9999;
+				if (callerInfo->size < offsetof(PaWasapiStreamInfo, flags) + sizeof(callerInfo->flags) || callerInfo->size > 4096)
+				{
+					LOG_ERROR("(AUDIO ROUTING) Refusing output open: invalid WASAPI stream information size " << callerInfo->size << std::endl);
+					SharedOutput::ReportGameOutputOpenResult(-9999);
+					return -9999;
+				}
 				// Preserve fields added after the prefix known to this mod.
 				std::vector<byte> infoStorage(callerInfo->size);
 				std::memcpy(infoStorage.data(), callerInfo, callerInfo->size);
 				auto* info = reinterpret_cast<PaWasapiStreamInfo*>(infoStorage.data());
-				info->flags |= PA_WASAPI_EXCLUSIVE;
+				ConfigureGameStreamTiming(parameters, *info);
 				parameters.hostApiSpecificStreamInfo = info;
 				const int result = originalPaOpenStream(stream, inputParameters, &parameters, sampleRate,
-					framesPerBuffer, streamFlags, streamCallback, userData);
+					CableGamePeriod::Frames(), streamFlags, streamCallback, userData);
 				LOG_INFO("(AUDIO ROUTING) Game output stream open result " << result << std::endl);
+				SharedOutput::ReportGameOutputOpenResult(result);
 				return result;
 			}
 			if (!inputOnlyOpen || inputOwnedByAsio)
@@ -1445,10 +1434,19 @@ namespace Audio::CableInput
 			const unsigned long callerFlags = streamInfo->flags;
 			if (persistentInputEnabled)
 			{
-				streamInfo->flags = callerFlags | PA_WASAPI_EXCLUSIVE;
-				const int result = originalPaOpenStream(stream, inputParameters, outputParameters, sampleRate,
-					framesPerBuffer, streamFlags, streamCallback, userData);
-				streamInfo->flags = callerFlags;
+				PaStreamParameters parameters = *inputParameters;
+				if (streamInfo->size < sizeof(PaWasapiStreamInfo) || streamInfo->size > 4096)
+				{
+					LOG_ERROR("(PERSISTENT INPUT) Refusing capture open: invalid WASAPI stream information size " << streamInfo->size << std::endl);
+					return -9999;
+				}
+				std::vector<byte> infoStorage(streamInfo->size);
+				std::memcpy(infoStorage.data(), streamInfo, streamInfo->size);
+				auto* info = reinterpret_cast<PaWasapiStreamInfo*>(infoStorage.data());
+				ConfigureGameStreamTiming(parameters, *info);
+				parameters.hostApiSpecificStreamInfo = info;
+				const int result = originalPaOpenStream(stream, &parameters, outputParameters, sampleRate,
+					CableGamePeriod::Frames(), streamFlags, streamCallback, userData);
 				LOG_INFO("(PERSISTENT INPUT) Game capture open result " << result << std::endl);
 				return result;
 			}

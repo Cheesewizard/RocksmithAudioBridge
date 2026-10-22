@@ -836,6 +836,9 @@
     <ClInclude Include="AudioBridge\Cable\CableInput.hpp">
       <Filter>AudioBridge\Cable</Filter>
     </ClInclude>
+    <ClInclude Include="AudioBridge\Cable\PortAudioStream.hpp">
+      <Filter>AudioBridge\Cable</Filter>
+    </ClInclude>
     <ClInclude Include="NoteByNote\Ml\MlServiceLauncher.hpp">
       <Filter>NoteByNote\Ml</Filter>
     </ClInclude>

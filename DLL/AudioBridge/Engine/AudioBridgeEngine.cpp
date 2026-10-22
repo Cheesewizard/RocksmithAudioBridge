@@ -43,6 +43,7 @@ namespace Audio::SharedOutput
 		// Set for the duration of one DispatchControlPreview on the calling thread: the op applies live but writes
 		// nothing to RSMods.ini (the overlay's sliders preview every drag step and save once on release).
 		thread_local bool previewOnly = false;
+		std::atomic<HRESULT> gameOutputInitializationError{ S_OK };
 
 		// The output the player picked in Switch output (op 4) this launch. The game drops and rebuilds its output
 		// client on every focus change (alt-tab, Windows key); the enumerator hook still hands CreateClient the
@@ -1261,9 +1262,11 @@ namespace Audio::SharedOutput
 		HRESULT STDMETHODCALLTYPE Initialize(AUDCLNT_SHAREMODE mode, DWORD flags, REFERENCE_TIME, REFERENCE_TIME,
 			const WAVEFORMATEX* format, LPCGUID session) override
 		{
-			if (mode != AUDCLNT_SHAREMODE_EXCLUSIVE) return E_INVALIDARG;
-			const HRESULT result = output->Initialize(format, flags, session);
-			if (FAILED(result)) LOG_ERROR("(AUDIO ROUTING) Shared output initialization failed, HRESULT " << std::hex << result << std::dec << "; requires shared 48 kHz stereo support" << std::endl);
+			const HRESULT result = mode != AUDCLNT_SHAREMODE_EXCLUSIVE ? E_INVALIDARG : output->Initialize(format, flags, session);
+			gameOutputInitializationError.store(result);
+			if (FAILED(result)) LOG_ERROR("(AUDIO ROUTING) Game output initialization failed, HRESULT " << std::hex << result
+				<< ", flags 0x" << flags << std::dec << ", mode " << mode
+				<< ", event callback " << ((flags & AUDCLNT_STREAMFLAGS_EVENTCALLBACK) != 0) << std::endl);
 			return result;
 		}
 		HRESULT STDMETHODCALLTYPE GetBufferSize(UINT32* frames) override
@@ -1346,6 +1349,16 @@ namespace Audio::SharedOutput
 		GetPrivateProfileStringW(L"Audio Bridge", L"OutputDevice", L"", value, 2048, path.c_str());
 		configuration.outputDeviceId = value;
 		return configuration;
+	}
+
+	void ReportGameOutputOpenResult(int result)
+	{
+		if (result == 0) gameOutputInitializationError.store(S_OK);
+		else
+		{
+			HRESULT expected = S_OK;
+			gameOutputInitializationError.compare_exchange_strong(expected, HRESULT_FROM_WIN32(ERROR_OPEN_FAILED));
+		}
 	}
 
 	// The control pipe is hosted for the whole process life, decoupled from routing, so the GUI
@@ -1685,7 +1698,7 @@ namespace Audio::SharedOutput
 			response.result = RouteStop();
 			SaveLastOutput(L"");
 		}
-		response.outputError = S_OK;
+		response.outputError = gameOutputInitializationError.load();
 		response.dryInputReady = DrySignalRecording::IsReady() ? 1 : 0;
 		response.recordingError = OutputTap::RecordingError();
 		response.recording = OutputTap::IsRecording() && SUCCEEDED(response.recordingError) ? 1 : 0;
@@ -1725,7 +1738,7 @@ namespace Audio::SharedOutput
 		else
 		{
 			const int proxyMode = OutputTap::ProxyOutputMode();
-			const wchar_t* idleTag = proxyMode == 3 ? L"(downgrading)" : proxyMode == 2 ? L"(passthrough)" : proxyMode == 1 ? L"(silent)" : L"(starting)";
+			const wchar_t* idleTag = FAILED(response.outputError) ? L"(failed)" : proxyMode == 3 ? L"(downgrading)" : proxyMode == 2 ? L"(passthrough)" : proxyMode == 1 ? L"(silent)" : L"(starting)";
 			wcsncpy_s(response.endpoint, routeTag.empty() ? idleTag : routeTag.c_str(), _TRUNCATE);
 		}
 		if (request.operation == 18) WriteLatencyResult(response);   // overwrites file with the latency result

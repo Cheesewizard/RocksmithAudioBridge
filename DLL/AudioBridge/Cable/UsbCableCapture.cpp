@@ -31,6 +31,7 @@ namespace Audio::PersistentInput
 		{
 			HMODULE module = nullptr;
 			std::mutex loadMutex;
+			bool loadFailureLogged = false;
 			decltype(&UsbDk_GetDevicesList) getDevicesList = nullptr;
 			decltype(&UsbDk_ReleaseDevicesList) releaseDevicesList = nullptr;
 			decltype(&UsbDk_GetConfigurationDescriptor) getConfigurationDescriptor = nullptr;
@@ -55,14 +56,26 @@ namespace Audio::PersistentInput
 				if (length && length < ARRAYSIZE(value)) candidates.emplace_back(value);
 				length = GetEnvironmentVariableW(L"ProgramW6432", value, ARRAYSIZE(value));
 				if (length && length < ARRAYSIZE(value)) candidates.emplace_back(value);
+				std::filesystem::path loadedFile;
+				DWORD lastError = ERROR_MOD_NOT_FOUND;
 				for (const auto& root : candidates)
 				{
 					const auto file = root / L"UsbDk Runtime Library" / (sizeof(void*) == 4 ? L"UsbDkHelper_x86.dll" : L"UsbDkHelper.dll");
 					module = LoadLibraryExW(file.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
-					if (module) break;
+					if (module) { loadedFile = file; break; }
+					lastError = GetLastError();
 				}
-				if (!module) return false;
-#define LOAD_API(name, field) field = reinterpret_cast<decltype(field)>(GetProcAddress(module, name)); if (!field) { FreeLibrary(module); module = nullptr; return false; }
+				if (!module)
+				{
+					if (!loadFailureLogged)
+					{
+						loadFailureLogged = true;
+						LOG_WARNING("(USB CABLE) UsbDk helper load failed, Win32 error " << lastError << std::endl);
+					}
+					return false;
+				}
+				LOG_INFO("(USB CABLE) UsbDk helper loaded (" << (sizeof(void*) == 4 ? "x86" : "x64") << "): " << loadedFile.string() << std::endl);
+				#define LOAD_API(name, field) field = reinterpret_cast<decltype(field)>(GetProcAddress(module, name)); if (!field) { const DWORD error = GetLastError(); LOG_WARNING("(USB CABLE) UsbDk helper export " << name << " missing, Win32 error " << error << std::endl); FreeLibrary(module); module = nullptr; return false; }
 				LOAD_API("UsbDk_GetDevicesList", getDevicesList)
 				LOAD_API("UsbDk_ReleaseDevicesList", releaseDevicesList)
 				LOAD_API("UsbDk_GetConfigurationDescriptor", getConfigurationDescriptor)
@@ -89,6 +102,53 @@ namespace Audio::PersistentInput
 		{
 			static std::atomic<bool> logged{ false };
 			if (!logged.exchange(true)) LOG_WARNING("(USB CABLE) UsbDk unavailable: " << reason << std::endl);
+		}
+
+		void LogEnumerationFailure(DWORD error)
+		{
+			static std::mutex failureMutex;
+			static bool hasPrevious = false;
+			static DWORD previousError = ERROR_SUCCESS;
+			std::lock_guard<std::mutex> lock(failureMutex);
+			if (hasPrevious && error == previousError) return;
+			hasPrevious = true;
+			previousError = error;
+			LOG_WARNING("(USB CABLE) UsbDk_GetDevicesList failed, Win32 error " << error << std::endl);
+		}
+
+		void LogEnumerationSummary(ULONG total, ULONG matching, ULONG accepted, ULONG rejected)
+		{
+			static std::mutex summaryMutex;
+			static bool hasPrevious = false;
+			static ULONG previousTotal = 0;
+			static ULONG previousMatching = 0;
+			static ULONG previousAccepted = 0;
+			static ULONG previousRejected = 0;
+			std::lock_guard<std::mutex> lock(summaryMutex);
+			if (hasPrevious && total == previousTotal && matching == previousMatching && accepted == previousAccepted && rejected == previousRejected) return;
+			hasPrevious = true;
+			previousTotal = total;
+			previousMatching = matching;
+			previousAccepted = accepted;
+			previousRejected = rejected;
+			LOG_INFO("(USB CABLE) UsbDk enumeration: devices " << total << ", VID/PID matches " << matching
+				<< ", accepted cable descriptors " << accepted << ", rejected descriptors " << rejected << std::endl);
+		}
+
+		HRESULT LogStageFailure(const char* stage, HRESULT result, DWORD error = GetLastError())
+		{
+			static std::mutex failureMutex;
+			static std::string previousStage;
+			static HRESULT previousResult = S_OK;
+			static DWORD previousError = ERROR_SUCCESS;
+			std::lock_guard<std::mutex> lock(failureMutex);
+			if (previousStage == stage && previousResult == result && previousError == error) return result;
+			previousStage = stage;
+			previousResult = result;
+			previousError = error;
+			LOG_WARNING("(USB CABLE) UsbDk " << stage << " failed, HRESULT " << std::hex << result << std::dec
+				<< ", Win32 error " << error << std::endl);
+			return result;
 		}
 
 		bool ParsePath(const std::wstring& path, USB_DK_DEVICE_ID& id)
@@ -151,21 +211,32 @@ namespace Audio::PersistentInput
 		Api& api = GetApi();
 		if (!api.Load()) { LogUnavailable("the installed helper DLL could not be loaded"); return paths; }
 		PUSB_DK_DEVICE_INFO devices = nullptr; ULONG count = 0;
-		if (!api.getDevicesList(&devices, &count)) { LogUnavailable("UsbDk_GetDevicesList failed"); return paths; }
+		if (!api.getDevicesList(&devices, &count))
+		{
+			const DWORD error = GetLastError();
+			LogUnavailable("UsbDk_GetDevicesList failed");
+			LogEnumerationFailure(error);
+			return paths;
+		}
+		ULONG matching = 0;
+		ULONG rejected = 0;
 		for (ULONG index = 0; index < count; ++index)
 		{
 			if (devices[index].DeviceDescriptor.idVendor != kVendorId || devices[index].DeviceDescriptor.idProduct != kProductId) continue;
+			++matching;
 			USB_DK_CONFIG_DESCRIPTOR_REQUEST request{};
 			request.ID = devices[index].ID;
 			PUSB_CONFIGURATION_DESCRIPTOR descriptor = nullptr;
 			ULONG length = 0;
-			if (!api.getConfigurationDescriptor(&request, &descriptor, &length)) continue;
+			if (!api.getConfigurationDescriptor(&request, &descriptor, &length)) { ++rejected; continue; }
 			if (descriptor && length >= sizeof(USB_CONFIGURATION_DESCRIPTOR) && HasCableStream(descriptor, length))
 			{
 				paths.push_back(MakePath(devices[index].ID));
 			}
+			else ++rejected;
 			if (descriptor) api.releaseConfigurationDescriptor(descriptor);
 		}
+		LogEnumerationSummary(count, matching, static_cast<ULONG>(paths.size()), rejected);
 		api.releaseDevicesList(devices);
 		std::sort(paths.begin(), paths.end(), [](const auto& a, const auto& b) { return _wcsicmp(a.c_str(), b.c_str()) < 0; });
 		return paths;
@@ -193,26 +264,26 @@ namespace Audio::PersistentInput
 	HRESULT UsbCableCapture::Open()
 	{
 		Api& api = GetApi();
-		if (!api.Load()) return HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND);
-		USB_DK_DEVICE_ID id{}; if (!ParsePath(path, id)) return E_INVALIDARG;
+		if (!api.Load()) return LogStageFailure("helper load", HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND));
+		USB_DK_DEVICE_ID id{}; if (!ParsePath(path, id)) return LogStageFailure("device path parse", E_INVALIDARG);
 		device = api.startRedirect(&id);
-		if (!device || device == INVALID_HANDLE_VALUE) return LastError();
+		if (!device || device == INVALID_HANDLE_VALUE) { const DWORD error = GetLastError(); return LogStageFailure("device redirect", error ? HRESULT_FROM_WIN32(error) : E_FAIL, error); }
 		systemHandle = api.getSystemHandle(device);
-		if (!systemHandle || systemHandle == INVALID_HANDLE_VALUE) return LastError();
+		if (!systemHandle || systemHandle == INVALID_HANDLE_VALUE) { const DWORD error = GetLastError(); return LogStageFailure("system handle", error ? HRESULT_FROM_WIN32(error) : E_FAIL, error); }
 		USB_DK_CONFIG_DESCRIPTOR_REQUEST request{}; request.ID = id; PUSB_CONFIGURATION_DESCRIPTOR descriptor = nullptr; ULONG length = 0;
-		if (!api.getConfigurationDescriptor(&request, &descriptor, &length)) return LastError();
+		if (!api.getConfigurationDescriptor(&request, &descriptor, &length)) { const DWORD error = GetLastError(); return LogStageFailure("configuration descriptor", error ? HRESULT_FROM_WIN32(error) : E_FAIL, error); }
 		const bool valid = descriptor && length >= sizeof(USB_CONFIGURATION_DESCRIPTOR) && HasCableStream(descriptor, length);
 		if (descriptor) api.releaseConfigurationDescriptor(descriptor);
-		if (!valid) return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
-		if (!api.setAltsetting(device, kStreamingInterface, kStreamingAlternate)) return LastError();
+		if (!valid) return LogStageFailure("configuration descriptor validation", HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED), ERROR_NOT_SUPPORTED);
+		if (!api.setAltsetting(device, kStreamingInterface, kStreamingAlternate)) { const DWORD error = GetLastError(); return LogStageFailure("alternate setting", error ? HRESULT_FROM_WIN32(error) : E_FAIL, error); }
 		std::array<UCHAR, 11> control{};
 		control[0] = 0x22; control[1] = 0x01; control[3] = 1; control[4] = kEndpoint; control[6] = 3;
 		control[8] = static_cast<UCHAR>(kSampleRate); control[9] = static_cast<UCHAR>(kSampleRate >> 8); control[10] = static_cast<UCHAR>(kSampleRate >> 16);
 		USB_DK_TRANSFER_REQUEST transfer{}; transfer.Buffer = control.data(); transfer.BufferLength = control.size(); transfer.TransferType = ControlTransferType;
-		if (api.writePipe(device, &transfer, nullptr) == TransferFailure || transfer.Result.GenResult.BytesTransferred < 3 || transfer.Result.GenResult.UsbdStatus != 0) return LastError();
+		if (api.writePipe(device, &transfer, nullptr) == TransferFailure || transfer.Result.GenResult.BytesTransferred < 3 || transfer.Result.GenResult.UsbdStatus != 0) { const DWORD error = GetLastError(); return LogStageFailure("sample-rate set", error ? HRESULT_FROM_WIN32(error) : E_FAIL, error); }
 		control[0] = 0xA2; control[1] = 0x81; transfer = {}; transfer.Buffer = control.data(); transfer.BufferLength = control.size(); transfer.TransferType = ControlTransferType;
-		if (api.readPipe(device, &transfer, nullptr) == TransferFailure || transfer.Result.GenResult.BytesTransferred < 3 || transfer.Result.GenResult.UsbdStatus != 0 || control[8] != static_cast<UCHAR>(kSampleRate) || control[9] != static_cast<UCHAR>(kSampleRate >> 8) || control[10] != static_cast<UCHAR>(kSampleRate >> 16)) return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
-		for (size_t index = 0; index < kSlots; ++index) { auto* slot = new Slot(); slot->overlapped.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr); if (!slot->overlapped.hEvent) { delete slot; return LastError(); } slots.push_back(slot); }
+		if (api.readPipe(device, &transfer, nullptr) == TransferFailure || transfer.Result.GenResult.BytesTransferred < 3 || transfer.Result.GenResult.UsbdStatus != 0 || control[8] != static_cast<UCHAR>(kSampleRate) || control[9] != static_cast<UCHAR>(kSampleRate >> 8) || control[10] != static_cast<UCHAR>(kSampleRate >> 16)) return LogStageFailure("sample-rate get", HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED), ERROR_NOT_SUPPORTED);
+		for (size_t index = 0; index < kSlots; ++index) { auto* slot = new Slot(); slot->overlapped.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr); if (!slot->overlapped.hEvent) { const DWORD error = GetLastError(); delete slot; return LogStageFailure("transfer event", error ? HRESULT_FROM_WIN32(error) : E_FAIL, error); } slots.push_back(slot); }
 		return S_OK;
 	}
 

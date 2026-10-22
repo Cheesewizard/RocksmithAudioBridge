@@ -296,6 +296,7 @@
     <ClInclude Include="AudioBridge\Input\AsioBufferState.hpp" />
     <ClInclude Include="AudioBridge\Input\CaptureProcessingGate.hpp" />
     <ClInclude Include="AudioBridge\Cable\CableInput.hpp" />
+    <ClInclude Include="AudioBridge\Cable\PortAudioStream.hpp" />
     <ClInclude Include="NoteByNote\Ml\MlAudioExporter.hpp" />
     <ClInclude Include="NoteByNote\Ml\MlServiceLauncher.hpp" />
     <ClInclude Include="AudioBridge\Driver\BridgeDriverRegistration.hpp" />

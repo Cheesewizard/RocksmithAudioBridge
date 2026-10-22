@@ -3455,7 +3455,7 @@ namespace Overlay
 			const bool proxy = Audio::OutputTap::ProxyAvailable();
 			const bool routing = endpoint.rfind(L"(route", 0) == 0;
 			const bool passthrough = endpoint == L"(passthrough)" || endpoint == L"(silent)";
-			const bool switching = endpoint == L"(starting)" || endpoint == L"(downgrading)";
+			const bool switching = endpoint == L"(downgrading)";
 			const bool session = !endpoint.empty() && endpoint[0] != L'(';
 			const unsigned outputMode = OutputStatusNumber(live, L"outputMode=");
 			std::wstring routedId;
@@ -3488,6 +3488,8 @@ namespace Overlay
 			else if (endpoint == L"(passthrough)") { current = asioName; state = proxy ? "ASIO" : "Direct"; stateColor = Color::Good; }
 			else if (endpoint == L"(silent)") { current = "No output"; state = "Silent"; stateColor = Color::Bad; }
 			else if (switching) { current = "Switching"; state = "Switching"; stateColor = Color::Warn; }
+			else if (endpoint == L"(starting)") { current = "Waiting for audio to start"; state = "Starting"; }
+			else if (endpoint == L"(failed)") { current = "Audio could not start"; state = "Failed"; stateColor = Color::Bad; }
 			if (session)
 			{
 				switch (outputMode)
@@ -3582,7 +3584,9 @@ namespace Overlay
 			BeginCard("Switch output");
 			const bool canRoute = proxy && (passthrough || routing);
 			if (!canRoute && !session) {
-				Caption(switching ? "The audio engine is switching devices. Try again in a moment."
+				Caption(endpoint == L"(failed)" ? "Audio initialization failed. Close Rocksmith and include a bug report when reporting this error."
+					: endpoint == L"(starting)" ? "Waiting for Rocksmith to open its audio output."
+					: switching ? "The audio engine is switching devices. Try again in a moment."
 					: "Switching needs the Rocksmith Audio Bridge in the ASIO chain (RS_ASIO.ini Driver set to Rocksmith Audio Bridge), or Cable mode.");
 				EndCard();
 				return;
