@@ -1247,7 +1247,7 @@ namespace Audio::AsioHook
 			}
 			if (observesRoute)
 			{
-				DrySignalRecording::Observe(converted, *frameCount, routeFormats[routeIndex].sampleRate);
+				DrySignalRecording::Observe(0, converted, *frameCount, routeFormats[routeIndex].sampleRate);
 				RawPitchVerifier::Observe(
 					static_cast<uint32_t>(routeIndex),
 					converted,
@@ -1263,6 +1263,10 @@ namespace Audio::AsioHook
 					*frameCount,
 					routeFormats[routeIndex].sampleRate);
 			}
+			// Player 2's dry take, from the same point as Player 1's above (after any source/processor, so it is
+			// what the game reads for that player).
+			if (metersPlayerTwo)
+				DrySignalRecording::Observe(1, converted, *frameCount, routeFormats[routeIndex].sampleRate);
 			if (modifiesBuffer)
 			{
 				CopyFloatToAllChannels(*data, routeFormats[routeIndex], *frameCount, converted);

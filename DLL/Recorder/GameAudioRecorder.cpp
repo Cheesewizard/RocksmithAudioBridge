@@ -22,7 +22,7 @@ namespace Audio
 		wchar_t base[64];
 		swprintf_s(base, L"Rocksmith-%04u-%02u-%02u_%02u-%02u-%02u", time.wYear, time.wMonth,
 			time.wDay, time.wHour, time.wMinute, time.wSecond);
-		static const wchar_t* const takeFiles[] = { L"-wet.wav", L"-wet.mp4", L"-dry.wav", L".wav", L".mp4" };
+		static const wchar_t* const takeFiles[] = { L"-wet.wav", L"-wet.mp4", L"-dry.wav", L"-dry-p2.wav", L".wav", L".mp4" };
 		for (uint32_t attempt = 1;; ++attempt)
 		{
 			std::wstring stem = base;
@@ -66,6 +66,9 @@ namespace Audio
 		dataBytes = 0;
 		recordedFrames.store(0);
 		recordingStarted.store(0);
+		firstBlockFrames.store(0);
+		leadingSilenceFrames.store(0);
+		leadingSilenceWritten = false;
 		error.store(S_OK);
 		stopping.store(false);
 		peakSample.store(0);
@@ -92,6 +95,22 @@ namespace Audio
 	{
 		if (!wakeEvent || FAILED(error.load(std::memory_order_relaxed))) return;
 		if (!samples || !frames || frames > packetLimit) { error.store(E_INVALIDARG); return; }
+		uint64_t firstBlockTime = 0;
+		if (!recordingStarted.load())
+		{
+			FILETIME time{};
+			GetSystemTimePreciseAsFileTime(&time);
+			firstBlockTime = (static_cast<uint64_t>(time.dwHighDateTime) << 32) | time.dwLowDateTime;
+			if (startReference)
+			{
+				// Nothing before the reference's first block: the take starts there. Arrival times stand in for
+				// audio times, so the files line up to within about one buffer, not to the sample.
+				const uint64_t referenceStart = startReference->GetFirstBlockStart();
+				if (!referenceStart) return;
+				const uint64_t ownStart = firstBlockTime - frames * 10000000ull / 48000;
+				leadingSilenceFrames.store(ownStart > referenceStart ? (ownStart - referenceStart) * 48000 / 10000000 : 0);
+			}
+		}
 		const uint32_t blockBytes = frames * 2 * sizeof(int16_t);
 		if (pendingSlot && pendingBytes + blockBytes > slotBytes)
 		{
@@ -129,14 +148,19 @@ namespace Audio
 			pendingSlot = nullptr;
 			pendingBytes = 0;
 		}
-		if (!recordingStarted.load())
+		if (firstBlockTime)
 		{
-			FILETIME time{};
-			GetSystemTimePreciseAsFileTime(&time);
-			recordingStarted.store((static_cast<uint64_t>(time.dwHighDateTime) << 32) | time.dwLowDateTime);
+			firstBlockFrames.store(frames);
+			recordingStarted.store(firstBlockTime);
 		}
 		recordedFrames.fetch_add(frames);
 		SetEvent(wakeEvent);
+	}
+
+	uint64_t GameAudioRecorder::GetFirstBlockStart() const noexcept
+	{
+		const uint64_t started = recordingStarted.load();
+		return started ? started - firstBlockFrames.load() * 10000000ull / 48000 : 0;
 	}
 
 	bool GameAudioRecorder::WriteHeader()
@@ -175,6 +199,20 @@ namespace Audio
 					break;
 				}
 				DWORD written = 0;
+				if (!leadingSilenceWritten)
+				{
+					leadingSilenceWritten = true;
+					static const uint8_t zeros[16384]{};
+					uint64_t silenceBytes = leadingSilenceFrames.load() * 2 * sizeof(int16_t);
+					if (silenceBytes > UINT32_MAX / 2) silenceBytes = 0;   // a nonsense gap: skip it rather than fill the disk
+					while (silenceBytes)
+					{
+						const DWORD chunk = static_cast<DWORD>(std::min<uint64_t>(sizeof(zeros), silenceBytes));
+						if (!WriteFile(file, zeros, chunk, &written, nullptr) || written != chunk) break;
+						dataBytes += chunk;
+						silenceBytes -= chunk;
+					}
+				}
 				if (!WriteFile(file, packet, bytes, &written, nullptr) || written != bytes)
 				{
 					error.store(HRESULT_FROM_WIN32(GetLastError() ? GetLastError() : ERROR_WRITE_FAULT));
@@ -205,6 +243,13 @@ namespace Audio
 			if (normalizeOnClose && SUCCEEDED(error.load())) NormalizeFile();
 			CloseHandle(file);
 			file = INVALID_HANDLE_VALUE;
+			if (deleteOnClose)
+			{
+				if (DeleteFileW(recordingPath.c_str()))
+					LOG_INFO("(AUDIO ROUTING) Removed " << std::filesystem::path(recordingPath).filename().string() << ": nothing was played on that input" << std::endl);
+				else
+					LOG_ERROR("(AUDIO ROUTING) Could not remove empty take " << std::filesystem::path(recordingPath).filename().string() << ", error " << GetLastError() << std::endl);
+			}
 		}
 		if (wakeEvent) { CloseHandle(wakeEvent); wakeEvent = nullptr; }
 	}
@@ -261,18 +306,34 @@ namespace Audio
 	// is capped at +30 dB so a take of pure noise is not blown up, and with no usable wet level
 	// (wet silent or unset) it falls back to the -1 dBFS peak target. The applied gain is logged so
 	// the detector-level signal can be recovered (divide by it).
+	//
+	// With two players the session works out one gain from both dry takes (their summed level against the wet
+	// mix, the louder peak for the limit) and hands it to each through SetNormalizeGain, so a quiet player is
+	// not lifted to match a loud one and the files keep the balance they were played with.
+	namespace
+	{
+		constexpr double TARGET_PEAK = 32767.0 * 0.891251;   // -1 dBFS
+		constexpr double MAXIMUM_GAIN = 31.6228;              // +30 dB
+		constexpr double SILENT_MEAN_SQUARE = 1e-6;           // -60 dBFS
+	}
+
+	double GameAudioRecorder::NormalizeGain(double referenceMeanSquare, double meanSquare, int32_t peak) noexcept
+	{
+		if (peak <= 0 || meanSquare <= 0.0) return 0.0;
+		const double peakGain = TARGET_PEAK / peak;
+		const double wantedGain = referenceMeanSquare > SILENT_MEAN_SQUARE ? std::sqrt(referenceMeanSquare / meanSquare) : peakGain;
+		return std::min({ wantedGain, peakGain, MAXIMUM_GAIN });
+	}
+
 	void GameAudioRecorder::NormalizeFile()
 	{
 		const int32_t peak = peakSample.load();
 		const double ownMeanSquare = GetMeanSquare();
 		if (peak <= 0 || dataBytes == 0 || ownMeanSquare <= 0.0) return;
-		constexpr double targetPeak = 32767.0 * 0.891251;   // -1 dBFS
-		constexpr double maximumGain = 31.6228;              // +30 dB
-		constexpr double silentMeanSquare = 1e-6;            // -60 dBFS
-		const double peakGain = targetPeak / peak;
-		const bool matchWet = loudnessReference > silentMeanSquare;
+		const double peakGain = TARGET_PEAK / peak;
+		const bool matchWet = loudnessReference > SILENT_MEAN_SQUARE;
 		const double wantedGain = matchWet ? std::sqrt(loudnessReference / ownMeanSquare) : peakGain;
-		const double gain = std::min({ wantedGain, peakGain, maximumGain });
+		const double gain = fixedGain > 0.0 ? fixedGain : NormalizeGain(loudnessReference, ownMeanSquare, peak);
 		if (std::fabs(gain - 1.0) < 0.01) return;
 		std::vector<int16_t> block(32768);
 		uint64_t offset = 0;
@@ -308,7 +369,7 @@ namespace Audio
 			<< ", " << (matchWet ? "matched wet mean " : "no wet level, peak target; ")
 			<< std::setprecision(1) << (matchWet ? 10.0 * std::log10(loudnessReference) : 0.0) << (matchWet ? " dBFS" : "")
 			<< ", source mean " << 10.0 * std::log10(ownMeanSquare) << " dBFS, source peak "
-			<< 20.0 * std::log10(peak / 32767.0) << " dBFS" << (gain < wantedGain ? ", limited by peak/cap" : "") << ")" << std::endl);
+			<< 20.0 * std::log10(peak / 32767.0) << " dBFS" << (fixedGain > 0.0 ? ", shared with the other player's take" : gain < wantedGain ? ", limited by peak/cap" : "") << ")" << std::endl);
 	}
 
 	RecordingSession::~RecordingSession()
@@ -320,37 +381,61 @@ namespace Audio
 
 	HRESULT RecordingSession::Start(const std::filesystem::path& directory, uint32_t wetMaximumFrames)
 	{
-		if (wetRecorder || dryRecorder) return HRESULT_FROM_WIN32(ERROR_ALREADY_INITIALIZED);
+		if (wetRecorder || dryRecorders[0]) return HRESULT_FROM_WIN32(ERROR_ALREADY_INITIALIZED);
 		if (directory.empty() || wetMaximumFrames == 0) return E_INVALIDARG;
 		// Refuse before creating any file: Attach below rejects a missing/wrong-rate input too, but by then both
 		// WAVs exist, and Stop only closes them, so a refused Record would leave an empty header-only pair.
-		if (!DrySignalRecording::IsReady()) return AUDCLNT_E_DEVICE_INVALIDATED;
+		// Player 1's input is required; Player 2's take is added only when that input is live right now.
+		if (!DrySignalRecording::IsReady(0)) return AUDCLNT_E_DEVICE_INVALIDATED;
+		static const wchar_t* const dryLabels[DRY_ROUTES] = { L"dry", L"dry-p2" };
+		static_assert(DRY_ROUTES == DrySignalRecording::ROUTES, "one dry take per input route");
 		auto wet = std::make_shared<GameAudioRecorder>();
-		auto dry = std::make_shared<GameAudioRecorder>();
-		dry->SetNormalizeOnClose(true);
-		// One take name for both files so the pair differs only by the -wet/-dry label (the video
+		std::shared_ptr<GameAudioRecorder> dry[DRY_ROUTES];
+		// One take name for every file so they differ only by the -wet/-dry/-dry-p2 label (the video
 		// muxed from the wet file keeps that name too).
 		const std::wstring takeName = GameAudioRecorder::NewTakeName(directory);
 		HRESULT result = wet->Open(directory, wetMaximumFrames, L"wet", takeName);
 		if (FAILED(result)) return result;
-		result = dry->Open(directory, 4096, L"dry", takeName);
-		if (FAILED(result)) { wet->Close(); return result; }
+		for (size_t route = 0; route < DRY_ROUTES; ++route)
+		{
+			if (route > 0 && !DrySignalRecording::IsReady(route)) continue;
+			dry[route] = std::make_shared<GameAudioRecorder>();
+			dry[route]->SetNormalizeOnClose(true);
+			dry[route]->SetStartReference(wet.get());   // every file of the take begins where the wet one does
+			result = dry[route]->Open(directory, 4096, dryLabels[route], takeName);
+			if (SUCCEEDED(result)) continue;
+			if (route == 0) { wet->Close(); return result; }
+			LOG_ERROR("(AUDIO ROUTING) Player 2 dry take not recorded, HRESULT " << std::hex << result << std::dec << std::endl);
+			dry[route].reset();
+		}
 		{
 			std::lock_guard<std::mutex> guard(stateMutex);
 			wetRecorder = std::move(wet);
-			dryRecorder = std::move(dry);
+			for (size_t route = 0; route < DRY_ROUTES; ++route) dryRecorders[route] = std::move(dry[route]);
 			lastError = S_OK;
 		}
 		wetGate.Open();
-		const HRESULT attached = DrySignalRecording::Attach(*this);
-		if (FAILED(attached))
+		for (size_t route = 0; route < DRY_ROUTES; ++route)
 		{
-			std::wstring ignoredPath;
-			uint64_t ignoredFrames = 0, ignoredStarted = 0;
-			Stop(ignoredPath, ignoredFrames, ignoredStarted);
-			return attached;
+			if (!dryRecorders[route]) continue;
+			const HRESULT attached = DrySignalRecording::Attach(route, *this);
+			if (SUCCEEDED(attached)) { dryAttached[route] = true; continue; }
+			if (route == 0)
+			{
+				std::wstring ignoredPath;
+				uint64_t ignoredFrames = 0, ignoredStarted = 0;
+				Stop(ignoredPath, ignoredFrames, ignoredStarted);
+				return attached;
+			}
+			// Player 2 went quiet between the check and here: drop its (empty) file, keep the take.
+			std::shared_ptr<GameAudioRecorder> unused;
+			{
+				std::lock_guard<std::mutex> guard(stateMutex);
+				unused = std::move(dryRecorders[route]);
+			}
+			unused->SetDeleteOnClose(true);
+			unused->Close();
 		}
-		dryAttached = true;
 		return S_OK;
 	}
 
@@ -360,9 +445,9 @@ namespace Audio
 		if (scope && wetRecorder) wetRecorder->Submit(stereo, frames);
 	}
 
-	void RecordingSession::SubmitDry(const float* mono, uint32_t frames, uint32_t sampleRate) noexcept
+	void RecordingSession::SubmitDry(size_t route, const float* mono, uint32_t frames, uint32_t sampleRate) noexcept
 	{
-		if (dryRecorder) dryRecorder->SubmitMono(mono, frames, sampleRate);
+		if (route < DRY_ROUTES && dryRecorders[route]) dryRecorders[route]->SubmitMono(mono, frames, sampleRate);
 	}
 
 	void RecordingSession::Stop(std::wstring& wetPath, uint64_t& frames, uint64_t& started)
@@ -370,30 +455,57 @@ namespace Audio
 		wetPath.clear();
 		frames = 0;
 		started = 0;
-		if (dryAttached)
+		for (size_t route = 0; route < DRY_ROUTES; ++route)
 		{
-			DrySignalRecording::Detach();
-			dryAttached = false;
+			if (!dryAttached[route]) continue;
+			DrySignalRecording::Detach(route);
+			dryAttached[route] = false;
 		}
 		wetGate.CloseAndWait();   // no wet block is being submitted from here on
-		std::shared_ptr<GameAudioRecorder> wet, dry;
+		std::shared_ptr<GameAudioRecorder> wet, dry[DRY_ROUTES];
 		{
 			std::lock_guard<std::mutex> guard(stateMutex);
 			wet = std::move(wetRecorder);
-			dry = std::move(dryRecorder);
+			for (size_t route = 0; route < DRY_ROUTES; ++route) dry[route] = std::move(dryRecorders[route]);
 			if (!wet) return;
 			lastError = wet->GetError();
-			if (dry && FAILED(dry->GetError())) lastError = dry->GetError();
+			// Only Player 1's dry take fails the session; a Player 2 problem is logged by its recorder.
+			if (dry[0] && FAILED(dry[0]->GetError())) lastError = dry[0]->GetError();
 		}
 		frames = wet->GetFrames();
 		started = wet->GetStarted();
 		wetPath = wet->GetPath();
 		// The wet file is finished here (a flush): the video helper muxes it as soon as Stop returns.
 		wet->Close();
-		if (dry)
+
+		// A Player 2 take that never rose above -40 dBFS was an input nobody played (hiss and hum peak lower
+		// than that, see tools/noise-doctor.py): it is removed rather than left as a file of noise.
+		constexpr int32_t PLAYED_PEAK = 328;   // -40 dBFS
+		for (size_t route = 1; route < DRY_ROUTES; ++route)
+			if (dry[route] && dry[route]->GetPeak() < PLAYED_PEAK) dry[route]->SetDeleteOnClose(true);
+
+		// Kept dry takes share one gain so the players keep their balance (summed level against the wet mix,
+		// the loudest peak for the limit). With only Player 1 this is the same gain NormalizeFile would pick.
+		const double wetMeanSquare = wet->GetMeanSquare();
+		double dryMeanSquare = 0.0;
+		int32_t dryPeak = 0;
+		size_t kept = 0;
+		for (size_t route = 0; route < DRY_ROUTES; ++route)
 		{
-			dry->SetLoudnessReference(wet->GetMeanSquare());
-			GameAudioRecorder::CloseInBackground(std::move(dry));
+			const auto& take = dry[route];
+			if (!take || FAILED(take->GetError()) || take->GetPeak() < (route == 0 ? 1 : PLAYED_PEAK)) continue;
+			dryMeanSquare += take->GetMeanSquare();
+			dryPeak = (std::max)(dryPeak, take->GetPeak());
+			++kept;
+		}
+		const double sharedGain = kept > 1 ? GameAudioRecorder::NormalizeGain(wetMeanSquare, dryMeanSquare, dryPeak) : 0.0;
+		for (auto& take : dry)
+		{
+			if (!take) continue;
+			take->SetStartReference(nullptr);
+			take->SetLoudnessReference(wetMeanSquare);
+			if (sharedGain > 0.0) take->SetNormalizeGain(sharedGain);
+			GameAudioRecorder::CloseInBackground(std::move(take));
 		}
 	}
 
@@ -401,7 +513,7 @@ namespace Audio
 	{
 		std::lock_guard<std::mutex> guard(stateMutex);
 		if (wetRecorder && FAILED(wetRecorder->GetError())) return wetRecorder->GetError();
-		if (dryRecorder && FAILED(dryRecorder->GetError())) return dryRecorder->GetError();
+		if (dryRecorders[0] && FAILED(dryRecorders[0]->GetError())) return dryRecorders[0]->GetError();
 		return lastError;
 	}
 

@@ -2,8 +2,10 @@
 // Recording takes started from inside the game (overlay Record button and the record hotkey), without the
 // desktop Audio Bridge window.
 //
-// Audio: the engine records the paired wet + dry WAVs in process (control ops 2 start / 3 stop), exactly as the
-// desktop bridge asks it to.
+// Audio: the engine records the wet + dry WAVs in process (control ops 2 start / 3 stop), exactly as the
+// desktop bridge asks it to. In multiplayer Player 2 gets its own dry WAV (-dry-p2) beside Player 1's (-dry);
+// the wet stays one file because the game mixes both players before the output tap. All files of a take start
+// at the same moment (padded to the wet file's first block), so they line up when dropped into a DAW.
 // Video: RSMods.exe is started hidden with --video-take (GUI/Features/VideoRecorder/VideoTakeHost.cs). It runs the same Windows
 // Graphics Capture recorder the desktop bridge uses, and on stop muxes the capture with the finished WAV into an
 // MP4, deletes the now-redundant wet WAV (a video take is always dry WAV + MP4), then exits. Out of process on purpose: an encoder crash or hang loses one take, not the game, and the
