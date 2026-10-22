@@ -394,7 +394,7 @@ namespace RSMods.Audio
 				cachedModeError = error.Message;
 			}
 			cachedProxyRegistered = AsioProxySetup.IsProxyRegistered();
-			cachedAsioDrivers = AsioProxySetup.ListRealDrivers();
+			cachedAsioDrivers = AsioProxySetup.ListBridgeDrivers();
 			RefreshDiskSpace();
 		}
 

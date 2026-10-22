@@ -53,22 +53,38 @@ namespace RSMods.Audio
 			return new List<string>(names);
 		}
 
-		/// <summary>ASIO drivers registered for 64-bit programs only. Rocksmith and RS_ASIO are 32-bit and cannot see
-		/// them, so an interface listed here is invisible to the game (the Audit says so).</summary>
+		/// <summary>ASIO drivers registered for 64-bit programs only (Line 6 Helix Stadium, for one). Rocksmith and RS_ASIO
+		/// are 32-bit and cannot load them; the bridge driver can, through its 64-bit host (DLL/AsioProxy/Remote64.hpp).
+		/// Machine and user hives, as the bridge's own resolver (Remote64::Resolve) reads both.</summary>
 		public static List<string> ListDriversOnlyIn64Bit()
 		{
-			var only64 = new List<string>();
-			if (!Environment.Is64BitOperatingSystem) return only64;
+			var only64 = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+			if (!Environment.Is64BitOperatingSystem) return new List<string>();
 			var x86 = new HashSet<string>(ListRealDrivers(), StringComparer.OrdinalIgnoreCase);
-			try
+			foreach (var hive in new[] { RegistryHive.LocalMachine, RegistryHive.CurrentUser })
 			{
-				using (var asio = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64).OpenSubKey(@"Software\ASIO"))
-					if (asio != null)
-						foreach (string name in asio.GetSubKeyNames())
-							if (!x86.Contains(name) && !string.Equals(name, ProxyName, StringComparison.OrdinalIgnoreCase)) only64.Add(name);
+				try
+				{
+					using (var baseKey = RegistryKey.OpenBaseKey(hive, RegistryView.Registry64))
+					using (var asio = baseKey.OpenSubKey(@"Software\ASIO"))
+						if (asio != null)
+							foreach (string name in asio.GetSubKeyNames())
+								if (!x86.Contains(name) && !string.Equals(name, ProxyName, StringComparison.OrdinalIgnoreCase)) only64.Add(name);
+				}
+				catch { /* hive unreadable; skip */ }
 			}
-			catch { /* unreadable: report nothing */ }
-			return only64;
+			return new List<string>(only64);
+		}
+
+		/// <summary>Every interface the bridge can wrap: the 32-bit drivers plus the 64-bit-only ones it opens through its
+		/// 64-bit host. Anything that picks or checks the bridge's interface (Target, InputTarget, Set up) uses this list.
+		/// ListRealDrivers alone made a 64-bit-only Target look uninstalled, so FillTarget replaced it with the only 32-bit
+		/// driver (Realtek ASIO) every time the settings app opened, and the player's pick never stuck.</summary>
+		public static List<string> ListBridgeDrivers()
+		{
+			var names = new SortedSet<string>(ListRealDrivers(), StringComparer.OrdinalIgnoreCase);
+			names.UnionWith(ListDriversOnlyIn64Bit());
+			return new List<string>(names);
 		}
 
 		/// <summary>True once the proxy is discoverable by ASIO hosts, i.e. its name is under HKLM\Software\ASIO.</summary>
@@ -373,7 +389,7 @@ namespace RSMods.Audio
 		/// chosen at install (several drivers, none named) is filled in once RS_ASIO.ini names one.</summary>
 		public static void FillTarget(string gameDirectory)
 		{
-			var real = ListRealDrivers();
+			var real = ListBridgeDrivers();
 			string target = ReadTarget();
 			if (real.Exists(r => string.Equals(r, target, StringComparison.OrdinalIgnoreCase))) return;
 			string driver = ResolveBridgeInterface(real, target, ReadOutputDriver(gameDirectory));

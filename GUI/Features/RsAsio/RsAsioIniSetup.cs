@@ -72,7 +72,7 @@ namespace RSMods
 		{
 			var plan = new Plan();
 			var ini = IniText.Load(IniPath(gameDirectory));
-			var installed = AsioProxySetup.ListRealDrivers();
+			var installed = AsioProxySetup.ListBridgeDrivers();   // the bridge opens 64-bit-only drivers too
 			bool Installed(string name) => installed.Exists(d => string.Equals(d, name, StringComparison.OrdinalIgnoreCase));
 
 			// The interface: the one the player's file already names (output first), else the bridge's current one,

@@ -416,11 +416,11 @@ namespace RSMods
 			asioDriverRow.Visible = asioDriverDivider.Visible = asioMode;
 			if (switchingInterface) return;   // the switch writes its own status line
 
-			// The picker: every 32-bit ASIO driver (what RS_ASIO can open), the bridge's current interface selected.
+			// The picker: every interface the bridge can open (32-bit drivers and 64-bit-only ones), its current one selected.
 			syncingAudioSetup = true;
 			try
 			{
-				var drivers = AsioProxySetup.ListRealDrivers();
+				var drivers = AsioProxySetup.ListBridgeDrivers();
 				asioInterfacePicker.BeginUpdate();
 				asioInterfacePicker.Items.Clear();
 				foreach (string driver in drivers) asioInterfacePicker.Items.Add(driver);
