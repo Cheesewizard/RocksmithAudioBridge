@@ -15,6 +15,7 @@
 #include <atomic>
 #include <thread>
 #include <mutex>
+#include "ToneGates.hpp"
 
 namespace VstHostLink
 {
@@ -991,6 +992,16 @@ namespace VstHostLink
 		PublishPopupName(shared, on);
 		FollowTuner(on);
 		PumpCommands(shared, hostRunning);
+		// The Noise gate follows the tone that plays: a saved tone's own gate, else the global one (ToneGates.hpp).
+		// Off, standby or an unsaved chain: the global gate.
+		std::string playingTone;
+		if (on)
+		{
+			char tone[VstHostControl::kNameChars + 1]{};
+			memcpy(tone, shared->toneName, VstHostControl::kNameChars);
+			playingTone = tone;
+		}
+		ToneGates::SetActiveTone(playingTone);
 	}
 
 	bool IsLoading()
@@ -1185,6 +1196,7 @@ namespace VstHostLink
 	}
 
 	std::wstring TonesFolder() { return DataDirectory() + L"\\Tones"; }
+	std::wstring DataFolder() { return DataDirectory(); }
 
 	void OpenTonesFolder()
 	{
@@ -1313,7 +1325,7 @@ namespace VstHostLink
 	void NotePageInUse() { g_pageUsedAt = GetTickCount64(); }
 	void SetLevels(int inputTenths, int outputTenths) { Queue(Command::SetLevels, inputTenths, outputTenths); }
 	void LoadTone(const std::string& name) { g_toneBeforeSong.clear(); Queue(Command::LoadTone, 0, 0, Wide(name)); }
-	void SaveTone(const std::string& name) { Queue(Command::SaveTone, 0, 0, Wide(name)); KickSlow(); }
+	void SaveTone(const std::string& name) { ToneGates::ToneSaved(name); Queue(Command::SaveTone, 0, 0, Wide(name)); KickSlow(); }
 	std::string DefaultTone() { return ReadSlow([](SlowState& slow) { return slow.defaultTone; }); }
 
 	void SetDefaultTone(const std::string& tone)
@@ -1327,6 +1339,7 @@ namespace VstHostLink
 	{
 		if (_stricmp(DefaultTone().c_str(), name.c_str()) == 0) SetDefaultTone({});
 		Queue(Command::DeleteTone, 0, 0, Wide(name));
+		ToneGates::DeleteTone(name);
 		// Songs that used it go back to the player's usual tone instead of failing to load a missing file.
 		for (const std::string& song : SongsUsingTone(name))
 			WritePrivateProfileStringW(L"Songs", Wide(song).c_str(), nullptr, SongTonesFile().c_str());
@@ -1338,6 +1351,7 @@ namespace VstHostLink
 	{
 		if (from.empty() || to.empty() || from == to) return;
 		Queue(Command::RenameTone, 0, 0, Wide(from) + L"\n" + Wide(to));
+		ToneGates::RenameTone(from, to);
 		for (const std::string& song : SongsUsingTone(from))
 			WritePrivateProfileStringW(L"Songs", Wide(song).c_str(), Wide(to).c_str(), SongTonesFile().c_str());
 		if (_stricmp(g_toneBeforeSong.c_str(), from.c_str()) == 0) g_toneBeforeSong = to;

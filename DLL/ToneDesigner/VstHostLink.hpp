@@ -95,6 +95,7 @@ namespace VstHostLink
 	// Tones: the saved chains.
 	const std::vector<std::string>& Tones();
 	void OpenTonesFolder();
+	std::wstring DataFolder();           // %APPDATA%\RocksmithAudioBridge\VstHost: SongTones.ini, ToneGates.ini
 	std::wstring TonesFolder();          // %APPDATA%\RocksmithAudioBridge\VstHost\Tones (not touched by install or uninstall)
 	std::vector<std::string> SongsUsingTone(const std::string& tone);   // song keys from SongTones.ini
 	size_t SongToneCount();              // songs with a tone of their own

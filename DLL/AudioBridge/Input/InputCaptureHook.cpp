@@ -1749,7 +1749,7 @@ namespace Audio::AsioHook
 		g_inputGainLinear.store(std::pow(10.0f, decibels / 20.0f), std::memory_order_relaxed);
 	}
 
-	void SetNoiseGateThresholdDb(float decibels)
+	void SetNoiseGateThresholdDb(float decibels, bool resetGate)
 	{
 		// A threshold at or above 0 dBFS is meaningless, so it doubles as the "off" signal: store 0
 		// (disabled, raw input untouched). The revision makes the audio thread reset its detector after
@@ -1762,7 +1762,7 @@ namespace Audio::AsioHook
 		}
 		decibels = std::clamp(decibels, -90.0f, -20.0f);
 		g_gateThresholdLinear.store(std::pow(10.0f, decibels / 20.0f), std::memory_order_relaxed);
-		g_gateThresholdRevision.fetch_add(1, std::memory_order_release);
+		if (resetGate) g_gateThresholdRevision.fetch_add(1, std::memory_order_release);
 	}
 
 	void StartLatencyCapture(int frames)

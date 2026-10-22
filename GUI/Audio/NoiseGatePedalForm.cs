@@ -207,6 +207,22 @@ namespace RSMods.Audio
 		private readonly PedalKnob reduction = new PedalKnob("REDUCTION") { Minimum = -80, Maximum = -10, Step = 1, DefaultValue = -60, Formatter = NoiseGateFormat.Reduction };
 		private readonly PedalKnob attack = new PedalKnob("ATTACK") { Minimum = 0.1, Maximum = 20, Step = 0.1, DefaultValue = 0.5, LogTaper = true, Formatter = NoiseGateFormat.Attack };
 		private readonly PedalFootswitch footswitch = new PedalFootswitch();
+		// Text-style button, shown only while the playing tone has gate settings of its own.
+		private readonly LinkLabel useGlobalLink = new LinkLabel
+		{
+			Text = "Use the global gate",
+			AutoSize = true,
+			UseMnemonic = false,
+			Visible = false,
+			BackColor = PedalKnob.Body,
+			LinkColor = PedalKnob.Lettering,
+			ActiveLinkColor = PedalKnob.Fill,
+			VisitedLinkColor = PedalKnob.Lettering,
+			LinkBehavior = LinkBehavior.HoverUnderline,
+			TabStop = true,
+			AccessibleName = "Use the global gate"
+		};
+		private const int MaxToneTitleLength = 28;
 		private readonly ToolTip tips = new ToolTip { AutoPopDelay = 12000, InitialDelay = 400, ReshowDelay = 120 };
 		private uint meter;
 
@@ -214,10 +230,12 @@ namespace RSMods.Audio
 		public event EventHandler GateToggled;
 		/// <summary>A knob moved (live) or a knob gesture ended (Committed).</summary>
 		public event EventHandler<GatePedalChangeEventArgs> SettingChanged;
+		/// <summary>"Use the global gate" was pressed: the playing tone should drop its own gate settings (op 33).</summary>
+		public event EventHandler UseGlobalRequested;
 
 		public NoiseGatePedalForm()
 		{
-			Text = "Noise gate · Player 1";
+			Text = TitleFor("");
 			AutoScaleDimensions = new SizeF(96F, 96F);
 			AutoScaleMode = AutoScaleMode.Dpi;
 			FormBorderStyle = FormBorderStyle.FixedToolWindow;
@@ -229,7 +247,7 @@ namespace RSMods.Audio
 			BackColor = StudioTheme.Background;
 			ForeColor = StudioTheme.Ink;
 			Font = StudioTheme.Body;
-			ClientSize = new Size(300, 512);
+			ClientSize = new Size(300, 534);
 			DoubleBuffered = true;
 
 			body = new PedalBody(this) { Dock = DockStyle.Fill };
@@ -238,6 +256,8 @@ namespace RSMods.Audio
 			body.Controls.Add(reduction);
 			body.Controls.Add(attack);
 			body.Controls.Add(footswitch);
+			useGlobalLink.Font = StudioTheme.Small;
+			body.Controls.Add(useGlobalLink);
 			Controls.Add(body);
 
 			foreach (var knob in new[] { threshold, decay, reduction, attack })
@@ -252,6 +272,7 @@ namespace RSMods.Audio
 				current.ValueCommitted += (sender, args) => SettingChanged?.Invoke(this, new GatePedalChangeEventArgs(isThreshold, true));
 			}
 			footswitch.Toggled += (sender, args) => GateToggled?.Invoke(this, EventArgs.Empty);
+			useGlobalLink.LinkClicked += (sender, args) => UseGlobalRequested?.Invoke(this, EventArgs.Empty);
 
 			StudioTheme.StyleTips(tips);
 			const string turn = " Drag up or down, scroll, or use the arrow keys. Double-click to reset.";
@@ -260,6 +281,7 @@ namespace RSMods.Audio
 			tips.SetToolTip(reduction, "Reduction from -80 to -10 dB: how far the gate turns the noise down. -60 is near silence; around -20 leaves a faint natural floor." + turn);
 			tips.SetToolTip(attack, "Attack from 0.1 to 20 ms: how fast the gate opens. Keep it short so your pick attack stays sharp." + turn);
 			tips.SetToolTip(footswitch, "Switches the noise gate on or off.");
+			tips.SetToolTip(useGlobalLink, "This tone stops using its own gate settings and follows the global gate again.");
 		}
 
 		public bool GateOn => footswitch.On;
@@ -277,6 +299,39 @@ namespace RSMods.Audio
 			reduction.SetValue(reductionDb);
 			attack.SetValue(attackTenths / 10.0);
 			body.Invalidate();
+		}
+
+		/// <summary>
+		/// Shows where edits go: the playing tone (empty = all tones, the global gate) in the title, and the
+		/// "Use the global gate" button only while that tone has gate settings of its own.
+		/// </summary>
+		public void SetTarget(string tone, bool own)
+		{
+			string title = TitleFor(tone);
+			if (Text != title) Text = title;
+			bool showLink = own && !string.IsNullOrEmpty(tone);
+			if (useGlobalLink.Visible != showLink) useGlobalLink.Visible = showLink;
+		}
+
+		/// <summary>"Noise gate · " plus the tone name (ellipsized when long), or "All tones" for the global gate.</summary>
+		public static string TitleFor(string tone) => "Noise gate · " + (string.IsNullOrEmpty(tone) ? "All tones" : Ellipsize(tone, MaxToneTitleLength));
+
+		public static string Ellipsize(string text, int maxLength)
+		{
+			if (string.IsNullOrEmpty(text) || text.Length <= maxLength) return text ?? "";
+			return text.Substring(0, Math.Max(1, maxLength - 1)).TrimEnd() + "…";
+		}
+
+		/// <summary>A knob gesture (drag, held key, scroll) is in progress.</summary>
+		public bool IsAdjusting => threshold.IsAdjusting || decay.IsAdjusting || reduction.IsAdjusting || attack.IsAdjusting;
+
+		/// <summary>Ends any knob gesture without committing it: the values it was editing belong to another target now.</summary>
+		public void CancelGestures()
+		{
+			threshold.CancelGesture();
+			decay.CancelGesture();
+			reduction.CancelGesture();
+			attack.CancelGesture();
 		}
 
 		/// <summary>Mirror the settings row's check onto the footswitch without raising GateToggled.</summary>
@@ -430,6 +485,10 @@ namespace RSMods.Audio
 				}
 				int switchSize = L(64);
 				owner.footswitch.Bounds = new Rectangle(box.X + (box.Width - switchSize) / 2, box.Bottom - L(18) - switchSize, switchSize, switchSize);
+				// "Use the global gate" sits centred between the meter caption and the footswitch.
+				var link = owner.useGlobalLink;
+				Size linkSize = link.GetPreferredSize(Size.Empty);
+				link.Location = new Point(box.X + (box.Width - linkSize.Width) / 2, owner.footswitch.Top - L(8) - linkSize.Height);
 			}
 
 			protected override void OnPaint(PaintEventArgs e)

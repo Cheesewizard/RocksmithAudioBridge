@@ -33,6 +33,7 @@
     <ClCompile Include="AudioBridge\Engine\OutputTap.cpp" />
     <ClCompile Include="ExternalAmp\ExternalAmp.cpp" />
     <ClCompile Include="ToneDesigner\VstHostLink.cpp" />
+    <ClCompile Include="ToneDesigner\ToneGates.cpp" />
     <ClCompile Include="ToneDesigner\ToneSwitchPopup.cpp" />
     <ClCompile Include="ExternalAmp\CableAmpLink.cpp" />
     <ClCompile Include="AsioProxy\AmpLinkHost.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
@@ -310,6 +311,7 @@
     <ClInclude Include="AudioBridge\Engine\OutputTap.hpp" />
     <ClInclude Include="ExternalAmp\ExternalAmp.hpp" />
     <ClInclude Include="ToneDesigner\VstHostLink.hpp" />
+    <ClInclude Include="ToneDesigner\ToneGates.hpp" />
     <ClInclude Include="ToneDesigner\ToneSwitchPopup.hpp" />
     <ClInclude Include="ExternalAmp\CableAmpLink.hpp" />
     <ClInclude Include="Core\RsModsHelper.hpp" />

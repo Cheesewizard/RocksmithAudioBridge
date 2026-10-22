@@ -115,6 +115,22 @@ namespace RSMods.Audio
 		private string pendingGateShape;
 		private string persistedGateShape;
 		private const int DefaultGateThresholdTenths = -620;
+		// Per-tone gate. The game DLL decides where ops 19 and 31 land: the playing saved Tone designer tone, or the
+		// global gate (RSMods.ini) for the game amp or an unsaved chain. Op 32 reports that target and its values; the
+		// panel polls it about every GateTargetPollMilliseconds on the status poll and adopts a new revision when no
+		// gate edit is pending and no knob gesture is running. gateTarget holds the last adopted reply (normalized to
+		// the pedal ranges) and is the baseline the edits are compared against: ApplyMixer re-reads op 32 right before
+		// it sends a gate edit, drops the edit if the target moved to another tone, and otherwise merges dial by dial
+		// (the dials the user changed win, the rest take the target's current values), so op 31, which always carries
+		// all three dials, never sends a stale value. Null = not connected, or a DLL without op 32: the global gate.
+		private const int GateTargetPollMilliseconds = 500;
+		private GateTarget gateTarget;
+		private bool gateTargetSupported = true;
+		private DateTime nextGateTargetPoll = DateTime.MinValue;
+		// Op 19 cannot carry a threshold while the gate is off. When the threshold knob moves while off, this holds the
+		// tone it was moved for ("" = all tones), so an op 32 reply still showing the old kept threshold does not undo
+		// it before the gate is switched back on (which sends it). Null = nothing kept.
+		private string gateKeptThresholdTone;
 		// Rocksmith gate (DLL forces the game's own P1_NoiseFloor RTPC). Its own on/off + threshold, kept
 		// separate from the pre-signal suppressor above; the two combine to give native / pre / both.
 		private readonly StudioCheck rgEnableCheck = new StudioCheck("Rocksmith gate");
@@ -1254,7 +1270,7 @@ namespace RSMods.Audio
 			tips.SetToolTip(inputGainSlider, "Input gain from 0 to +20 dB. Type an exact value in the box or nudge by 0.1 dB.");
 			tips.SetToolTip(gainInput, "Input gain from 0 to +20 dB. Type an exact value or nudge by 0.1 dB.");
 			tips.SetToolTip(gateEnableCheck, "Turns the noise gate on or off. It opens at the threshold, listening to the guitar's own range rather than the hiss or hum, and fades each note out smoothly. Applies live.");
-			tips.SetToolTip(gateSummary, "Threshold, decay and reduction. Open the pedal to change them and to see the live input meter.");
+			tips.SetToolTip(gateSummary, "Where the gate settings apply (the tone playing in the Tone designer, or all tones), then threshold, decay and reduction. Open the pedal to change them and to see the live input meter.");
 			tips.SetToolTip(gateLight, "Lights while the gate is open and letting your guitar through.");
 			tips.SetToolTip(gatePedalButton, "Opens the noise gate pedal: threshold, decay, reduction and attack, with a live input meter.");
 			tips.SetToolTip(compressorEnableCheck, "Compresses the guitar input to even out level swings during sustained notes. Applies live.");
@@ -1425,6 +1441,7 @@ namespace RSMods.Audio
 			{
 				client = null;
 				latestStatus = null;
+				RevertGateToGlobal();
 				UpdateGateIndicators();
 				connectionChip.Set("Audio bridge off", ChipTone.Idle);
 				SetPollInterval(SearchingPollMilliseconds);
@@ -1445,6 +1462,9 @@ namespace RSMods.Audio
 					// About to (re)establish the pipe: queue a one-time push of the saved input settings
 					// below, so the live bridge matches the sliders even if it launched at a different value.
 					pushInputSettingsOnConnect = true;
+					// A new connection may be a new game DLL: ask op 32 again, and at once.
+					gateTargetSupported = true;
+					nextGateTargetPoll = DateTime.MinValue;
 					// Steam's launcher can briefly run a second Rocksmith2014.exe in the same folder that never
 					// hosts the control pipe. Prefer whichever matching process is actually serving its pipe so
 					// the connection does not latch onto the wrong one and report "not connected".
@@ -1482,6 +1502,13 @@ namespace RSMods.Audio
 					if (pendingGateShape == null) pendingGateShape = persistedGateShape;
 					if (!pendingCompressor.HasValue) pendingCompressor = persistedCompressor;
 					if (!pendingRocksmithGate.HasValue) pendingRocksmithGate = (persistedRgOverride, persistedRgTenths);
+				}
+				// Where gate edits go (op 32), on the same serialised pipe turn, at most every ~500 ms.
+				if (gateTargetSupported && DateTime.UtcNow >= nextGateTargetPoll)
+				{
+					nextGateTargetPoll = DateTime.UtcNow.AddMilliseconds(GateTargetPollMilliseconds);
+					var target = await ReadGateTargetAsync(client);
+					if (target != null && !IsDisposed) OnGateTargetPolled(target);
 				}
 				// The bridge hosts its control pipe even when it is not routing audio (passthrough),
 				// so a live connection does not imply an owned output. In that state there is no
@@ -1560,6 +1587,7 @@ namespace RSMods.Audio
 				isVirtualRoute = false;
 				routedEndpointId = "";
 				routeSourceStalled = false;
+				RevertGateToGlobal();
 				SetPollInterval(SearchingPollMilliseconds);
 				connectionChip.Set(Summarize(error), ChipTone.Idle);
 				if (error is NotSupportedException) SetStatus(error.Message, ChipTone.Bad);
@@ -1649,6 +1677,18 @@ namespace RSMods.Audio
 				// Operation 15 = guitar input make-up gain, sent as tenths of a dB (matches RSMods.ini).
 				if (requestedGain.HasValue)
 					latestStatus = await client.SendAsync(15, requestedGain.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+				// Gate edits go to whatever op 32 reports right now (a tone or all tones). Re-read it first so a
+				// target that moved since the last poll never receives values meant for another target.
+				if ((requestedGate.HasValue || requestedGateShape != null) && gateTargetSupported)
+				{
+					var target = await ReadGateTargetAsync(client);
+					if (target != null && !IsDisposed)
+					{
+						var reconciled = ReconcileGateEdit(target, requestedGate, requestedGateShape);
+						requestedGate = reconciled.gate;
+						requestedGateShape = reconciled.shape;
+					}
+				}
 				// Operation 19 = guitar input noise gate threshold, signed tenths of a dB (0 = off).
 				if (requestedGate.HasValue)
 					latestStatus = await client.SendAsync(19, requestedGate.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
@@ -1678,13 +1718,15 @@ namespace RSMods.Audio
 				if (requestedGate.HasValue && !pendingNoiseGateTenths.HasValue) pendingNoiseGateTenths = requestedGate;
 				if (requestedGateShape != null && pendingGateShape == null) pendingGateShape = requestedGateShape;
 				// The game did not take the gate edit, so it will not save it either: write it to RSMods.ini here so
-				// it is not lost if Rocksmith has closed (it is re-sent on the next connection anyway).
-				if (requestedGate.HasValue || requestedGateShape != null) TryWriteNoiseGateIni();
+				// it is not lost if Rocksmith has closed (it is re-sent on the next connection anyway). Only for the
+				// global gate: an edit meant for a tone must never land in the global keys; it is dropped below.
+				if ((requestedGate.HasValue || requestedGateShape != null) && IsGateTargetGlobal) TryWriteNoiseGateIni();
 				if (requestedCompressor.HasValue && !pendingCompressor.HasValue) pendingCompressor = requestedCompressor;
 				if (requestedLimiter != null && pendingLimiter == null) pendingLimiter = requestedLimiter;
 				if (requestedRg.HasValue && !pendingRocksmithGate.HasValue) pendingRocksmithGate = requestedRg;
 				client = null;
 				latestStatus = null;
+				if (!IsDisposed) RevertGateToGlobal();
 				if (!IsDisposed) UpdateGateIndicators();
 				if (!IsDisposed) SetStatus("Live audio controls: " + error.Message, ChipTone.Bad);
 			}
@@ -2444,7 +2486,7 @@ namespace RSMods.Audio
 
 		private void UpdateGateSummary()
 		{
-			gateSummary.Text = NoiseGateFormat.Threshold(gateThresholdTenths / 10.0)
+			gateSummary.Text = GateTargetLabel(GateTone) + ": " + NoiseGateFormat.Threshold(gateThresholdTenths / 10.0)
 				+ " · decay " + NoiseGateFormat.Decay(gateDecayMs)
 				+ " · " + NoiseGateFormat.Reduction(gateReductionDb);
 			gateSummary.ForeColor = gateEnableCheck.Checked ? StudioTheme.Muted : StudioTheme.Faint;
@@ -2461,6 +2503,8 @@ namespace RSMods.Audio
 		// The row's check or the pedal's footswitch turned the gate on or off: send op 19 now and keep both in step.
 		private void OnGateSwitched()
 		{
+			// Switching on sends the threshold the pedal shows, so a threshold kept while off is delivered now.
+			if (gateEnableCheck.Checked) gateKeptThresholdTone = null;
 			pendingNoiseGateTenths = GateEffectiveTenths();
 			lastMixerEdit = DateTime.UtcNow;
 			FlushMixerNow();
@@ -2479,6 +2523,7 @@ namespace RSMods.Audio
 			{
 				gateThresholdTenths = ClampGateThreshold(pedal.ThresholdTenths);
 				if (gateEnableCheck.Checked) pendingNoiseGateTenths = gateThresholdTenths;
+				else gateKeptThresholdTone = GateTone;
 			}
 			else
 			{
@@ -2507,9 +2552,11 @@ namespace RSMods.Audio
 			}
 			var pedal = new NoiseGatePedalForm();
 			pedal.SetState(gateEnableCheck.Checked, gateThresholdTenths, gateDecayMs, gateReductionDb, gateAttackTenths);
+			pedal.SetTarget(GateTone, gateTarget != null && gateTarget.Own);
 			pedal.SetMeter(latestStatus != null ? latestStatus.GateMeter : 0u);
 			pedal.GateToggled += (sender, args) => { if (!pedal.IsDisposed) gateEnableCheck.Checked = pedal.GateOn; };
 			pedal.SettingChanged += OnPedalChanged;
+			pedal.UseGlobalRequested += OnUseGlobalGate;
 			pedal.FormClosed += (sender, args) => { if (gatePedal == pedal) gatePedal = null; };
 			gatePedal = pedal;
 			// Open beside the Pedal button, then pull it back onto that screen once its DPI-scaled size is known.
@@ -2530,21 +2577,270 @@ namespace RSMods.Audio
 			bool live = IsGateLive;
 			try
 			{
+				bool forTone = live && !IsGateTargetGlobal;
 				if (!live)
 					WriteNoiseGateIni();
-				else if (lastChanged && tenths == 0)
+				else if (lastChanged && tenths == 0 && !forTone)
 					// Op 19 cannot carry a threshold while the gate is off, and the DLL only saves the last
-					// threshold for a negative value, so keep the one the pedal shows ourselves.
+					// threshold for a negative value, so keep the one the pedal shows ourselves. Only for the
+					// global gate: a tone's values are the DLL's to save, never the global keys.
 					WriteModSetting(RSMods.ReadSettings.NoiseGateLastThresholdIdentifier, gateThresholdTenths.ToString(System.Globalization.CultureInfo.InvariantCulture));
 				persistedNoiseGateTenths = tenths;
 				persistedNoiseGateLastTenths = gateThresholdTenths;
 				persistedGateShape = shape;
-				string state = tenths < 0 ? "Noise gate on at " + NoiseGateFormat.Threshold(tenths / 10.0) : "Noise gate off";
-				SetStatus(live ? state + ", applied live." : state + ". Saved for when Rocksmith starts.", ChipTone.Good);
+				string where = forTone ? " for " + NoiseGatePedalForm.Ellipsize(GateTone, 32) : "";
+				string state = tenths < 0 ? "Noise gate on at " + NoiseGateFormat.Threshold(tenths / 10.0) + where : "Noise gate off" + where;
+				if (forTone && tenths == 0 && lastChanged)
+					SetStatus(state + ". The new threshold applies when you switch the gate on.", ChipTone.Good);
+				else
+					SetStatus(live ? state + ", applied live." : state + ". Saved for when Rocksmith starts.", ChipTone.Good);
 			}
 			catch (Exception error)
 			{
 				SetStatus("Could not save the noise gate: " + error.Message, ChipTone.Bad);
+			}
+		}
+
+		// --- Per-tone gate target (op 32 / op 33) ---
+
+		/// <summary>The tone gate edits go to; empty = all tones (the global gate), also while not connected.</summary>
+		private string GateTone => gateTarget != null ? gateTarget.Tone : "";
+
+		private bool IsGateTargetGlobal => gateTarget == null || gateTarget.IsGlobal;
+
+		private static string GateTargetLabel(string tone) => string.IsNullOrEmpty(tone) ? "All tones" : NoiseGatePedalForm.Ellipsize(tone, 24);
+
+		/// <summary>A gate edit is queued or being sent, or a pedal knob gesture runs: an op 32 reply must wait.</summary>
+		private bool IsGateEditInFlight => pendingNoiseGateTenths.HasValue || pendingGateShape != null || isApplyingMixer
+			|| (gatePedal != null && !gatePedal.IsDisposed && gatePedal.IsAdjusting);
+
+		/// <summary>
+		/// Op 32 on the caller's pipe turn (the poll, ApplyMixer or the "Use the global gate" command; never in
+		/// parallel). Null, and op 32 is not asked again on this connection, when the game DLL does not support it:
+		/// then everything stays on the global gate as before. Pipe errors propagate to the caller.
+		/// </summary>
+		private async Task<GateTarget> ReadGateTargetAsync(AudioControlClient activeClient)
+		{
+			GateTarget target;
+			try
+			{
+				target = await activeClient.GetGateTargetAsync();
+			}
+			catch (InvalidOperationException)
+			{
+				target = null;
+			}
+			if (target == null)
+			{
+				gateTargetSupported = false;
+				if (!IsDisposed) RevertGateToGlobal();
+				return null;
+			}
+			return NormalizeGateTarget(target);
+		}
+
+		/// <summary>Clamps a reply to the pedal's ranges, so comparisons with the panel's own values are exact.</summary>
+		private static GateTarget NormalizeGateTarget(GateTarget target) => new GateTarget
+		{
+			Tone = target.Tone ?? "",
+			On = target.On,
+			ThresholdTenths = ClampGateThreshold(target.ThresholdTenths),
+			DecayMs = Math.Max(50, Math.Min(2000, target.DecayMs)),
+			ReductionDb = Math.Max(-80, Math.Min(-10, target.ReductionDb)),
+			AttackTenths = Math.Max(1, Math.Min(200, target.AttackTenths)),
+			Own = target.Own && !string.IsNullOrEmpty(target.Tone),
+			Revision = target.Revision
+		};
+
+		private static bool SameGateRevision(GateTarget a, GateTarget b) => a != null && b != null && a.Revision == b.Revision && a.Tone == b.Tone;
+
+		/// <summary>The poll's op 32 reply. A new revision is adopted once no gate edit is pending and no knob is turning.</summary>
+		private void OnGateTargetPolled(GateTarget target)
+		{
+			if (SameGateRevision(gateTarget, target)) return;
+			if (IsGateEditInFlight) return;   // retried on the next op 32 poll
+			AdoptGateTarget(target);
+		}
+
+		/// <summary>
+		/// Takes every value from the target into the row and the pedal and makes it the baseline (gateTarget and the
+		/// persisted* fields), so nothing stale is re-sent. A threshold moved while the gate is off for the same target
+		/// is kept (op 19 cannot carry it; switching the gate on sends it).
+		/// </summary>
+		private void AdoptGateTarget(GateTarget target)
+		{
+			if (GateTone != target.Tone) gateKeptThresholdTone = null;
+			bool keepThreshold = !target.On && gateKeptThresholdTone != null && gateKeptThresholdTone == target.Tone;
+			if (!keepThreshold)
+			{
+				gateKeptThresholdTone = null;
+				gateThresholdTenths = target.ThresholdTenths;
+			}
+			gateTarget = target;
+			gateDecayMs = target.DecayMs;
+			gateReductionDb = target.ReductionDb;
+			gateAttackTenths = target.AttackTenths;
+			syncingNoiseGate = true;
+			gateEnableCheck.Checked = target.On;
+			syncingNoiseGate = false;
+			persistedNoiseGateTenths = target.On ? target.ThresholdTenths : 0;
+			persistedNoiseGateLastTenths = gateThresholdTenths;
+			persistedGateShape = GateShapeCommand();
+			RefreshGateViews();
+		}
+
+		/// <summary>
+		/// ApplyMixer's check right before a gate send, against a fresh op 32 reply. Unchanged target: send as queued.
+		/// Another tone: the edit belongs to the old target, so drop it and show the new one. Same tone with a new
+		/// revision (the overlay pedal, or this panel's previous send): merge dial by dial against the last adopted
+		/// values; what the user changed wins, everything else takes the target's current value, and a send that would
+		/// only repeat old values is dropped. Returns what to send (null = nothing for that op).
+		/// </summary>
+		private (int? gate, string shape) ReconcileGateEdit(GateTarget current, int? gate, string shape)
+		{
+			var known = gateTarget;
+			if (SameGateRevision(known, current)) return (gate, shape);
+			if (current.Tone != GateTone)
+			{
+				if (gatePedal != null && !gatePedal.IsDisposed) gatePedal.CancelGestures();
+				pendingNoiseGateTenths = null;
+				pendingGateShape = null;
+				AdoptGateTarget(current);
+				SetStatus("The noise gate now follows " + (current.IsGlobal ? "all tones" : NoiseGatePedalForm.Ellipsize(current.Tone, 32)) + ", so the last gate change was not applied.", ChipTone.Warn);
+				return (null, null);
+			}
+			bool onEdited = known == null || gateEnableCheck.Checked != known.On;
+			bool thresholdEdited = known == null || gateThresholdTenths != known.ThresholdTenths;
+			bool decayEdited = known == null || gateDecayMs != known.DecayMs;
+			bool reductionEdited = known == null || gateReductionDb != known.ReductionDb;
+			bool attackEdited = known == null || gateAttackTenths != known.AttackTenths;
+			if (!onEdited)
+			{
+				syncingNoiseGate = true;
+				gateEnableCheck.Checked = current.On;
+				syncingNoiseGate = false;
+			}
+			if (!thresholdEdited) gateThresholdTenths = current.ThresholdTenths;
+			if (!decayEdited) gateDecayMs = current.DecayMs;
+			if (!reductionEdited) gateReductionDb = current.ReductionDb;
+			if (!attackEdited) gateAttackTenths = current.AttackTenths;
+			gateTarget = current;
+			persistedNoiseGateTenths = current.On ? current.ThresholdTenths : 0;
+			persistedNoiseGateLastTenths = current.ThresholdTenths;
+			persistedGateShape = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0},{1},{2}", current.DecayMs, current.ReductionDb, current.AttackTenths);
+			if (gate.HasValue)
+			{
+				if (onEdited || thresholdEdited)
+				{
+					gate = GateEffectiveTenths();
+					if (!gateEnableCheck.Checked && thresholdEdited) gateKeptThresholdTone = current.Tone;
+				}
+				else gate = null;
+			}
+			if (shape != null)
+				shape = decayEdited || reductionEdited || attackEdited ? GateShapeCommand() : null;
+			RefreshGateViews();
+			return (gate, shape);
+		}
+
+		/// <summary>
+		/// The pipe is gone (or the DLL has no op 32): edits go to the global gate in RSMods.ini again. Coming from a
+		/// tone, its queued edits are dropped and the global values are reloaded from RSMods.ini, so a tone's values are
+		/// never written into the global keys.
+		/// </summary>
+		private void RevertGateToGlobal()
+		{
+			if (gateTarget == null) return;
+			bool wasTone = !gateTarget.IsGlobal;
+			gateTarget = null;
+			if (wasTone)
+			{
+				gateKeptThresholdTone = null;
+				pendingNoiseGateTenths = null;
+				pendingGateShape = null;
+				if (gatePedal != null && !gatePedal.IsDisposed) gatePedal.CancelGestures();
+				syncingNoiseGate = true;
+				try
+				{
+					LoadNoiseGate();
+				}
+				catch (Exception error)
+				{
+					Trace.TraceError("Could not reload the noise gate: {0}", error.Message);
+				}
+				finally
+				{
+					syncingNoiseGate = false;
+				}
+			}
+			RefreshGateViews();
+		}
+
+		/// <summary>Row summary, pedal knobs, footswitch, title and the "Use the global gate" button from the panel's values.</summary>
+		private void RefreshGateViews()
+		{
+			UpdateGateSummary();
+			if (gatePedal == null || gatePedal.IsDisposed) return;
+			gatePedal.SetState(gateEnableCheck.Checked, gateThresholdTenths, gateDecayMs, gateReductionDb, gateAttackTenths);
+			gatePedal.SetTarget(GateTone, gateTarget != null && gateTarget.Own);
+		}
+
+		private bool isSwitchingGateToGlobal;
+
+		/// <summary>The pedal's "Use the global gate": op 33 for the playing tone, then op 32 to show what it follows now.</summary>
+		private async void OnUseGlobalGate(object sender, EventArgs args)
+		{
+			if (isSwitchingGateToGlobal || !IsGateLive || IsGateTargetGlobal) return;
+			isSwitchingGateToGlobal = true;
+			string tone = GateTone;
+			try
+			{
+				// Same pipe discipline as the other commands: wait for the poll and any send in flight.
+				while (isCommandRunning || isPolling)
+				{
+					await Task.Delay(25);
+					if (IsDisposed) return;
+				}
+				var activeClient = client;
+				if (activeClient == null || latestStatus == null || IsGateTargetGlobal) return;
+				isCommandRunning = true;
+				UpdateState();
+				try
+				{
+					// The tone's own values are going away: an edit still queued for it must not reach the global gate.
+					pendingNoiseGateTenths = null;
+					pendingGateShape = null;
+					if (gatePedal != null && !gatePedal.IsDisposed) gatePedal.CancelGestures();
+					bool removed = true;
+					try
+					{
+						await activeClient.UseGlobalGateAsync();
+					}
+					catch (InvalidOperationException)
+					{
+						removed = false;
+					}
+					var target = await ReadGateTargetAsync(activeClient);
+					if (IsDisposed) return;
+					if (target != null) AdoptGateTarget(target);
+					if (removed)
+						SetStatus(NoiseGatePedalForm.Ellipsize(tone, 32) + " now uses the global gate.", ChipTone.Good);
+					else
+						SetStatus("The playing tone has no gate settings of its own, so it already uses the global gate.", ChipTone.Info);
+				}
+				catch (Exception error)
+				{
+					if (!IsDisposed) SetStatus("Could not switch the tone to the global gate: " + error.Message, ChipTone.Bad);
+				}
+				finally
+				{
+					isCommandRunning = false;
+					if (!IsDisposed) UpdateState();
+				}
+			}
+			finally
+			{
+				isSwitchingGateToGlobal = false;
 			}
 		}
 

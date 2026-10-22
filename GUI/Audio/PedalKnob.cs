@@ -37,6 +37,7 @@ namespace RSMods.Audio
 		private int dragStartY;
 		private double dragStartPosition;
 		private bool dragMoved;
+		private bool keyHeld;
 		private readonly Timer wheelCommit = new Timer { Interval = 400 };
 
 		public event EventHandler ValueChanged;
@@ -68,6 +69,20 @@ namespace RSMods.Audio
 		public Func<double, string> Formatter { get; set; }
 
 		public double Value => value;
+
+		/// <summary>A gesture is in progress: a drag, a held key, or scrolling that has not settled into ValueCommitted.</summary>
+		public bool IsAdjusting => dragging || keyHeld || wheelCommit.Enabled;
+
+		/// <summary>Ends any gesture without raising ValueCommitted (the value it was editing no longer applies).</summary>
+		public void CancelGesture()
+		{
+			wheelCommit.Stop();
+			keyHeld = false;
+			if (!dragging) return;
+			dragging = false;
+			dragMoved = false;
+			Capture = false;
+		}
 
 		public string DisplayValue => Formatter != null ? Formatter(value) : value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
 
@@ -225,6 +240,7 @@ namespace RSMods.Audio
 				case Keys.Delete: case Keys.Back: SetFromUser(DefaultValue); break;
 				default: return;
 			}
+			keyHeld = true;
 			e.Handled = e.SuppressKeyPress = true;
 		}
 
@@ -236,6 +252,7 @@ namespace RSMods.Audio
 				case Keys.Up: case Keys.Down: case Keys.Left: case Keys.Right:
 				case Keys.PageUp: case Keys.PageDown: case Keys.Home: case Keys.End:
 				case Keys.Delete: case Keys.Back:
+					keyHeld = false;
 					ValueCommitted?.Invoke(this, EventArgs.Empty);
 					break;
 			}
@@ -244,7 +261,7 @@ namespace RSMods.Audio
 		protected override void OnMouseEnter(EventArgs e) { hovered = true; Invalidate(); base.OnMouseEnter(e); }
 		protected override void OnMouseLeave(EventArgs e) { hovered = false; Invalidate(); base.OnMouseLeave(e); }
 		protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
-		protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
+		protected override void OnLostFocus(EventArgs e) { keyHeld = false; Invalidate(); base.OnLostFocus(e); }
 		protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
 
 		protected override void OnPaint(PaintEventArgs e)

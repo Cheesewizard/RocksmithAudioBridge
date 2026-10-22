@@ -13,6 +13,7 @@
 #include "ExternalAmp/ExternalAmp.hpp"
 #include "ExternalAmp/CableAmpLink.hpp"
 #include "ToneDesigner/VstHostLink.hpp"
+#include "ToneDesigner/ToneGates.hpp"
 #include "Shared/VstHostControl.hpp"
 #include "Shared/ShellOpenAsync.hpp"
 #include "AudioBridge/Engine/AsioOutputDevice.hpp"
@@ -4217,18 +4218,33 @@ namespace Overlay
 			int reductionDb = -60;
 			int attackTenths = 5;
 
+			std::string tone;             // the Tone designer tone being edited; empty = all tones (the global gate)
+			bool own = false;             // that tone has its own gate
+			uint32_t revision = 0;
+
+			// Follows ToneGates every frame: the playing tone's own gate, else the global one. Edits from here or the
+			// settings app bump the revision, so both pedals stay on the same values.
 			void Seed()
 			{
-				if (seeded) return;
+				const ToneGates::View view = ToneGates::Current();
+				if (seeded && view.revision == revision) return;
 				seeded = true;
-				const int threshold = Settings::GetModSetting("NoiseGateThreshold");
-				on = threshold < 0;
-				const int last = Settings::GetModSetting("NoiseGateLastThreshold");
-				thresholdTenths = on ? threshold : (last < 0 ? last : -620);
-				thresholdTenths = std::clamp(thresholdTenths, -800, -200);
-				decayMs = std::clamp(Settings::GetModSetting("NoiseGateDecay"), 50, 2000);
-				reductionDb = std::clamp(Settings::GetModSetting("NoiseGateReduction"), -80, -10);
-				attackTenths = std::clamp(Settings::GetModSetting("NoiseGateAttack"), 1, 200);
+				revision = view.revision;
+				tone = view.tone;
+				own = view.own;
+				on = view.gate.on;
+				thresholdTenths = view.gate.thresholdTenths;
+				decayMs = view.gate.decayMs;
+				reductionDb = view.gate.reductionDb;
+				attackTenths = view.gate.attackTenths;
+			}
+
+			// "Noise gate · Clean Strat" or "Noise gate · All tones", cut to fit the pedal's title bar.
+			std::string Title() const
+			{
+				std::string name = tone.empty() ? std::string("All tones") : tone;
+				if (name.size() > 30) name = name.substr(0, 28) + "...";
+				return std::string("Noise gate \xC2\xB7 ") + name;
 			}
 
 			void SendThreshold(bool save) { if (save) SendInt(19, on ? thresholdTenths : 0); else if (on) PreviewInt(19, thresholdTenths); }
@@ -4323,7 +4339,7 @@ namespace Overlay
 		{
 			NoiseGatePedalState& gate = g_gatePedal;
 			gate.Seed();
-			const float width = 340.0f, height = 470.0f;
+			const float width = 340.0f, height = 494.0f;
 			ImGui::SetNextWindowSize(ImVec2(width, height), ImGuiCond_Always);
 			ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - width - 40.0f, 80.0f), ImGuiCond_FirstUseEver);
 			ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::ColorConvertU32ToFloat4(Color::Window));
@@ -4342,7 +4358,8 @@ namespace Overlay
 			ImFont* title = GetFonts().title ? GetFonts().title : ImGui::GetFont();
 
 			// Title bar: drag anywhere on the window that is not a control (ImGui moves windows by their background).
-			list->AddText(caption, caption->FontSize, ImVec2(origin.x + 14.0f, origin.y + 11.0f), Color::Muted, "Noise gate \xC2\xB7 Player 1");
+			const std::string windowTitle = gate.Title();
+			list->AddText(caption, caption->FontSize, ImVec2(origin.x + 14.0f, origin.y + 11.0f), Color::Muted, windowTitle.c_str());
 			ImGui::SetCursorScreenPos(ImVec2(origin.x + width - 34.0f, origin.y + 6.0f));
 			if (ImGui::InvisibleButton("##close", ImVec2(26.0f, 24.0f))) gate.windowOpen = false;
 			const bool closeHovered = ImGui::IsItemHovered();
@@ -4350,8 +4367,25 @@ namespace Overlay
 			DrawIcon(list, ImVec2(origin.x + width - 21.0f, origin.y + 18.0f), Glyph::Close, closeHovered ? Color::Text : Color::Muted);
 			list->AddLine(ImVec2(origin.x, origin.y + 36.0f), ImVec2(origin.x + width, origin.y + 36.0f), Color::CardEdge);
 
+			// Whose gate this is: the playing tone's own (with a way back to the global one), or the one all tones share.
+			const char* scope = gate.tone.empty() ? "Shared by every tone without its own gate."
+				: gate.own ? "Saved with this tone." : "Uses the global gate. Turn a dial to give this tone its own.";
+			list->AddText(caption, caption->FontSize, ImVec2(origin.x + 14.0f, origin.y + 46.0f), Color::Muted, scope);
+			if (gate.own)
+			{
+				const char* useGlobal = "Use the global gate";
+				const float buttonW = caption->CalcTextSizeA(caption->FontSize, FLT_MAX, 0.0f, useGlobal).x;
+				const float scopeW = caption->CalcTextSizeA(caption->FontSize, FLT_MAX, 0.0f, scope).x;
+				const ImVec2 at(origin.x + 14.0f + scopeW + 10.0f, origin.y + 46.0f);
+				ImGui::SetCursorScreenPos(at);
+				if (ImGui::InvisibleButton("##useGlobal", ImVec2(buttonW, caption->FontSize + 2.0f))) BridgeControl(33);
+				const bool linkHovered = ImGui::IsItemHovered();
+				Hint("This tone stops using its own gate settings and follows the global gate again.");
+				list->AddText(caption, caption->FontSize, at, linkHovered ? Color::AccentHi : Color::Accent, useGlobal);
+			}
+
 			// Enclosure
-			const ImVec2 box(origin.x + 20.0f, origin.y + 50.0f), boxEnd(origin.x + width - 20.0f, origin.y + height - 16.0f);
+			const ImVec2 box(origin.x + 20.0f, origin.y + 74.0f), boxEnd(origin.x + width - 20.0f, origin.y + height - 16.0f);
 			list->AddRectFilled(box, boxEnd, PedalInk::Body, 14.0f);
 			list->AddRect(box, boxEnd, PedalInk::Edge, 14.0f, 0, 2.0f);
 			list->AddText(title, title->FontSize, ImVec2(box.x + 16.0f, box.y + 12.0f), PedalInk::Lettering, "NOISE GATE");
@@ -4481,9 +4515,11 @@ namespace Overlay
 			// Noise gate: one row here, its dials on the pedal pop-out (NoiseGatePedalWindow). Also applied to the amp sim's
 			// feed (AmpFeedConditioner.hpp).
 			{
-				char decay[16], summary[96];
+				char decay[16], summary[160];
 				gate.FormatDecay(decay, sizeof(decay));
-				snprintf(summary, sizeof(summary), "%.1f dB \xC2\xB7 decay %s \xC2\xB7 %d dB", gate.thresholdTenths / 10.0f, decay, gate.reductionDb);
+				std::string target = gate.tone.empty() ? std::string("All tones") : gate.tone;
+				if (target.size() > 24) target = target.substr(0, 22) + "...";
+				snprintf(summary, sizeof(summary), "%s: %.1f dB \xC2\xB7 decay %s \xC2\xB7 %d dB", target.c_str(), gate.thresholdTenths / 10.0f, decay, gate.reductionDb);
 				if (ToggleRow("Noise gate", gate.on ? summary : "Silent between notes, without cutting your sustain.", &gate.on, "Switches the gate on or off. Open the pedal for its dials."))
 					gate.SendThreshold(true);
 				if (Button(gate.windowOpen ? "Close pedal" : "Open pedal", false, "The gate's dials: threshold, decay, reduction and attack, with a level meter."))

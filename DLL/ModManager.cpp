@@ -6,6 +6,7 @@
 #include "NoteByNote/Ml/MlAudioExporter.hpp"
 #include "AudioBridge/Cable/CableInput.hpp"
 #include "AudioBridge/Input/InputCaptureHook.hpp"
+#include "ToneDesigner/ToneGates.hpp"
 #include "AudioBridge/Engine/OutputTap.hpp"
 #include "Overlay/OverlayToggles.hpp"
 #include "DropPedal/SpeakerMode/WwiseMusicHook.hpp"
@@ -271,9 +272,17 @@ namespace ModManager {
 		const int suppressorThresholdTenths = Settings::GetModSetting("NoiseGateThreshold");
 		const int compressorStrength = Settings::GetModSetting("CompressorStrength");
 		Audio::AsioHook::SetInputGainDb(inputGainTenths / 10.0f);
-		Audio::AsioHook::SetNoiseGateThresholdDb(suppressorThresholdTenths / 10.0f);
-		Audio::AsioHook::SetNoiseGateShape(static_cast<float>(Settings::GetModSetting("NoiseGateDecay")),
-			static_cast<float>(Settings::GetModSetting("NoiseGateReduction")), Settings::GetModSetting("NoiseGateAttack") / 10.0f);
+		{
+			// The global Noise gate; a Tone designer tone with its own gate takes over while it plays (ToneGates.hpp).
+			ToneGates::Gate gate;
+			gate.on = suppressorThresholdTenths < 0;
+			const int lastThreshold = Settings::GetModSetting("NoiseGateLastThreshold");
+			gate.thresholdTenths = gate.on ? suppressorThresholdTenths : (lastThreshold < 0 ? lastThreshold : -620);
+			gate.decayMs = Settings::GetModSetting("NoiseGateDecay");
+			gate.reductionDb = Settings::GetModSetting("NoiseGateReduction");
+			gate.attackTenths = Settings::GetModSetting("NoiseGateAttack");
+			ToneGates::InitGlobal(gate);
+		}
 		Audio::AsioHook::SetCompressorStrength(compressorStrength / 100.0f);
 		LOG_INFO("[InputCapture] Startup conditioner configured: gain " << inputGainTenths / 10.0f
 			<< " dB, suppressor " << suppressorThresholdTenths / 10.0f

@@ -970,6 +970,9 @@
     <ClCompile Include="ToneDesigner\ToneBackup.cpp">
       <Filter>ToneDesigner</Filter>
     </ClCompile>
+    <ClCompile Include="ToneDesigner\ToneGates.cpp">
+      <Filter>ToneDesigner</Filter>
+    </ClCompile>
     <ClCompile Include="ToneDesigner\VstHostLink.cpp">
       <Filter>ToneDesigner</Filter>
     </ClCompile>

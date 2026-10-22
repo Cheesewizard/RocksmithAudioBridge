@@ -36,7 +36,9 @@ namespace Audio::AsioHook
 
 	// Noise gate threshold in dBFS on the gate's filtered detector (NoiseSuppressor.hpp), keyed to the raw
 	// pre-gain input. >= 0 dB = off.
-	void SetNoiseGateThresholdDb(float decibels);
+	// resetGate: start the detector fresh (switching on). A new threshold or tone while it runs keeps its state, so a
+	// ringing note is not cut.
+	void SetNoiseGateThresholdDb(float decibels, bool resetGate = true);
 	float GetNoiseGateThresholdDb();
 	// The Noise gate pedal's other dials: decay (ms), reduction (dB) and attack (ms). Clamped to the pedal's ranges.
 	void SetNoiseGateShape(float decayMs, float reductionDb, float attackMs);

@@ -9,6 +9,7 @@
 #include "OutputDevices.hpp"
 #include "AudioBridge/Devices/DeviceEnumeratorHook.hpp"
 #include "AudioBridge/Input/InputCaptureHook.hpp"
+#include "ToneDesigner/ToneGates.hpp"
 #include "AudioBridge/Cable/CableInput.hpp"
 #include "AsioProxy/LatencyDsp.h"
 #include "Mods/VolumeControl.hpp"
@@ -316,10 +317,18 @@ namespace Audio::SharedOutput
 			if (!parseInteger(integer) || (integer != 0 && (integer < -900 || integer > -200))) response.result = E_INVALIDARG;
 			else
 			{
-				AsioHook::SetNoiseGateThresholdDb(static_cast<float>(integer) / 10.0f);
-				response.result = PersistCustomSetting("NoiseGateThreshold", integer);
-				// Remembered while the pedal is off, so switching it back on returns to the same threshold.
-				if (SUCCEEDED(response.result) && integer < 0) response.result = PersistCustomSetting("NoiseGateLastThreshold", integer);
+				// The Noise gate edits the playing Tone designer tone's own gate when one plays, else the global one
+				// (ToneGates.hpp); only the global one is saved in RSMods.ini.
+				ToneGates::Gate gate = ToneGates::Current().gate;
+				gate.on = integer < 0;
+				if (integer < 0) gate.thresholdTenths = integer;
+				if (ToneGates::Apply(gate, !previewOnly)) response.result = S_OK;
+				else
+				{
+					response.result = PersistCustomSetting("NoiseGateThreshold", integer);
+					// Remembered while the pedal is off, so switching it back on returns to the same threshold.
+					if (SUCCEEDED(response.result) && integer < 0) response.result = PersistCustomSetting("NoiseGateLastThreshold", integer);
+				}
 			}
 			return true;
 		case 31:
@@ -338,7 +347,9 @@ namespace Audio::SharedOutput
 			{
 				response.result = E_INVALIDARG; return true;
 			}
-			AsioHook::SetNoiseGateShape(static_cast<float>(decay), static_cast<float>(reduction), static_cast<float>(attackTenths) / 10.0f);
+			ToneGates::Gate gate = ToneGates::Current().gate;   // the playing tone's gate or the global one (op 19)
+			gate.decayMs = decay; gate.reductionDb = reduction; gate.attackTenths = attackTenths;
+			if (ToneGates::Apply(gate, !previewOnly)) { response.result = S_OK; return true; }
 			response.result = PersistCustomSetting("NoiseGateDecay", decay);
 			if (SUCCEEDED(response.result)) response.result = PersistCustomSetting("NoiseGateReduction", reduction);
 			if (SUCCEEDED(response.result)) response.result = PersistCustomSetting("NoiseGateAttack", attackTenths);
@@ -1755,6 +1766,20 @@ namespace Audio::SharedOutput
 
 		ControlResponse DispatchLocked(const ControlRequest& request)
 		{
+			// Noise gate target (op 32: what the pedal edits now, for the settings app) and "Use the global gate for this
+			// tone" (op 33). Answered here, before the session paths, which rewrite `file` with their own status text.
+			if (request.operation == 32 || request.operation == 33)
+			{
+				ControlResponse response;
+				if (request.operation == 33 && !ToneGates::UseGlobal()) response.result = HRESULT_FROM_WIN32(ERROR_INVALID_STATE);
+				const ToneGates::View view = ToneGates::Current();
+				wchar_t wideTone[256]{};
+				MultiByteToWideChar(CP_UTF8, 0, view.tone.c_str(), -1, wideTone, 255);
+				swprintf_s(response.file, L"tone=%s\non=%d\nthreshold=%d\ndecay=%d\nreduction=%d\nattack=%d\nown=%d\nrevision=%u",
+					wideTone, view.gate.on ? 1 : 0, view.gate.thresholdTenths, view.gate.decayMs, view.gate.reductionDb,
+					view.gate.attackTenths, view.own ? 1 : 0, view.revision);
+				return response;
+			}
 			std::shared_ptr<OutputSession> session;
 			{
 				std::lock_guard<std::mutex> guard(g_sessionMutex);

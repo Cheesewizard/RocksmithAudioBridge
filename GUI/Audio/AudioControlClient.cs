@@ -61,6 +61,66 @@ namespace RSMods.Audio
 		}
 	}
 
+	/// <summary>
+	/// Where noise gate edits (ops 19 and 31) land right now, from op 32. While a saved Tone designer tone plays the
+	/// game DLL targets that tone; otherwise (game amp, unsaved chain) the global gate in RSMods.ini. The DLL answers
+	/// op 32 in the response's file text as "key=value" lines separated by "\n".
+	/// </summary>
+	internal sealed class GateTarget
+	{
+		/// <summary>The tone the gate edits go to; empty = all tones (the global gate).</summary>
+		public string Tone { get; set; } = "";
+		public bool On { get; set; }
+		/// <summary>Signed tenths of a dB, always negative; kept while the gate is off.</summary>
+		public int ThresholdTenths { get; set; }
+		public int DecayMs { get; set; }
+		public int ReductionDb { get; set; }
+		/// <summary>Tenths of a ms.</summary>
+		public int AttackTenths { get; set; }
+		/// <summary>The tone has gate settings of its own (op 33 can remove them).</summary>
+		public bool Own { get; set; }
+		/// <summary>Changes whenever the target or any of its values change.</summary>
+		public uint Revision { get; set; }
+
+		public bool IsGlobal => string.IsNullOrEmpty(Tone);
+
+		/// <summary>Parses the op 32 reply text. Null when it is not a gate target reply (no revision line).</summary>
+		public static GateTarget Parse(string text)
+		{
+			if (string.IsNullOrEmpty(text)) return null;
+			var target = new GateTarget();
+			bool hasRevision = false;
+			var invariant = System.Globalization.CultureInfo.InvariantCulture;
+			foreach (string rawLine in text.Split('\n'))
+			{
+				string line = rawLine.TrimEnd('\r');
+				int equals = line.IndexOf('=');
+				if (equals <= 0) continue;
+				string key = line.Substring(0, equals).Trim();
+				string value = line.Substring(equals + 1);
+				int number;
+				switch (key)
+				{
+					case "tone": target.Tone = value.Trim(); break;
+					case "on": target.On = value.Trim() == "1"; break;
+					case "threshold": if (int.TryParse(value.Trim(), System.Globalization.NumberStyles.Integer, invariant, out number)) target.ThresholdTenths = number; break;
+					case "decay": if (int.TryParse(value.Trim(), System.Globalization.NumberStyles.Integer, invariant, out number)) target.DecayMs = number; break;
+					case "reduction": if (int.TryParse(value.Trim(), System.Globalization.NumberStyles.Integer, invariant, out number)) target.ReductionDb = number; break;
+					case "attack": if (int.TryParse(value.Trim(), System.Globalization.NumberStyles.Integer, invariant, out number)) target.AttackTenths = number; break;
+					case "own": target.Own = value.Trim() == "1"; break;
+					case "revision":
+						if (uint.TryParse(value.Trim(), System.Globalization.NumberStyles.Integer, invariant, out uint revision))
+						{
+							target.Revision = revision;
+							hasRevision = true;
+						}
+						break;
+				}
+			}
+			return hasRevision ? target : null;
+		}
+	}
+
 	internal sealed class AudioControlClient
 	{
 		public int ProcessId
@@ -101,6 +161,21 @@ namespace RSMods.Audio
 				return await exchange;
 			}
 		}
+
+		/// <summary>
+		/// Op 32: the current noise gate target. The reply text arrives in the file field (FilePath). Returns null when
+		/// the reply carries no gate target (an older game DLL that answers op 32 with something else). A DLL that
+		/// rejects op 32 makes SendAsync throw InvalidOperationException; pipe errors propagate as usual.
+		/// </summary>
+		public async Task<GateTarget> GetGateTargetAsync()
+		{
+			var status = await SendAsync(32);
+			return GateTarget.Parse(status.FilePath);
+		}
+
+		/// <summary>Op 33: the playing tone drops its own gate settings and follows the global gate again.
+		/// Throws InvalidOperationException when no saved tone plays or it has no settings of its own.</summary>
+		public Task<AudioControlStatus> UseGlobalGateAsync() => SendAsync(33);
 
 		private static async Task<AudioControlStatus> ExchangeAsync(Stream pipe, byte[] request)
 		{
