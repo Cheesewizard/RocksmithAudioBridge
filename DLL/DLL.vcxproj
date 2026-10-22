@@ -907,6 +907,16 @@ if exist "$(OutDir)$(TargetName).map" copy /Y "$(OutDir)$(TargetName).map" "$(Bu
       <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
+  <!-- The overlay and its companion must ship the same shared-control protocol. -->
+  <ItemGroup Condition="'$(Configuration)' != 'Master'">
+    <ProjectReference Include="..\VstHost\RocksmithAudioBridgeVstHost.vcxproj">
+      <Project>{5D3E8A41-7C2B-4F69-B1E0-9A4C6D2F8E17}</Project>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+      <SetPlatform>Platform=x64</SetPlatform>
+      <SetConfiguration>Configuration=$(Configuration)</SetConfiguration>
+    </ProjectReference>
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Import Project="$(MSBuildThisFileDirectory)..\DeployToGame.targets" />
   <ImportGroup Label="ExtensionTargets">
@@ -926,6 +936,8 @@ if exist "$(OutDir)$(TargetName).map" copy /Y "$(OutDir)$(TargetName).map" "$(Bu
     <ClCompile Include="AudioBridge\Engine\AsioOutputDevice.cpp" />
     <ClCompile Include="AudioBridge\Engine\AppAudioMix.cpp" />
     <ClCompile Include="AudioBridge\Engine\GameToneLatency.cpp" />
+    <ClCompile Include="AudioBridge\Engine\LatencyLoopback.cpp" />
+    <ClCompile Include="AudioBridge\Engine\LatencyCalibration.cpp" />
     <ClCompile Include="AudioBridge\Engine\DeviceVolume.cpp" />
     <ClCompile Include="AudioBridge\Engine\ExclusiveOutputDevice.cpp" />
     <ClCompile Include="AudioBridge\Devices\DeviceEnumeratorHook.cpp" />
@@ -935,6 +947,8 @@ if exist "$(OutDir)$(TargetName).map" copy /Y "$(OutDir)$(TargetName).map" "$(Bu
     <ClInclude Include="AudioBridge\Engine\AsioOutputDevice.hpp" />
     <ClInclude Include="AudioBridge\Engine\AppAudioMix.hpp" />
     <ClInclude Include="AudioBridge\Engine\GameToneLatency.hpp" />
+    <ClInclude Include="AudioBridge\Engine\LatencyLoopback.hpp" />
+    <ClInclude Include="AudioBridge\Engine\LatencyCalibration.hpp" />
     <ClInclude Include="AudioBridge\Engine\DeviceVolume.hpp" />
     <ClInclude Include="AudioBridge\Engine\ExclusiveOutputDevice.hpp" />
     <ClInclude Include="AudioBridge\Cable\CableEndpointVolume.hpp" />

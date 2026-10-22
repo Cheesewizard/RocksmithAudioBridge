@@ -158,6 +158,8 @@ namespace VstHost
 		if (wasProcessing) m_plugin->releaseResources();
 	}
 
+	int PluginHost::LatencySamples() const { return m_plugin ? (std::max)(0, m_plugin->getLatencySamples()) : 0; }
+
 	bool PluginHost::Process(const float* inLeft, const float* inRight, float* left, float* right, int frames)
 	{
 		struct InProcess

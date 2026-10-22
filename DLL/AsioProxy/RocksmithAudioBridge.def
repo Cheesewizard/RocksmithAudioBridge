@@ -25,6 +25,9 @@ EXPORTS
 	RSModsAsio_ConfigureAmpLink
 	RSModsAsio_GetAmpLinkStatus
 	RSModsAsio_GetLatencies
+	RSModsAsio_StartLatencyMeasure
+	RSModsAsio_ReleaseLatencyMeasure
+	RSModsAsio_GetLatencyMeasure
 	RSModsAsio_SetAmpLinkLatency
 	RSModsAsio_SetAmpLinkPitch
 	RSModsAsio_ConfigureAmpFeed

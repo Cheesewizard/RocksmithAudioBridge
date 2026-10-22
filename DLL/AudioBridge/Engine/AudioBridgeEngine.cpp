@@ -6,6 +6,7 @@
 #include "Recorder/DrySignalRecording.hpp"
 #include "AudioControl.hpp"
 #include "OutputTap.hpp"
+#include "LatencyLoopback.hpp"
 #include "OutputDevices.hpp"
 #include "AudioBridge/Devices/DeviceEnumeratorHook.hpp"
 #include "AudioBridge/Input/InputCaptureHook.hpp"
@@ -1070,8 +1071,11 @@ namespace Audio::SharedOutput
 				if (packetGenerations[packetReadIndex % 2] == routeGeneration.load())
 				{
 					// Heard after what the backend and the device hold ahead of it: the game tones' delay ends here.
-					GameToneLatency::Output(converted.data(), packetFrames,
-						GameToneLatency::Now100ns() + UINT64(physical->HeardDelayFrames()) * 10000000 / 48000);
+					const UINT64 heard = GameToneLatency::Now100ns() + UINT64(physical->HeardDelayFrames()) * 10000000 / 48000;
+					GameToneLatency::Output(converted.data(), packetFrames, heard);
+					// A latency measurement records the game's answer to its chirps, and the player hears none of it.
+					LatencyLoopback::Capture(converted.data(), packetFrames, heard);
+					if (LatencyLoopback::MuteOutput()) std::fill(converted.begin(), converted.begin() + samples, 0.0f);
 					physical->Submit(converted.data(), packetFrames, packetTimes[packetReadIndex % 2]);
 				}
 				submittedFrames += packetFrames;

@@ -10,6 +10,7 @@
 #include "AudioBridge/Cable/CableInput.hpp"
 #include "AudioBridge/Cable/CableCaptureSession.hpp"
 #include "AudioBridge/Engine/GameToneLatency.hpp"
+#include "AudioBridge/Engine/LatencyCalibration.hpp"
 #include "ExternalAmp/ExternalAmp.hpp"
 #include "Overlay/OverlayToggles.hpp"
 #include "Overlay/OverlayShell.hpp"
@@ -589,24 +590,23 @@ void GameOverlay::DisplayAudioDiagnostics()
 		}
 		else if (!amp.cableHost && amp.asioInMs + amp.asioOutMs > 0.0f)
 		{
-			// ASIO mode: the driver's reported input and output latency, plus the amp link's blocks while an amp sim
-			// plays. With the game's amp playing, the game's own processing goes on top (its two blocks at the ASIO buffer
-			// size plus the part measured on the cable, else a guess: GameToneLatency::GameOwnMs), so the two compare.
+			// ASIO mode (LatencyCalibration::SplitAsio, the same figures as the overlay's header): the interface's round
+			// trip, measured with a patch cable or else the driver's figures, plus the path being heard: the amp link
+			// while an amp sim or Tone designer plays, else the game's amp; each measured on this setup, else estimated.
 			const bool linkPlaying = amp.link.connected && !amp.comparing;
 			const int rate = amp.link.sampleRate > 0 ? amp.link.sampleRate : AmpLink::kSampleRate;
-			const double linkMs = linkPlaying && amp.link.frames > 0 ? amp.link.frames * (amp.link.latencyBlocks > 1 ? 2 : 1) * 1000.0 / rate : 0.0;
-			const long input = std::lround(amp.asioInMs);
+			const float linkMs = linkPlaying && amp.link.frames > 0 ? static_cast<float>(amp.link.frames * (amp.link.latencyBlocks > 1 ? 2 : 1) * 1000.0 / rate) : 0.0f;
+			const float blockMs = (amp.link.frames > 0 ? amp.link.frames : 128) * 1000.0f / rate;
+			const bool picks = Audio::GameToneLatency::Valid();   // timed from picks in the last minute (ASIO feed)
+			const float gameOwn = picks ? Audio::GameToneLatency::MedianMs() : Audio::GameToneLatency::GameOwnMs(blockMs);
+			const auto split = Audio::LatencyCalibration::SplitAsio(amp.asioInMs, amp.asioOutMs, linkMs, gameOwn, !picks && Audio::GameToneLatency::GameOwnGuessed());
+			const auto upper = [](Audio::LatencyCalibration::Quality q) { return q == Audio::LatencyCalibration::Quality::Measured ? L" ms MEASURED" : q == Audio::LatencyCalibration::Quality::Estimate ? L" ms EST" : L" ms GUESS"; };
+			const long input = std::lround(split.inMs);
 			if (linkPlaying) {
-				const long total = std::lround(amp.asioInMs + amp.asioOutMs + linkMs);
-				latencyEstimate << L"ASIO LATENCY  IN " << input << L"  OUT " << total - input << L"  TOTAL ~" << total << L" ms";
+				const long total = std::lround(split.ampTotalMs);
+				latencyEstimate << L"ASIO LATENCY  IN " << input << L"  OUT " << total - input << L"  TOTAL ~" << total << upper(split.amp);
 			}
-			else {
-				const float blockMs = (amp.link.frames > 0 ? amp.link.frames : 128) * 1000.0f / rate;
-				const bool measured = Audio::GameToneLatency::Valid();   // timed from picks in the last minute (ASIO feed)
-				const float gameOwn = measured ? Audio::GameToneLatency::MedianMs() : Audio::GameToneLatency::GameOwnMs(blockMs);
-				const long total = std::lround(amp.asioInMs + amp.asioOutMs + gameOwn);
-				latencyEstimate << L"GAME TONES  ~" << total << (!measured && Audio::GameToneLatency::GameOwnGuessed() ? L" ms GUESS" : L" ms EST");
-			}
+			else latencyEstimate << L"GAME TONES  ~" << std::lround(split.gameTotalMs) << upper(split.game);
 			showLatencyReadout = true;
 		}
 	}

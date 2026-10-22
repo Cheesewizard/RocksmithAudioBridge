@@ -949,6 +949,12 @@
     <ClCompile Include="AudioBridge\Engine\GameToneLatency.cpp">
       <Filter>AudioBridge\Engine</Filter>
     </ClCompile>
+    <ClCompile Include="AudioBridge\Engine\LatencyLoopback.cpp">
+      <Filter>AudioBridge\Engine</Filter>
+    </ClCompile>
+    <ClCompile Include="AudioBridge\Engine\LatencyCalibration.cpp">
+      <Filter>AudioBridge\Engine</Filter>
+    </ClCompile>
     <ClCompile Include="AudioBridge\Engine\DeviceVolume.cpp">
       <Filter>AudioBridge\Engine</Filter>
     </ClCompile>
@@ -1057,6 +1063,12 @@
       <Filter>AudioBridge\Engine</Filter>
     </ClInclude>
     <ClInclude Include="AudioBridge\Engine\GameToneLatency.hpp">
+      <Filter>AudioBridge\Engine</Filter>
+    </ClInclude>
+    <ClInclude Include="AudioBridge\Engine\LatencyLoopback.hpp">
+      <Filter>AudioBridge\Engine</Filter>
+    </ClInclude>
+    <ClInclude Include="AudioBridge\Engine\LatencyCalibration.hpp">
       <Filter>AudioBridge\Engine</Filter>
     </ClInclude>
     <ClInclude Include="AudioBridge\Engine\DeviceVolume.hpp">

@@ -10,12 +10,12 @@
 
 namespace VstHostControl
 {
-	// v7: standby (off with the plugins kept loaded). v6: spare plugins kept loaded (preloading, sparePaths, preloadAllowed). v5: one window per plugin (openWindows, HideSlot). v4: slot paths, chain bypass and the Tone designer page's
+	// v8: the chain's own delay (chainLatencySamples). v7: standby (off with the plugins kept loaded). v6: spare plugins kept loaded (preloading, sparePaths, preloadAllowed). v5: one window per plugin (openWindows, HideSlot). v4: slot paths, chain bypass and the Tone designer page's
 	// commands. v3: plugin chains, tones, levels. A new mapping name per version, so an old host and a new overlay
 	// never meet.
-	constexpr wchar_t kMappingName[] = L"Local\\RocksmithAudioBridge.VstHost.v7";
+	constexpr wchar_t kMappingName[] = L"Local\\RocksmithAudioBridge.VstHost.v8";
 	constexpr uint32_t kMagic = 0x56424152;   // "RABV"
-	constexpr uint32_t kVersion = 7;
+	constexpr uint32_t kVersion = 8;
 	constexpr int kBeatMs = 250;              // both sides bump their beat at least this often
 	constexpr int kAliveMs = 1500;            // a side is gone when its beat stops this long
 	constexpr int kPathChars = 520;
@@ -119,6 +119,11 @@ namespace VstHostControl
 		volatile LONG preloadAllowed;  // 0 while a song plays (a plugin starting up could cost late buffers) or the player is using the page
 		// Written by the host (v7).
 		volatile LONG standby;         // off: the amp link is released, the plugins stay loaded (Command::SetStandby)
+		// Written by the host (v8): the delay the chain's plugins report (VST3 latency), summed over the slots that
+		// play (none while the chain is bypassed), in samples at the stream's rate. The latency readout adds it live
+		// to what was measured, so a new chain or a plugin changing its own delay (oversampling) needs no new
+		// measurement. Kept current every beat.
+		volatile LONG chainLatencySamples;
 	};
 
 	// Creates or opens the block. Returns nullptr on failure; `mapping` must stay open while it is used.

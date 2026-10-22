@@ -5,6 +5,7 @@
 #include "AudioBridge/Engine/CableGamePeriod.hpp"
 #include "AudioBridge/Engine/AudioBridgeEngine.hpp"
 #include "AudioBridge/Engine/GameToneLatency.hpp"
+#include "AudioBridge/Engine/LatencyLoopback.hpp"
 #include "AudioBridge/Engine/OutputReserve.hpp"
 #include <avrt.h>
 #include <filesystem>
@@ -368,6 +369,14 @@ namespace Audio::PersistentInput
 	void CaptureSession::Publish(const float* samples, UINT32 frames, UINT64 timestamp, bool discontinuity, bool timestampError)
 	{
 		if (!samples || !frames || frames > RING_FRAMES) return;
+		// A latency measurement replaces Player 1's packets with its chirps (LatencyLoopback.hpp), for the game and every
+		// feed below alike. Copied only while one runs.
+		if (!gatedByPlayerTwoToggle && LatencyLoopback::Running())
+		{
+			static thread_local std::vector<float> loopback;
+			loopback.assign(samples, samples + frames);
+			if (LatencyLoopback::Inject(loopback.data(), frames, timestamp)) samples = loopback.data();
+		}
 		// Player 1's raw cable guitar also feeds the Tone designer's amp link (cable mode has no ASIO driver to host it).
 		if (!gatedByPlayerTwoToggle)
 		{

@@ -118,6 +118,28 @@ namespace Audio::GameToneLatency
 		float Internal() { return Fixed() + 2.0f * BlockMs(); }
 
 		int64_t g_examined = -1;   // input ms already searched for picks
+		std::atomic<float> g_pendingMeasured{ -1.0f };   // NoteMeasuredMs, applied by the overlay thread (TakeMeasured)
+
+		// The overlay thread owns g_results; a loopback measurement lands here from its worker thread.
+		void TakeMeasured()
+		{
+			const float total = g_pendingMeasured.exchange(-1.0f);
+			if (total < 0.0f) return;
+			g_results.fill(total);
+			g_resultCount = g_results.size();
+			g_resultAt = 0;
+			g_median.store(total);
+			g_lastResult.store(GetTickCount64());
+			const float output = Asio() ? 0.0f : g_outputMs.load();
+			const float fixed = total - output - 2.0f * BlockMs();
+			LOG_INFO("(GAME TONE LATENCY) loopback measured " << total << " ms; output part " << output << " ms, blocks 2 x "
+				<< BlockMs() << " ms, so the game's own part is " << fixed << " ms" << std::endl);
+			if (output < 0.0f || fixed < 0.0f || fixed > kMaxFixedMs) return;
+			g_fixedMs.store(fixed);
+			g_fixedMeasured.store(true);
+			const DWORD tenths = static_cast<DWORD>(fixed * 10.0f + 0.5f);
+			RegSetKeyValueW(HKEY_CURRENT_USER, L"Software\\RSMods\\AsioProxy", FixedValueName(), REG_DWORD, &tenths, sizeof(tenths));
+		}
 
 		// One measurement per clear pick, timed like hand measurements on recordings: the first sharp rise
 		// in the game's output after the pick. Both sides are 1 kHz high-passed 1 ms peaks. A pick: a 10 dB rise over the
@@ -236,7 +258,7 @@ namespace Audio::GameToneLatency
 		const ULONGLONG now = GetTickCount64();
 		// The in-game HUD and the overlay both ask, every frame: one of them runs the comparison, once a second.
 		ULONGLONG last = g_lastRun.load();
-		if (now - last >= 1000 && g_lastRun.compare_exchange_strong(last, now)) Analyse();
+		if (now - last >= 1000 && g_lastRun.compare_exchange_strong(last, now)) { TakeMeasured(); Analyse(); }
 		return g_resultCount >= 3 && now - g_lastResult.load() < 60000;
 	}
 
@@ -251,4 +273,6 @@ namespace Audio::GameToneLatency
 	bool GameOwnGuessed() { return (Fixed(), !g_fixedMeasured.load()); }
 
 	float CurrentMs() { return Valid() ? MedianMs() : Internal() + g_outputMs.load(); }
+
+	void NoteMeasuredMs(float totalMs) { g_pendingMeasured.store(totalMs); }
 }

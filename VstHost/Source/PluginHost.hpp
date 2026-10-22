@@ -50,6 +50,8 @@ namespace VstHost
 		bool TakeRestartRequest() { return false; }   // JUCE re-prepares the plugin itself when its layout changes
 
 		const std::string& Name() const { return m_name; }
+		// The delay the plugin reports for its processing (look-ahead, oversampling filters), in samples.
+		int LatencySamples() const;
 		bool HasEditor() const { return m_editor != nullptr; }
 
 		// Stream thread. Stereo in and out; false (and silence) while the plugin is not ready.

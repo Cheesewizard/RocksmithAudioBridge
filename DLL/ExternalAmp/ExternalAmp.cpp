@@ -9,6 +9,7 @@
 #include "AudioBridge/Input/InputCaptureHook.hpp"
 #include "AudioBridge/Engine/GameToneLatency.hpp"
 #include "AudioBridge/Engine/OutputTap.hpp"
+#include "AudioBridge/Engine/LatencyCalibration.hpp"
 #include <atomic>
 #include <cmath>
 #include <mutex>
@@ -348,6 +349,7 @@ namespace ExternalAmp
 				CableAmpLink::LogLatency();   // every 30 s while the cable hosts the link
 				CableAmpLink::SetGuestLoading(VstHostLink::IsLoading());
 				CableAmpLink::Maintain();
+				Audio::LatencyCalibration::Tick();   // ASIO mode: measures a new setup once, in the menus
 				Sleep(100);
 			}
 		}

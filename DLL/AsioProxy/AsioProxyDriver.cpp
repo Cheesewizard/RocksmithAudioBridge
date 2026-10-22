@@ -21,6 +21,7 @@
 #include "Remote64Driver.hpp"
 #include "AmpLinkHost.hpp"
 #include "AmpLinkGuest.hpp"
+#include "LatencyMeasure.hpp"
 #include "../Shared/ProductVersion.hpp"
 #include <string>
 #include <array>
@@ -202,6 +203,19 @@ extern "C" __declspec(dllexport) int RSModsAsio_GetLatencies(long* inFrames, lon
 	if (outFrames) *outFrames = out;
 	if (sampleRate) *sampleRate = rate;
 	return rate > 0 && (in > 0 || out > 0) ? 1 : 0;
+}
+
+// Latency measurement on the bound stream (LatencyMeasure.hpp). kind 1 = game (no cable), 2 = hardware (patch cable).
+extern "C" __declspec(dllexport) int RSModsAsio_StartLatencyMeasure(int kind)
+{
+	return (kind == 1 || kind == 2) && AsioProxy::LatencyMeasure::Start(static_cast<AsioProxy::LatencyMeasure::Kind>(kind)) ? 1 : 0;
+}
+extern "C" __declspec(dllexport) void RSModsAsio_ReleaseLatencyMeasure() { AsioProxy::LatencyMeasure::Release(); }
+extern "C" __declspec(dllexport) int RSModsAsio_GetLatencyMeasure(AsioProxy::LatencyMeasure::Result* result, int size)
+{
+	if (!result || size != static_cast<int>(sizeof(AsioProxy::LatencyMeasure::Result))) return 0;
+	*result = AsioProxy::LatencyMeasure::Get();
+	return 1;
 }
 
 namespace
@@ -908,7 +922,7 @@ public:
 		return 0;
 	}
 	ASIOError getChannelInfo(ASIOChannelInfo* info) override { if (m_mode.load() == OutputMode::Virtual && info && info->channel > 1 && ProbeRealBeforeBind()) { const ASIOError e = m_real->getChannelInfo(info); if (e == 0) info->type = ASIOSTInt32LSB; return e; } if (m_mode.load() == OutputMode::Virtual) { if (!info || info->channel < 0 || info->channel > 1) return -1; info->isActive = 1; info->channelGroup = 0; info->type = ASIOSTInt32LSB; strcpy_s(info->name, 32, info->isInput ? (info->channel == 0 ? "Virtual Capture Left" : "Virtual Capture Right") : (info->channel == 0 ? "Virtual Left" : "Virtual Right")); return 0; } if (!m_real) return -1; const ASIOError e = m_real->getChannelInfo(info); if (e == 0 && info) info->type = ASIOSTInt32LSB; return e; }
-	ASIOError disposeBuffers() override { std::lock_guard<std::mutex> transition(m_transitionMutex); ProxyLog("disposeBuffers: mode %s", m_mode.load() == OutputMode::Virtual ? "Virtual" : "Real"); if (m_mode.load() == OutputMode::Virtual) { StopVirtual(); m_virtualCable.Stop(); FreeVirtualBuffers(); } DisableRealCallbacksAndWait(); m_bufferInfos = nullptr; m_numChannels = 0; m_callbackSeen.store(false); if (s_active == this) s_active = nullptr; g_latencyRate.store(0); const ASIOError e = m_real ? m_real->disposeBuffers() : 0; FreeBridge(); return e; }
+	ASIOError disposeBuffers() override { std::lock_guard<std::mutex> transition(m_transitionMutex); ProxyLog("disposeBuffers: mode %s", m_mode.load() == OutputMode::Virtual ? "Virtual" : "Real"); if (m_mode.load() == OutputMode::Virtual) { StopVirtual(); m_virtualCable.Stop(); FreeVirtualBuffers(); } DisableRealCallbacksAndWait(); m_bufferInfos = nullptr; m_numChannels = 0; m_callbackSeen.store(false); if (s_active == this) s_active = nullptr; g_latencyRate.store(0); AsioProxy::LatencyMeasure::SetStream(L"", 0, 0.0, false); const ASIOError e = m_real ? m_real->disposeBuffers() : 0; FreeBridge(); return e; }
 	ASIOError controlPanel() override { return m_real ? m_real->controlPanel() : 0; }
 	ASIOError future(long selector, void* opt) override { return m_real ? m_real->future(selector, opt) : -1; }
 	ASIOError outputReady() override { return m_real ? m_real->outputReady() : 0; }
@@ -983,7 +997,7 @@ private:
 	static const long kVirtualHardMaxFrames = 16384;
 	static const long kVirtualSampleRate = 48000;
 
-	void ActivateVirtual() { m_mode.store(OutputMode::Virtual); m_callbackSeen.store(false); m_lastCallbackTick.store(0); m_virtualSamplePosition.store(0); m_sampleRate = 48000.0; CacheChannelNames(); }
+	void ActivateVirtual() { AsioProxy::LatencyMeasure::SetStream(L"", 0, 0.0, false); m_mode.store(OutputMode::Virtual); m_callbackSeen.store(false); m_lastCallbackTick.store(0); m_virtualSamplePosition.store(0); m_sampleRate = 48000.0; CacheChannelNames(); }
 
 	// The bound device's channel names for the overlay's pickers; none while Virtual.
 	void CacheChannelNames()
@@ -1422,6 +1436,9 @@ private:
 		ConfigureGuard();
 		OpenAmpLink();
 		CacheLatencies();
+		m_measureScratch.assign(static_cast<size_t>(bufferSize) * 9, 0.0f);
+		AsioProxy::LatencyMeasure::SetLogger(&ProxyLog);
+		AsioProxy::LatencyMeasure::SetStream(m_bindTarget.c_str(), bufferSize, m_sampleRate > 0.0 ? m_sampleRate : 48000.0, m_realIs64);
 		s_active = this;
 	}
 
@@ -1888,8 +1905,10 @@ private:
 				return false;
 			}
 			ProxyLog("LoadReal: '%ls' loaded through the 64-bit host", targetDriver.c_str());
+			m_realIs64 = true;
 			return true;
 		}
+		m_realIs64 = false;
 		m_realModule = LoadLibraryW(dllPath.c_str());
 		// Pinned: an ASIO driver's own threads can outlive Release() (a USB worker waking late), and once its DLL is
 		// unmapped they run into freed code and take the game down (an execute fault after switching interfaces live).
@@ -1980,16 +1999,21 @@ private:
 		m_lastCallbackTick.store(GetTickCount64(), std::memory_order_release);
 		FillVirtualInputs(index);
 		BridgeInputs(index);
+		m_measuring = AsioProxy::LatencyMeasure::Active();
+		if (m_measuring) MeasureInputs(index);   // before the amp link's DI, so the Tone designer gets the chirps too
 		g_ampLink.Publish(m_bufferInfos, m_numChannels, index, m_bufferSize);   // raw DI, before the input chain
 		NotifyInputObserver(index);
 		if (m_hostCallbacks.bufferSwitch) m_hostCallbacks.bufferSwitch(index, ASIOFalseVal);
+		if (m_measuring) MeasureOutput(index, false);
 		MixAmpReturn(index);   // before the trim/limiter/meter/tap, so all of them include the amp
+		if (m_measuring) MeasureOutput(index, true);
 		InjectProbe(index);
 		ApplyOutputTrim(index);
 		ApplyOutputGuard(index);
 		MeterOutput(index);
 		TapOutput(index);
 		MuteForward(index);
+		if (m_measuring) MeasureFinalOutput(index);
 		BridgeOutputs(index);
 	}
 	ASIOTime* OnBufferSwitchTimeInfo(ASIOTime* params, long index, ASIOBool direct)
@@ -1998,16 +2022,21 @@ private:
 		m_lastCallbackTick.store(GetTickCount64(), std::memory_order_release);
 		FillVirtualInputs(index);
 		BridgeInputs(index);
+		m_measuring = AsioProxy::LatencyMeasure::Active();
+		if (m_measuring) MeasureInputs(index);   // before the amp link's DI, so the Tone designer gets the chirps too
 		g_ampLink.Publish(m_bufferInfos, m_numChannels, index, m_bufferSize);
 		NotifyInputObserver(index);
 		ASIOTime* r = m_hostCallbacks.bufferSwitchTimeInfo ? m_hostCallbacks.bufferSwitchTimeInfo(params, index, direct) : nullptr;
+		if (m_measuring) MeasureOutput(index, false);
 		MixAmpReturn(index);
+		if (m_measuring) MeasureOutput(index, true);
 		InjectProbe(index);
 		ApplyOutputTrim(index);
 		ApplyOutputGuard(index);
 		MeterOutput(index);
 		TapOutput(index);
 		MuteForward(index);
+		if (m_measuring) MeasureFinalOutput(index);
 		BridgeOutputs(index);
 		return r;
 	}
@@ -2171,6 +2200,72 @@ private:
 
 	// When armed, overwrite the leading probe samples of each output channel for this buffer. Runs after the
 	// host filled the buffers, so it briefly replaces game audio with the impulse the loopback will carry back.
+	// ---- Latency measurement (LatencyMeasure.hpp) on this callback's buffers -----------------------------------
+	// The host's input buffers as floats (m_measureScratch, one row per input), the chirps or silence written back.
+	void MeasureInputs(long index) noexcept
+	{
+		constexpr int kMax = 8;
+		if (!m_bufferInfos || m_bufferSize <= 0 || m_measureScratch.size() < static_cast<size_t>(m_bufferSize) * (kMax + 1)) return;
+		float* rows[kMax]{};
+		long infoOf[kMax]{};
+		int count = 0;
+		for (long i = 0; i < m_numChannels && count < kMax; ++i)
+		{
+			if (!m_bufferInfos[i].isInput || i >= static_cast<long>(m_inputTypes.size())) continue;
+			const BYTE* src = reinterpret_cast<const BYTE*>(m_bufferInfos[i].buffers[index]);
+			const long bytes = SampleBytes(m_inputTypes[i]);
+			if (!src || bytes == 0) continue;
+			float* row = m_measureScratch.data() + static_cast<size_t>(count) * m_bufferSize;
+			for (long f = 0; f < m_bufferSize; ++f) row[f] = ReadFloatSample(src + static_cast<size_t>(f) * bytes, m_inputTypes[i]);
+			rows[count] = row;
+			infoOf[count++] = i;
+		}
+		if (!AsioProxy::LatencyMeasure::Inputs(rows, count, m_bufferSize)) return;
+		for (int c = 0; c < count; ++c)
+		{
+			const long i = infoOf[c];
+			BYTE* dst = reinterpret_cast<BYTE*>(m_bufferInfos[i].buffers[index]);
+			const long bytes = SampleBytes(m_inputTypes[i]);
+			for (long f = 0; f < m_bufferSize; ++f) WriteFloatSample(dst + static_cast<size_t>(f) * bytes, m_inputTypes[i], rows[c][f]);
+		}
+	}
+
+	// The first two outputs, averaged: the game's alone (`heard` false, straight after the host's callback), or with
+	// the amp link's return mixed in (`heard` true).
+	void MeasureOutput(long index, bool heard) noexcept
+	{
+		constexpr int kMax = 8;
+		if (m_outputCount == 0 || m_bufferSize <= 0 || m_measureScratch.size() < static_cast<size_t>(m_bufferSize) * (kMax + 1)) return;
+		float* mono = m_measureScratch.data() + static_cast<size_t>(kMax) * m_bufferSize;
+		const long channels = m_outputCount < 2 ? m_outputCount : 2;
+		std::fill(mono, mono + m_bufferSize, 0.0f);
+		for (long ch = 0; ch < channels; ++ch)
+		{
+			const BYTE* src = reinterpret_cast<const BYTE*>(m_bufferInfos[m_outputs[ch].bufferIndex].buffers[index]);
+			const long bytes = SampleBytes(m_outputs[ch].type);
+			if (!src || bytes == 0) continue;
+			for (long f = 0; f < m_bufferSize; ++f) mono[f] += ReadFloatSample(src + static_cast<size_t>(f) * bytes, m_outputs[ch].type) / channels;
+		}
+		if (heard) AsioProxy::LatencyMeasure::HeardOutput(mono, m_bufferSize);
+		else AsioProxy::LatencyMeasure::GameOutput(mono, m_bufferSize);
+	}
+
+	// Last before the driver: every output replaced by silence (or the cable chirps) while a measurement needs it.
+	void MeasureFinalOutput(long index) noexcept
+	{
+		constexpr int kMax = 8;
+		if (m_bufferSize <= 0 || m_measureScratch.size() < static_cast<size_t>(m_bufferSize) * (kMax + 1)) return;
+		float* replacement = m_measureScratch.data() + static_cast<size_t>(kMax) * m_bufferSize;
+		if (!AsioProxy::LatencyMeasure::FinalOutput(replacement, m_bufferSize)) return;
+		for (long ch = 0; ch < m_outputCount; ++ch)
+		{
+			BYTE* dst = reinterpret_cast<BYTE*>(m_bufferInfos[m_outputs[ch].bufferIndex].buffers[index]);
+			const long bytes = SampleBytes(m_outputs[ch].type);
+			if (!dst || bytes == 0) continue;
+			for (long f = 0; f < m_bufferSize; ++f) WriteFloatSample(dst + static_cast<size_t>(f) * bytes, m_outputs[ch].type, replacement[f]);
+		}
+	}
+
 	void InjectProbe(long index) noexcept
 	{
 		if (g_probeRemaining.load(std::memory_order_relaxed) <= 0 || m_outputCount == 0 || m_bufferSize <= 0) return;
@@ -2323,6 +2418,9 @@ private:
 	double m_sampleRate = 48000.0;
 	OutChannel m_outputs[kMaxOutputs]{};
 	long m_outputCount = 0;
+	bool m_measuring = false;                  // audio thread: a latency measurement is running this callback
+	std::vector<float> m_measureScratch;       // its float rows: 8 inputs, then one output row (CompleteRealBind)
+	bool m_realIs64 = false;                   // the bound driver runs in the 64-bit driver host
 	long m_inputCount = 0;
 	std::vector<std::vector<float>> m_guardScratch;   // per-channel float scratch for the loudness guard (pre-allocated)
 	std::vector<void*> m_virtualBuffers;

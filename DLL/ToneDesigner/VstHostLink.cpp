@@ -1152,6 +1152,12 @@ namespace VstHostLink
 		return shared && (shared->loading != 0 || shared->commandDone != shared->commandSeq);
 	}
 
+	int ChainLatencySamples()
+	{
+		VstHostControl::Shared* shared = g_shared;
+		return shared && shared->hostPid != 0 ? static_cast<int>(shared->chainLatencySamples) : -1;
+	}
+
 	Snapshot GetSnapshot()
 	{
 		VstHostControl::Shared* shared = Shared();

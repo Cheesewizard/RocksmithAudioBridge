@@ -431,6 +431,15 @@ namespace VstHost
 		RaisePeak(m_outputPeak, std::max(Peak(left, frames), Peak(right, frames)));
 	}
 
+	int Chain::LatencySamples()
+	{
+		if (m_chainBypass.load()) return 0;
+		int total = 0;
+		for (auto& slot : m_slots)
+			if (!slot->bypass.load()) total += slot->plugin->LatencySamples();
+		return total;
+	}
+
 	// Tone file: magic "RABTONE2", input and output trim (int32 tenths of a dB), slot count (uint32), then per slot
 	// the plugin path (uint32 length in UTF-16 units + text), bypass (uint8), and the plugin's settings as JUCE
 	// keeps them (uint32 length + bytes). "RABTONE1" files (before JUCE) have two blocks per slot instead, the raw

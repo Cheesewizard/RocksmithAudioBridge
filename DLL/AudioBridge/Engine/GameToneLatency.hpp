@@ -39,5 +39,8 @@ namespace Audio::GameToneLatency
 	float GameOwnMs(float blockMs);
 	bool GameOwnGuessed();   // that fixed part is still the built-in guess (never measured on the cable on this PC)
 	float CurrentMs();
+	// LatencyLoopback's measured total (cable sample to speaker, ms), from any thread: taken as 7 agreeing picks on the
+	// overlay's next comparison, and its fixed part (beyond the output part and the two blocks) is remembered.
+	void NoteMeasuredMs(float totalMs);
 	UINT64 Now100ns();
 }

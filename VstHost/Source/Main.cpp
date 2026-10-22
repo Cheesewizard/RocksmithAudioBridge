@@ -1120,6 +1120,7 @@ namespace
 				return 0;
 			}
 			if (g_control) InterlockedIncrement(&g_control->hostBeat);
+			if (g_control) InterlockedExchange(&g_control->chainLatencySamples, g_chain.LatencySamples());
 			InstallCrashReporter();   // a plugin may have replaced it with its own
 			if (g_chain.TakeRestartRequest() && !g_standby) StartAudio(window);
 			if (g_ticks % 4 == 0) RefreshKeepSettings();

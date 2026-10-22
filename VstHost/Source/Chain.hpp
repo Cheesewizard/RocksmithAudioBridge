@@ -75,6 +75,7 @@ namespace VstHost
 		// Every plugin skipped (the clean guitar plays); each slot keeps its own bypass. Not part of the tone.
 		void SetChainBypass(bool bypass) { m_chainBypass = bypass; }
 		bool ChainBypassed() const { return m_chainBypass.load(); }
+		int LatencySamples();   // what the playing slots report, summed (0 while the whole chain is bypassed)
 		int InputTenths() const { return m_inputTenths; }
 		int OutputTenths() const { return m_outputTenths; }
 		float TakeInputPeak() { return m_inputPeak.exchange(0.0f); }

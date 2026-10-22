@@ -79,7 +79,10 @@ namespace VstHostLink
 	// Any thread: the host is loading plugins or a tone, or has commands not yet handled. A raw read of the shared
 	// state (no refresh, never opens the mapping); for the cable amp link, which must not treat a load as a slow PC.
 	bool IsLoading();
-	bool IsHostGuest(const std::string& guestName);   // the amp link's guest is the VST host (Tone designer)
+	bool IsHostGuest(const std::string& guestName);
+	// Any thread, raw read like IsLoading: the delay the chain's playing plugins report, in samples; -1 when no host
+	// is running (or the overlay has not opened the shared block yet).
+	int ChainLatencySamples();   // the amp link's guest is the VST host (Tone designer)
 
 	// Plugins: 64-bit VST3 in Common Files\VST3 and any added folders, scanned on first use.
 	const std::vector<Plugin>& Plugins();

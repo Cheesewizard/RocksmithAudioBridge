@@ -21,6 +21,7 @@
 #include "AudioBridge/Engine/DeviceVolume.hpp"
 #include "AudioBridge/Engine/AppAudioMix.hpp"
 #include "AudioBridge/Engine/GameToneLatency.hpp"
+#include "AudioBridge/Engine/LatencyCalibration.hpp"
 #include "AudioBridge/Input/InputCaptureHook.hpp"
 #include "AudioBridge/Devices/DeviceEnumeratorHook.hpp"
 #include "AudioBridge/Engine/CableGamePeriod.hpp"
@@ -4886,6 +4887,56 @@ namespace Overlay
 				SetLatencyReadoutEnabled(latencyReadout);
 			EndCard();
 
+			// ASIO mode's measured latency (LatencyCalibration.hpp). The game measurement runs by itself once per setup;
+			// Recalibrate runs it again. The interface's own delay needs a cable looped from its headphone jack into its guitar input, and
+			// the output stays muted afterwards until the player says the cable is out (a guitar input patched to the
+			// output would feed back through the game's amp).
+			BeginCard("Latency");
+			{
+				static std::string refused;
+				static bool cableSteps = false;
+				const bool available = Audio::LatencyCalibration::Available();
+				const bool running = Audio::LatencyCalibration::Running();
+				const bool holding = Audio::LatencyCalibration::HoldingMuted();
+				if (!available && !holding) Caption("Measuring works with an ASIO interface. In Cable mode the game tones figure is estimated from your playing.");
+				else {
+					Caption(Audio::LatencyCalibration::Status().c_str());
+					if (holding) {
+						Caption("Rocksmith is muted. Take the cable out of the headphone jack, plug your guitar back in, then press Cable out.");
+						if (Button("Cable out", true)) { Audio::LatencyCalibration::CableOut(); cableSteps = false; }
+					}
+					else {
+						ImGui::BeginDisabled(running);
+						if (Button(running ? "Measuring..." : "Recalibrate", false,
+							"Measures again what the game's amp adds (and the Tone designer, if it is playing) by sending three short chirps through it in place of your guitar. About a second of silence; it waits until you stop playing. It also runs by itself once for each interface, buffer size and sample rate, in the menus.")) {
+							refused.clear();
+							Audio::LatencyCalibration::Recalibrate(refused);
+						}
+						ImGui::SameLine();
+						if (Button("Measure the interface...", false, "Times your interface's own input and output delay by sending a sound out of the headphone jack and back into the guitar input through a cable, instead of trusting what its driver reports. Once per interface and buffer size."))
+							cableSteps = !cableSteps;
+						ImGui::EndDisabled();
+						if (cableSteps && !running) {
+							Caption("This needs no guitar: the interface plays a test sound into a cable that loops straight back into it.");
+							Caption("1. Unplug the guitar from its cable. Plug that free end into the interface's headphone jack (or line out). The cable now runs from the headphone jack into the guitar input: a closed loop.");
+							Caption("2. Headphone volume about halfway. Direct monitor fully to playback (USB), or the loop will feed back.");
+							Caption("3. Press Start. Rocksmith stays muted until you press Cable out.");
+							if (Button("Start", true)) {
+								refused.clear();
+								Audio::LatencyCalibration::MeasureHardware(refused);
+							}
+							if (Audio::LatencyCalibration::Current().roundTripMs >= 0.0f) {
+								ImGui::SameLine();
+								if (Button("Use the driver's figures", false, "Forget the cable measurement for this interface and show the delays its driver reports."))
+									Audio::LatencyCalibration::ForgetHardware();
+							}
+						}
+					}
+				}
+				if (!refused.empty()) Caption(refused.c_str());
+			}
+			EndCard();
+
 			BeginCard("Library");
 			Caption("Picks up newly added CDLC without restarting. Open the song list once first if nothing changes.");
 			if (Button("Update song list")) BridgeControl(28);
@@ -5004,23 +5055,24 @@ namespace Overlay
 			LatencyReadout(right, origin.y);
 		}
 
-		// ASIO mode's figures: the driver's reported input and output latency (they include its buffers), plus the amp
-		// link's blocks when an amp sim plays, or the game's own processing for the game tones (its two blocks at the ASIO
-		// buffer size plus the part measured on the cable, else a guess: GameToneLatency::GameOwnMs). Rounded once and
-		// subtracted so the parts add up, like CableSplit.
-		struct AsioSplit { int input, ampOutput, ampTotal, gameTotal; };
+		// ASIO mode's figures (LatencyCalibration::SplitAsio, shared with the HUD): the interface's round trip, measured
+		// with a patch cable or else the driver's own figures, plus each path's processing, measured or else the amp
+		// link's blocks / the game's estimate (picks in the last minute, else GameToneLatency::GameOwnMs). Rounded once
+		// and subtracted so the parts add up, like CableSplit.
+		struct AsioSplit { int input, ampOutput, ampTotal, gameTotal; const char* ampLabel; const char* gameLabel; };
 		AsioSplit SplitAsioLatency(const ExternalAmp::Snapshot& amp)
 		{
 			const AmpLink::Status& link = amp.link;
 			const int rate = link.sampleRate > 0 ? link.sampleRate : AmpLink::kSampleRate;
-			const double linkMs = link.frames > 0 ? link.frames * (link.latencyBlocks > 1 ? 2 : 1) * 1000.0 / rate : 0.0;
-			const int input = static_cast<int>(std::lround(amp.asioInMs));
-			const int ampTotal = static_cast<int>(std::lround(amp.asioInMs + amp.asioOutMs + linkMs));
+			const float linkMs = link.frames > 0 ? static_cast<float>(link.frames * (link.latencyBlocks > 1 ? 2 : 1) * 1000.0 / rate) : 0.0f;
 			const float blockMs = static_cast<float>((link.frames > 0 ? link.frames : 128) * 1000.0 / rate);
-			// The game's own part: timed from picks in the last minute (GameToneLatency ASIO feed), else remembered or guessed.
-			const float gameOwn = Audio::GameToneLatency::Valid() ? Audio::GameToneLatency::MedianMs() : Audio::GameToneLatency::GameOwnMs(blockMs);
-			const int gameTotal = static_cast<int>(std::lround(amp.asioInMs + amp.asioOutMs + gameOwn));
-			return { input, ampTotal - input, ampTotal, gameTotal };
+			const bool picks = Audio::GameToneLatency::Valid();
+			const float gameOwn = picks ? Audio::GameToneLatency::MedianMs() : Audio::GameToneLatency::GameOwnMs(blockMs);
+			const auto split = Audio::LatencyCalibration::SplitAsio(amp.asioInMs, amp.asioOutMs, linkMs, gameOwn, !picks && Audio::GameToneLatency::GameOwnGuessed());
+			const int input = static_cast<int>(std::lround(split.inMs));
+			const int ampTotal = static_cast<int>(std::lround(split.ampTotalMs));
+			return { input, ampTotal - input, ampTotal, static_cast<int>(std::lround(split.gameTotalMs)),
+				Audio::LatencyCalibration::Label(split.amp), Audio::LatencyCalibration::Label(split.game) };
 		}
 
 		// Guitar to ear, on every page, the one being heard brighter. Cable mode: the Tone designer's delay (measured
@@ -5032,14 +5084,14 @@ namespace Overlay
 			const ExternalAmp::Snapshot amp = ExternalAmp::GetSnapshot();
 			const bool asio = !amp.cableHost && amp.asioInMs + amp.asioOutMs > 0.0f;
 			if (!amp.cableHost && !asio) return;
-			char designer[96], game[48];
+			char designer[112], game[48];
 			bool toneDesignerPlays = amp.toneDesigner && amp.enabled && !amp.comparing;
 			if (asio) {
 				const AsioSplit split = SplitAsioLatency(amp);
 				const bool ampSim = amp.link.guestPresent && !amp.toneDesigner;
 				toneDesignerPlays = amp.link.connected && !amp.comparing;
-				sprintf_s(designer, "%s in %d  out %d  total %d ms", ampSim ? "Amp sim" : "Tone designer", split.input, split.ampOutput, split.ampTotal);
-				sprintf_s(game, !Audio::GameToneLatency::Valid() && Audio::GameToneLatency::GameOwnGuessed() ? "Game tones ~%d ms (guess)" : "Game tones ~%d ms (est.)", split.gameTotal);
+				sprintf_s(designer, "%s in %d  out %d  total %d ms (%s)", ampSim ? "Amp sim" : "Tone designer", split.input, split.ampOutput, split.ampTotal, split.ampLabel);
+				sprintf_s(game, "Game tones ~%d ms (%s)", split.gameTotal, split.gameLabel);
 			}
 			else if (amp.cableLatencyMs > 0.0f) {
 				const CableSplit split = SplitCableLatency(amp);
@@ -5065,7 +5117,7 @@ namespace Overlay
 			ImGui::PopFont();
 			ImGui::SetCursorScreenPos(ImVec2(x, top + 10.0f));
 			ImGui::InvisibleButton("##latency", ImVec2(designerW + gap + gameW, 38.0f));
-			if (asio) Hint("Latency estimates from your ASIO driver: input and output are the delays the driver reports for its buffers and converters; the amp sim or Tone designer adds the amp link's blocks to the output part. Game tones also pass through the game's own processing, which is not measured in ASIO mode, so their figure is the least they can be. Nothing here is timed from your playing; it is not a calibrated guitar-to-ear measurement.");
+			if (asio) Hint("Guitar to ear in ASIO mode. Input and output are your interface's: measured with a cable looped from the headphone jack into the guitar input (General > Latency), else the delays its driver reports. The total adds what happens inside the PC: the game's amp or the Tone designer, measured on this setup by sending short chirps through it (once, by itself, in the menus; Recalibrate in General > Latency), else estimated. \"measured\" means every part was measured; \"est.\" that some part is the driver's word or an estimate.");
 			else Hint("Latency estimates: software timing plus the output driver's reported delay. Input is how long the guitar waits for each packet from the cable (about 1 ms read directly over USB, 10 ms through Windows), plus any measured wait when packets arrive in batches; output is the Tone designer, its buffers and the output device (exclusive mode lowers this part); total is the two together. Tone designer tracks audio blocks; game tones are a rougher estimate, matching your picks to output attacks; until a few picks have been timed with the game amp playing, the game tones figure is a guess from the game block size. The cable's own converter and the USB bus are excluded. This is not a calibrated guitar-to-ear measurement.");
 		}
 
