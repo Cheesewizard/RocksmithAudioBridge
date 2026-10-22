@@ -23,6 +23,30 @@ namespace Audio::PersistentInput
 	// for a Windows restart. The cable plays through Windows meanwhile; the game screen tells the player why.
 	bool IsDirectUsbWaitingForRestart();
 
+	// Player 1's input in Cable mode. The game only ever sees our persistent cable device; this is the hardware behind
+	// it. Automatic (no choice) is a cable with the Real Tone Cable USB ID (12BA:00FF), read over UsbDk when it can be.
+	// Without one, and while none has opened this launch, it is the Windows default recording device, the way the game
+	// itself takes other cables when Rocksmith.ini has RealToneCableOnly=0 (it skips them at 1, and so do we).
+	// A chosen device that is not a Real Tone Cable is always read through Windows.
+	enum class PlayerOneInputKind { None, RealToneCable, ChosenDevice, WindowsDefault };
+	struct PlayerOneInput
+	{
+		PlayerOneInputKind kind = PlayerOneInputKind::None;
+		std::wstring name;   // Windows' friendly name of the open device
+	};
+	struct CaptureDeviceInfo
+	{
+		std::wstring id;
+		std::wstring name;
+		bool realToneCable = false;
+	};
+	PlayerOneInput GetPlayerOneInput();
+	// RSMods.ini [Audio Bridge] CableInputDevice: an endpoint ID, or empty for automatic. Saved and applied within a second.
+	std::wstring GetPlayerOneInputChoice();
+	void SetPlayerOneInputChoice(const std::wstring& endpointId);
+	// Active Windows recording devices, for the overlay's picker.
+	std::vector<CaptureDeviceInfo> ListCaptureDevices();
+
 	class CaptureSession
 	{
 	public:
@@ -49,8 +73,10 @@ namespace Audio::PersistentInput
 	private:
 		void Run();
 		void RunClock();
-		HRESULT OpenDevice(IMMDeviceEnumerator* enumerator);
+		HRESULT OpenDevice(IMMDeviceEnumerator* enumerator, const std::wstring& endpointId);
+		HRESULT OpenEndpoint(IMMDevice* device);
 		HRESULT OpenUsb();
+		void NoteOpened(PlayerOneInputKind kind);
 		HRESULT DrainDevice();
 		void CloseDevice();
 		void ClearPackets();
@@ -105,6 +131,8 @@ namespace Audio::PersistentInput
 		// The cable read directly over USB (its audio function on WinUSB) instead of `backend`; one or the other.
 		UsbCableCapture usb;
 		bool usbOpen = false;
+		PlayerOneInputKind openKind = PlayerOneInputKind::None;   // what Player 1's open device is (worker thread)
+		UINT64 seenChoiceGeneration = 0;
 		UINT32 clockFrames = 0;   // packetMutex: input frames toward the next NotifyCableInputFrames
 	};
 }

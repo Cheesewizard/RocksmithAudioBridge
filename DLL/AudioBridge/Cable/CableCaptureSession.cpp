@@ -7,6 +7,7 @@
 #include "AudioBridge/Engine/GameToneLatency.hpp"
 #include "AudioBridge/Engine/OutputReserve.hpp"
 #include <avrt.h>
+#include <filesystem>
 #include <functiondiscoverykeys_devpkey.h>
 
 namespace Audio::PersistentInput
@@ -45,6 +46,155 @@ namespace Audio::PersistentInput
 
 	bool IsDirectUsbWaitingForRestart() { return g_usbWaitingForRestart.load(std::memory_order_relaxed); }
 
+	namespace
+	{
+		std::wstring GameFolderFile(const wchar_t* name)
+		{
+			wchar_t executable[MAX_PATH]{};
+			GetModuleFileNameW(nullptr, executable, MAX_PATH);
+			return (std::filesystem::path(executable).parent_path() / name).wstring();
+		}
+
+		// Player 1's chosen input (RSMods.ini [Audio Bridge] CableInputDevice), read on first use. Its own key, not
+		// InputDevice: in RS_ASIO mode InputDevice names Player 2's cable (VirtualCableCapture), a different meaning.
+		std::mutex g_choiceMutex;
+		std::wstring g_choice;
+		bool g_choiceRead = false;
+		std::atomic<UINT64> g_choiceGeneration{ 0 };
+
+		// Once a Real Tone Cable has opened this launch, automatic never falls back to the Windows default: a cable that
+		// drops out (unplugged, a USB hub reset) waits in silence rather than putting a webcam or laptop mic in the amp.
+		std::atomic<bool> g_realToneCableOpened{ false };
+
+		std::mutex g_activeMutex;
+		const void* g_activeOwner = nullptr;
+		PlayerOneInput g_active;
+
+		bool RealToneCableOnly()
+		{
+			static const bool only = GetPrivateProfileIntW(L"Audio", L"RealToneCableOnly", 0, GameFolderFile(L"Rocksmith.ini").c_str()) != 0;
+			return only;
+		}
+
+		std::string Utf8(const std::wstring& text)
+		{
+			if (text.empty()) return {};
+			const int size = WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+			std::string result(size > 0 ? size : 0, '\0');
+			if (size > 0) WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), result.data(), size, nullptr, nullptr);
+			return result;
+		}
+
+		std::wstring FriendlyName(IMMDevice* device)
+		{
+			ComPtr<IPropertyStore> properties;
+			PROPVARIANT value{};
+			std::wstring name;
+			if (device && SUCCEEDED(device->OpenPropertyStore(STGM_READ, &properties))
+				&& SUCCEEDED(properties->GetValue(PKEY_Device_FriendlyName, &value)) && value.vt == VT_LPWSTR && value.pwszVal)
+				name = value.pwszVal;
+			PropVariantClear(&value);
+			return name;
+		}
+
+		// The USB (or other bus) instance path, so the log says what hardware ID a non-Real Tone Cable reports.
+		std::wstring InstancePath(IMMDevice* device)
+		{
+			const PROPERTYKEY instance = { { 0xb3f8fa53, 0x0004, 0x438e, { 0x90, 0x03, 0x51, 0xa4, 0x6e, 0x13, 0x9b, 0xfc } }, 2 };
+			ComPtr<IPropertyStore> properties;
+			PROPVARIANT value{};
+			std::wstring path;
+			if (device && SUCCEEDED(device->OpenPropertyStore(STGM_READ, &properties))
+				&& SUCCEEDED(properties->GetValue(instance, &value)) && value.vt == VT_LPWSTR && value.pwszVal)
+				path = value.pwszVal;
+			PropVariantClear(&value);
+			return path;
+		}
+	}
+
+	std::wstring GetPlayerOneInputChoice()
+	{
+		std::lock_guard<std::mutex> guard(g_choiceMutex);
+		if (!g_choiceRead)
+		{
+			wchar_t value[2048]{};
+			GetPrivateProfileStringW(L"Audio Bridge", L"CableInputDevice", L"", value, 2048, GameFolderFile(L"RSMods.ini").c_str());
+			g_choice = value;
+			g_choiceRead = true;
+		}
+		return g_choice;
+	}
+
+	void SetPlayerOneInputChoice(const std::wstring& endpointId)
+	{
+		{
+			std::lock_guard<std::mutex> guard(g_choiceMutex);
+			g_choice = endpointId;
+			g_choiceRead = true;
+		}
+		// An empty choice deletes the key rather than writing "CableInputDevice=".
+		WritePrivateProfileStringW(L"Audio Bridge", L"CableInputDevice", endpointId.empty() ? nullptr : endpointId.c_str(), GameFolderFile(L"RSMods.ini").c_str());
+		g_choiceGeneration.fetch_add(1);
+		LOG_INFO("(PERSISTENT INPUT) Player 1 input set to " << (endpointId.empty() ? std::string("automatic") : "a chosen device") << std::endl);
+	}
+
+	PlayerOneInput GetPlayerOneInput()
+	{
+		std::lock_guard<std::mutex> guard(g_activeMutex);
+		return g_active;
+	}
+
+	std::vector<CaptureDeviceInfo> ListCaptureDevices()
+	{
+		std::vector<CaptureDeviceInfo> list;
+		// Called from the overlay (the game's render thread): join whatever apartment it has, or make one for the call.
+		const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+		{
+			ComPtr<IMMDeviceEnumerator> enumerator;
+			ComPtr<IMMDeviceCollection> devices;
+			UINT count = 0;
+			if (SUCCEEDED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&enumerator)))
+				&& SUCCEEDED(enumerator->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE, &devices))
+				&& SUCCEEDED(devices->GetCount(&count)))
+			{
+				for (UINT index = 0; index < count; ++index)
+				{
+					ComPtr<IMMDevice> device;
+					LPWSTR id = nullptr;
+					if (FAILED(devices->Item(index, &device)) || FAILED(device->GetId(&id))) continue;
+					list.push_back({ id, FriendlyName(device.Get()), IsCable(device.Get()) });
+					CoTaskMemFree(id);
+				}
+			}
+		}
+		if (SUCCEEDED(com)) CoUninitialize();
+		return list;
+	}
+
+	void CaptureSession::NoteOpened(PlayerOneInputKind kind)
+	{
+		openKind = kind;
+		if (gatedByPlayerTwoToggle) return;
+		if (kind == PlayerOneInputKind::RealToneCable) g_realToneCableOpened.store(true);
+		std::wstring name = usbOpen ? L"Real Tone Cable" : std::wstring();
+		if (!usbOpen)
+		{
+			ComPtr<IMMDeviceEnumerator> enumerator;
+			ComPtr<IMMDevice> device;
+			if (SUCCEEDED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&enumerator)))
+				&& SUCCEEDED(enumerator->GetDevice(activeEndpoint.c_str(), &device)))
+			{
+				name = FriendlyName(device.Get());
+				if (kind != PlayerOneInputKind::RealToneCable)
+					LOG_INFO("(PERSISTENT INPUT) Player 1 plays on " << (kind == PlayerOneInputKind::ChosenDevice ? "the chosen device" : "the Windows default recording device (no Real Tone Cable ID found)")
+						<< ": " << Utf8(name) << ", hardware " << Utf8(InstancePath(device.Get())) << "; read through Windows" << std::endl);
+			}
+		}
+		std::lock_guard<std::mutex> guard(g_activeMutex);
+		g_activeOwner = this;
+		g_active = { kind, name };
+	}
+
 	bool IsCaptureFormat(const WAVEFORMATEX* format)
 	{
 		if (!format || format->nSamplesPerSec != SAMPLE_RATE || format->nChannels < 1 || format->nChannels > 2) return false;
@@ -71,7 +221,8 @@ namespace Audio::PersistentInput
 		HRESULT STDMETHODCALLTYPE OnDeviceStateChanged(LPCWSTR, DWORD) override { ::SetEvent(changed); return S_OK; }
 		HRESULT STDMETHODCALLTYPE OnDeviceAdded(LPCWSTR) override { ::SetEvent(changed); return S_OK; }
 		HRESULT STDMETHODCALLTYPE OnDeviceRemoved(LPCWSTR) override { ::SetEvent(changed); return S_OK; }
-		HRESULT STDMETHODCALLTYPE OnDefaultDeviceChanged(EDataFlow, ERole, LPCWSTR) override { return S_OK; }
+		// A new default recording device matters while Player 1 plays on the Windows default (see Run).
+		HRESULT STDMETHODCALLTYPE OnDefaultDeviceChanged(EDataFlow flow, ERole role, LPCWSTR) override { if (flow == eCapture && role == eConsole) ::SetEvent(changed); return S_OK; }
 		HRESULT STDMETHODCALLTYPE OnPropertyValueChanged(LPCWSTR, const PROPERTYKEY) override { return S_OK; }
 	private:
 		HANDLE changed;
@@ -404,11 +555,11 @@ namespace Audio::PersistentInput
 		return S_OK;
 	}
 
-	HRESULT CaptureSession::OpenDevice(IMMDeviceEnumerator* enumerator)
+	HRESULT CaptureSession::OpenDevice(IMMDeviceEnumerator* enumerator, const std::wstring& endpointId)
 	{
 		ComPtr<IMMDevice> device;
 		HRESULT result = S_OK;
-		if (!selectedEndpoint.empty()) result = enumerator->GetDevice(selectedEndpoint.c_str(), &device);
+		if (!endpointId.empty()) result = enumerator->GetDevice(endpointId.c_str(), &device);
 		else
 		{
 			ComPtr<IMMDeviceCollection> devices;
@@ -444,9 +595,15 @@ namespace Audio::PersistentInput
 		}
 		if (FAILED(result)) return result;
 		if (!device) return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+		return OpenEndpoint(device.Get());
+	}
+
+	HRESULT CaptureSession::OpenEndpoint(IMMDevice* device)
+	{
+		HRESULT result = S_OK;
 		ComPtr<IMMEndpoint> direction;
 		EDataFlow flow = eAll;
-		result = device.As(&direction);
+		result = device->QueryInterface(IID_PPV_ARGS(&direction));
 		if (SUCCEEDED(result)) result = direction->GetDataFlow(&flow);
 		if (FAILED(result) || flow != eCapture) return FAILED(result) ? result : E_INVALIDARG;
 		LPWSTR id = nullptr;
@@ -518,6 +675,11 @@ namespace Audio::PersistentInput
 		if (backend) backend->Stop();
 		capture.Reset(); backend.Reset(); activeEndpoint.clear();
 		if (usbOpen) { usb.Stop(); usbOpen = false; }
+		openKind = PlayerOneInputKind::None;
+		{
+			std::lock_guard<std::mutex> guard(g_activeMutex);
+			if (g_activeOwner == this) { g_activeOwner = nullptr; g_active = {}; }
+		}
 		Disconnect();
 	}
 
@@ -546,9 +708,24 @@ namespace Audio::PersistentInput
 				if (wake == WAIT_OBJECT_0 || wake == WAIT_FAILED) break;
 				if (deviceResetRequested.exchange(false)) CloseDevice();
 				if (!running && (backend || usbOpen)) CloseDevice();
+				// Player 1's input was picked again in the overlay: reopen on the new choice now.
+				if (!gatedByPlayerTwoToggle)
+				{
+					const UINT64 choiceGeneration = g_choiceGeneration.load();
+					if (choiceGeneration != seenChoiceGeneration)
+					{
+						seenChoiceGeneration = choiceGeneration;
+						if (backend || usbOpen) CloseDevice();
+						nextOpen = 0;
+						lastOpenResult = S_OK;
+					}
+				}
 				if (wake == WAIT_OBJECT_0 + 1)
 				{
 					nextOpen = 0;
+					// On the Windows default, any device change is a reason to look again: a Real Tone Cable plugged in
+					// takes over, and a new default recording device is followed.
+					if (openKind == PlayerOneInputKind::WindowsDefault) CloseDevice();
 					if (backend)
 					{
 						ComPtr<IMMDevice> device;
@@ -566,18 +743,54 @@ namespace Audio::PersistentInput
 				}
 				if (running && enumerator && !backend && !usbOpen && now >= nextOpen)
 				{
-					result = OpenUsb();
-					// UsbDk saw the cable but could not take it (e.g. installed, waiting for a Windows restart): Windows
-					// still owns it, so the Windows cable input plays this session instead of the guitar staying silent.
-					if (FAILED(result) && result != lastOpenResult)
-						LOG_WARNING("(PERSISTENT INPUT) The Real Tone Cable could not be opened through UsbDk, HRESULT " << std::hex << result << std::dec << "; using the Windows cable input" << std::endl);
-					const bool onUsb = SUCCEEDED(result) && result != S_FALSE;
-					if (!onUsb)
+					// Player 1's chosen device (overlay), else RSMods.ini InputDevice as before, else automatic.
+					std::wstring endpoint = gatedByPlayerTwoToggle ? selectedEndpoint : GetPlayerOneInputChoice();
+					if (endpoint.empty()) endpoint = selectedEndpoint;
+					bool chosenIsCable = true;
+					if (!endpoint.empty())
 					{
-						result = OpenDevice(enumerator.Get());
-						if (SUCCEEDED(result) && !gatedByPlayerTwoToggle) NoteWindowsCableFallback();
+						ComPtr<IMMDevice> chosen;
+						chosenIsCable = SUCCEEDED(enumerator->GetDevice(endpoint.c_str(), &chosen)) && IsCable(chosen.Get());
 					}
-					else if (!gatedByPlayerTwoToggle) g_usbWaitingForRestart.store(false);
+					if (!chosenIsCable)
+					{
+						// Not a Real Tone Cable: UsbDk only knows the cable's USB layout, so this is read through Windows.
+						result = OpenDevice(enumerator.Get(), endpoint);
+						if (SUCCEEDED(result)) { g_usbWaitingForRestart.store(false); NoteOpened(PlayerOneInputKind::ChosenDevice); }
+					}
+					else
+					{
+						result = OpenUsb();
+						// UsbDk saw the cable but could not take it (e.g. installed, waiting for a Windows restart): Windows
+						// still owns it, so the Windows cable input plays this session instead of the guitar staying silent.
+						if (FAILED(result) && result != lastOpenResult)
+							LOG_WARNING("(PERSISTENT INPUT) The Real Tone Cable could not be opened through UsbDk, HRESULT " << std::hex << result << std::dec << "; using the Windows cable input" << std::endl);
+						const bool onUsb = SUCCEEDED(result) && result != S_FALSE;
+						if (!onUsb)
+						{
+							result = OpenDevice(enumerator.Get(), endpoint);
+							if (SUCCEEDED(result))
+							{
+								if (!gatedByPlayerTwoToggle) NoteWindowsCableFallback();
+								NoteOpened(PlayerOneInputKind::RealToneCable);
+							}
+							// No cable with the Real Tone Cable ID: the Windows default recording device, as the game itself
+							// would take another cable (see GetPlayerOneInput in the header for when).
+							else if (result == HRESULT_FROM_WIN32(ERROR_NOT_FOUND) && endpoint.empty() && !gatedByPlayerTwoToggle
+								&& !g_realToneCableOpened.load() && !RealToneCableOnly())
+							{
+								ComPtr<IMMDevice> fallback;
+								result = enumerator->GetDefaultAudioEndpoint(eCapture, eConsole, &fallback);
+								if (SUCCEEDED(result)) result = OpenEndpoint(fallback.Get());
+								if (SUCCEEDED(result)) { g_usbWaitingForRestart.store(false); NoteOpened(PlayerOneInputKind::WindowsDefault); }
+							}
+						}
+						else
+						{
+							if (!gatedByPlayerTwoToggle) g_usbWaitingForRestart.store(false);
+							NoteOpened(PlayerOneInputKind::RealToneCable);
+						}
+					}
 					nextOpen = now + 10000000;
 					if (FAILED(result) && result != lastOpenResult)
 						LOG_WARNING("(PERSISTENT INPUT) Waiting for selected cable, HRESULT " << std::hex << result << std::dec << std::endl);

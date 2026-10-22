@@ -5,6 +5,7 @@
 #include "NoteByNote/Ui/NoteByNoteHudLayout.hpp"
 #include "AudioBridge/Engine/AudioBridgeEngine.hpp"
 #include "AudioBridge/Cable/CableInput.hpp"
+#include "AudioBridge/Cable/CableCaptureSession.hpp"
 #include "AudioBridge/Engine/OutputDevices.hpp"
 #include "AudioBridge/Engine/OutputTap.hpp"
 #include "Recorder/TakeRecorder.hpp"
@@ -4166,6 +4167,34 @@ namespace Overlay
 			RouteStatusMessage();
 		}
 
+		// Player 1's input device in Cable mode: automatic (a Real Tone Cable, else the Windows default recording device), or
+		// any Windows recording device, for cables that do not report the Real Tone Cable's USB ID. The list is re-read
+		// every 3 s while this card is shown, as enumerating is a few COM calls.
+		void PlayerOneCableInputRows()
+		{
+			using namespace Audio::PersistentInput;
+			static std::vector<CaptureDeviceInfo> devices;
+			static ULONGLONG listedAt = 0;
+			const ULONGLONG now = GetTickCount64();
+			if (listedAt == 0 || now - listedAt > 3000) { devices = ListCaptureDevices(); listedAt = now; }
+			const std::wstring choice = GetPlayerOneInputChoice();
+			std::vector<std::string> labels{ "Automatic" };
+			int index = 0;
+			for (size_t i = 0; i < devices.size(); ++i) {
+				labels.push_back(Utf8(devices[i].name.empty() ? devices[i].id : devices[i].name) + (devices[i].realToneCable ? " (Real Tone Cable)" : ""));
+				if (!choice.empty() && _wcsicmp(devices[i].id.c_str(), choice.c_str()) == 0) index = static_cast<int>(i) + 1;
+			}
+			if (!choice.empty() && index == 0) {
+				labels.push_back("Chosen device (not plugged in)");
+				index = static_cast<int>(labels.size()) - 1;
+			}
+			if (DropdownRow("Input device", &index, labels, "Automatic plays a Real Tone Cable, or the Windows default recording device when none is plugged in. Pick your cable here if it is not found."))
+			{
+				if (index == 0) SetPlayerOneInputChoice(L"");
+				else if (static_cast<size_t>(index - 1) < devices.size()) SetPlayerOneInputChoice(devices[static_cast<size_t>(index - 1)].id);
+			}
+		}
+
 		// ---- Input --------------------------------------------------------------------------------
 		// One tab per player (and the mic while RS_ASIO.ini sends it through the bridge), each the same component: what the
 		// input is (ASIO interface or Real Tone Cable), its level, that source's own settings, then the processing. The
@@ -4565,12 +4594,20 @@ namespace Overlay
 				line = Utf8(iface);
 				if (view.device[role] >= 0 && view.device[role] < static_cast<long>(names.size())) line += ", " + names[static_cast<size_t>(view.device[role])];
 			}
-			else if (source == InputSource::Cable) line = role == 1 ? (CableAmpLink::IsDirectUsb() ? "Real Tone Cable, read directly over USB" : "Real Tone Cable, through Windows") : "Real Tone Cable, added for Player 2";
+			// Cable mode Player 1 may be another cable or recording device (CableCaptureSession.hpp, GetPlayerOneInput).
+			const Audio::PersistentInput::PlayerOneInput playerOneInput = Audio::PersistentInput::GetPlayerOneInput();
+			const bool playerOneOtherDevice = source == InputSource::Cable && role == 1
+				&& (playerOneInput.kind == Audio::PersistentInput::PlayerOneInputKind::ChosenDevice
+					|| playerOneInput.kind == Audio::PersistentInput::PlayerOneInputKind::WindowsDefault);
+			if (playerOneOtherDevice) line = Utf8(playerOneInput.name)
+				+ (playerOneInput.kind == Audio::PersistentInput::PlayerOneInputKind::WindowsDefault ? " (Windows default), through Windows" : ", through Windows");
+			else if (source == InputSource::Cable) line = role == 1 ? (CableAmpLink::IsDirectUsb() ? "Real Tone Cable, read directly over USB"
+				: Audio::AsioHook::IsInputReady(0) ? "Real Tone Cable, through Windows" : "Real Tone Cable, waiting for input") : "Real Tone Cable, added for Player 2";
 			else if (source == InputSource::CableStandIn) line = "Real Tone Cable, while no ASIO input is open";
 			else if (source == InputSource::GameCable) line = "A second Real Tone Cable, opened by Rocksmith";
 			if (source != InputSource::None) {
 				BeginCard();
-				StatusPill(source == InputSource::Asio ? "ASIO" : "REAL TONE CABLE", source == InputSource::Asio ? Color::Good : Color::AccentHi);
+				StatusPill(source == InputSource::Asio ? "ASIO" : playerOneOtherDevice ? "WINDOWS INPUT" : "REAL TONE CABLE", source == InputSource::Asio ? Color::Good : Color::AccentHi);
 				ImGui::SameLine(0.0f, 12.0f);
 				ImGui::TextUnformatted(line.c_str());
 				EndCard();
@@ -4601,7 +4638,9 @@ namespace Overlay
 			}
 			else if (source == InputSource::Cable && role == 1) {
 				BeginCard("Source");
-				InfoRow("Read", CableAmpLink::IsDirectUsb() ? "Directly over USB, about 1 ms packets" : "Through Windows, 10 ms packets");
+				PlayerOneCableInputRows();
+				InfoRow("Read", CableAmpLink::IsDirectUsb() ? "Directly over USB, about 1 ms packets"
+					: Audio::AsioHook::IsInputReady(0) ? "Through Windows, 10 ms packets" : "No active cable capture");
 				EndCard();
 			}
 			else if (source == InputSource::CableStandIn) {
