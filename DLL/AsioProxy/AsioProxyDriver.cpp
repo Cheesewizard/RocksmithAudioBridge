@@ -957,7 +957,9 @@ public:
 		// The device went away between the host's dispose and re-create (e.g. unplugged). Staying Real with no
 		// buffers and no s_active would make every RSModsAsio_Try* export refuse until a restart.
 		ProxyLog("createBuffers: re-creating on the real device failed (%ld); falling back to Virtual", e);
-		if (m_bindFailure.empty()) NoteBindFailure("it stopped accepting buffers, error %ld (was it unplugged?)", e);
+		std::string hostFailure;
+		if (m_bindFailure.empty() && Remote64::HostFailure(m_real, hostFailure)) NoteBindFailure("%s", hostFailure.c_str());
+		else if (m_bindFailure.empty()) NoteBindFailure("it stopped accepting buffers, error %ld (was it unplugged?)", e);
 		PublishBindFailure();
 		ReleaseReal();
 		ActivateVirtual();
@@ -1052,7 +1054,9 @@ private:
 				char message[128]{};
 				m_real->getErrorMessage(message);
 				ProxyLog("BindReal: the real driver refused init (host handle %p): %s", m_sysHandle, message);
-				NoteInitRefused(message);
+				std::string hostFailure;
+				if (Remote64::HostFailure(m_real, hostFailure)) NoteBindFailure("%s", hostFailure.c_str());
+				else NoteInitRefused(message);
 				ReleaseReal();
 				return -1;
 			}
@@ -1069,8 +1073,12 @@ private:
 			m_real->getBufferSize(&minimum, &maximum, &preferred, &granularity);
 			ProxyLog("BindReal: real createBuffers(%ld channels, %ld frames) -> %ld (%s); driver allows %ld..%ld preferred %ld granularity %ld",
 				numChannels, bufferSize, e, message, minimum, maximum, preferred, granularity);
-			// A format refusal noted by CreateRealBuffers is the real reason; otherwise use the driver's text.
-			if (m_bindFailure.empty())
+			// A format refusal noted by CreateRealBuffers is the real reason; then a 64-bit host that hung or ended (its
+			// -999 is not the interface's answer); otherwise use the driver's text.
+			std::string hostFailure;
+			if (m_bindFailure.empty() && Remote64::HostFailure(m_real, hostFailure))
+				NoteBindFailure("%s", hostFailure.c_str());
+			else if (m_bindFailure.empty())
 			{
 				if (message[0] != '\0') NoteBindFailure("it refused %ld frame buffers: %s", bufferSize, message);
 				else NoteBindFailure("it refused %ld frame buffers, error %ld", bufferSize, e);

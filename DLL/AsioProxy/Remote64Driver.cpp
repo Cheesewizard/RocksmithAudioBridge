@@ -155,7 +155,7 @@ namespace Remote64
 			// The game's window is not passed on: the driver lives in the host, which gives it a window of its own.
 			const ASIOError result = Call(OpInit, 15000);
 			std::lock_guard<std::mutex> guard(m_callMutex);
-			if (m_dead.load()) { m_error = "The 64-bit driver host stopped."; return 0; }
+			if (m_dead.load()) { m_error = HostFailure(); return 0; }
 			if (result) m_driverName = m_shared->control.text;
 			else m_error = m_shared->control.text;
 			m_version = m_shared->control.version;
@@ -305,9 +305,45 @@ namespace Remote64
 			const DWORD woke = WaitForMultipleObjects(2, waits, FALSE, timeoutMs);
 			if (woke == WAIT_OBJECT_0) return m_shared->control.result;
 			m_dead = true;
-			if (woke == WAIT_TIMEOUT) TerminateProcess(m_process, 1);
+			if (woke == WAIT_TIMEOUT)
+			{
+				TerminateProcess(m_process, 1);
+				// Said in its own words, not as the -999 every caller gets back: the driver hung, it did not refuse.
+				SetHostFailure("its driver did not answer for " + std::to_string(timeoutMs / 1000) + " s while " + OpDoing(op)
+					+ ", so its 64-bit host was closed");
+			}
+			else SetHostFailure("its 64-bit host stopped while " + OpDoing(op) + " (an antivirus may have closed RocksmithAudioBridgeDriverHost.exe)");
 			if (m_log) m_log("Remote64: '%ls' host %s during request %ld", m_name.c_str(), woke == WAIT_TIMEOUT ? "did not answer (ended)" : "stopped", op);
 			return kHWMalfunction;
+		}
+
+		static std::string OpDoing(LONG op)
+		{
+			switch (op)
+			{
+			case OpInit: return "starting";
+			case OpCreateBuffers: return "opening its buffers";
+			case OpDisposeBuffers: return "closing its buffers";
+			case OpStart: return "starting playback";
+			case OpStop: return "stopping playback";
+			case OpSetSampleRate: return "setting the sample rate";
+			default: return "answering a setup call";
+			}
+		}
+
+	public:
+		// Why the host is gone, or empty while it runs. The first cause is kept: later calls only fail because of it.
+		std::string HostFailure()
+		{
+			std::lock_guard<std::mutex> guard(m_failureMutex);
+			return m_hostFailure.empty() && m_dead.load() ? std::string("its 64-bit host stopped") : m_hostFailure;
+		}
+
+	private:
+		void SetHostFailure(const std::string& why)
+		{
+			std::lock_guard<std::mutex> guard(m_failureMutex);
+			if (m_hostFailure.empty()) m_hostFailure = why;
 		}
 
 		void StopThread()
@@ -335,6 +371,7 @@ namespace Remote64
 					// The host is gone (crashed, or closed by an antivirus). A reset request makes the bridge reopen this
 					// interface, which starts a new host (ScheduleResetRebind).
 					m_dead = true;
+					SetHostFailure("its 64-bit host stopped while playing (an antivirus may have closed RocksmithAudioBridgeDriverHost.exe)");
 					if (m_log) m_log("Remote64: '%ls' host stopped while playing; asking the bridge to reopen it", m_name.c_str());
 					if (m_callbacks.asioMessage) m_callbacks.asioMessage(kResetRequest, 0, nullptr, nullptr);
 					break;
@@ -375,8 +412,18 @@ namespace Remote64
 		long m_frames = 0;
 		std::thread m_thread;
 		std::string m_driverName, m_error;
+		std::mutex m_failureMutex;
+		std::string m_hostFailure;
 		long m_version = 0;
 	};
+
+	bool HostFailure(IAsioDriver* driver, std::string& why)
+	{
+		auto* remote = dynamic_cast<Remote64Driver*>(driver);
+		if (!remote) return false;
+		why = remote->HostFailure();
+		return !why.empty();
+	}
 
 	IAsioDriver* Create(const std::wstring& name, const std::wstring& dllPath, const CLSID& clsid, LogFn log, std::string& failure)
 	{
