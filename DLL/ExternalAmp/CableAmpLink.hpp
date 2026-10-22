@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AsioProxy/AmpLink.hpp"
+#include "AudioBridge/Input/NoiseSuppressor.hpp"
 #include <cstdint>
 
 // The amp link (AsioProxy/AmpLink.hpp) for Real Tone Cable players, who have no ASIO driver to host it.
@@ -59,5 +60,5 @@ namespace CableAmpLink
 	void SetLatencyBlocks(int blocks);
 	void SetPitchSemitones(int semitones);
 	// The Input page's noise suppressor (linear threshold, 0 = off) for the Tone designer's input (AmpFeedConditioner.hpp).
-	void ConfigureConditioner(float gateThreshold);
+	void ConfigureConditioner(float gateThreshold, const Audio::AsioHook::Detail::NoiseGateShape& gateShape = {});
 }

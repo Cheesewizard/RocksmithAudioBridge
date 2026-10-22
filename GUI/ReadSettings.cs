@@ -63,7 +63,7 @@ namespace RSMods
 
                              // Mod Settings
                              ExtendedRangeTuning, CheckForNewSongInterval, RiffRepeaterSpeedInterval, TuningPedal, MidiTuningOffset,
-                             VolumeControlInterval, SecondaryMonitorXPosition, SecondaryMonitorYPosition, OverrideInputVolume, AsioInputGain, NoiseGateThreshold, CompressorStrength, RocksmithGateOverride, RocksmithGateThreshold, AudioBridgeLimiter, AudioBridgeLimiterLevel, AlternativeOutputSampleRate, LoopingLeadUp,
+                             VolumeControlInterval, SecondaryMonitorXPosition, SecondaryMonitorYPosition, OverrideInputVolume, AsioInputGain, NoiseGateThreshold, NoiseGateLastThreshold, NoiseGateDecay, NoiseGateReduction, NoiseGateAttack, CompressorStrength, RocksmithGateOverride, RocksmithGateThreshold, AudioBridgeLimiter, AudioBridgeLimiterLevel, AlternativeOutputSampleRate, LoopingLeadUp,
                              RewindBy, RewindLeadup, CustomNSPTimeLimit,
 
                              // Guitar Speak
@@ -249,6 +249,10 @@ namespace RSMods
             OverrideInputVolumeIdentifier           = "OverrideInputVolume = ",
             AsioInputGainIdentifier                 = "AsioInputGain = ",
             NoiseGateThresholdIdentifier            = "NoiseGateThreshold = ",
+            NoiseGateLastThresholdIdentifier        = "NoiseGateLastThreshold = ",
+            NoiseGateDecayIdentifier                = "NoiseGateDecay = ",
+            NoiseGateReductionIdentifier            = "NoiseGateReduction = ",
+            NoiseGateAttackIdentifier               = "NoiseGateAttack = ",
             CompressorStrengthIdentifier            = "CompressorStrength = ",
             RocksmithGateOverrideIdentifier         = "RocksmithGateOverride = ",
             RocksmithGateThresholdIdentifier        = "RocksmithGateThreshold = ",
@@ -393,6 +397,10 @@ namespace RSMods
             CableForPlayerTwoIdentifier,
             AsioInputGainIdentifier,
             NoiseGateThresholdIdentifier,
+            NoiseGateLastThresholdIdentifier,
+            NoiseGateDecayIdentifier,
+            NoiseGateReductionIdentifier,
+            NoiseGateAttackIdentifier,
             CompressorStrengthIdentifier,
 			RocksmithGateOverrideIdentifier,
 			RocksmithGateThresholdIdentifier,
@@ -801,6 +809,14 @@ namespace RSMods
                     return FillSettingVariable(AsioInputGainIdentifier, SettingType.STRING, currentLine, out AsioInputGain);
                 if (IdentifierIsFound(currentLine, NoiseGateThresholdIdentifier, identifierToGrab))
                     return FillSettingVariable(NoiseGateThresholdIdentifier, SettingType.STRING, currentLine, out NoiseGateThreshold);
+                if (IdentifierIsFound(currentLine, NoiseGateLastThresholdIdentifier, identifierToGrab))
+                    return FillSettingVariable(NoiseGateLastThresholdIdentifier, SettingType.STRING, currentLine, out NoiseGateLastThreshold);
+                if (IdentifierIsFound(currentLine, NoiseGateDecayIdentifier, identifierToGrab))
+                    return FillSettingVariable(NoiseGateDecayIdentifier, SettingType.STRING, currentLine, out NoiseGateDecay);
+                if (IdentifierIsFound(currentLine, NoiseGateReductionIdentifier, identifierToGrab))
+                    return FillSettingVariable(NoiseGateReductionIdentifier, SettingType.STRING, currentLine, out NoiseGateReduction);
+                if (IdentifierIsFound(currentLine, NoiseGateAttackIdentifier, identifierToGrab))
+                    return FillSettingVariable(NoiseGateAttackIdentifier, SettingType.STRING, currentLine, out NoiseGateAttack);
                 if (IdentifierIsFound(currentLine, CompressorStrengthIdentifier, identifierToGrab))
                     return FillSettingVariable(CompressorStrengthIdentifier, SettingType.STRING, currentLine, out CompressorStrength);
                 if (IdentifierIsFound(currentLine, RocksmithGateOverrideIdentifier, identifierToGrab))

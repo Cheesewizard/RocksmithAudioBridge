@@ -16,6 +16,16 @@ namespace RSMods.Audio
 		public float[] OutputPeak { get; set; } = new float[2];
 		public float[] OutputRms { get; set; } = new float[2];
 		public int ProxyInputMode { get; set; }
+		/// <summary>
+		/// Player 1 noise gate meter, from the uint32 at byte 3172 (formerly struct padding, so the response size and
+		/// version are unchanged). 0 = no data / gate not running. Otherwise bit 30 = gate running, bit 31 = gate open,
+		/// bits 0..15 = detector level as (dB * 10 + 2000), so -70.0 dB = 1300.
+		/// </summary>
+		public uint GateMeter { get; set; }
+		public bool GateRunning => (GateMeter & 0x40000000u) != 0;
+		public bool GateOpen => GateRunning && (GateMeter & 0x80000000u) != 0;
+		/// <summary>The gate detector level in dB, or null when the gate is not running.</summary>
+		public double? GateLevelDb => GateRunning ? ((int)(GateMeter & 0xFFFFu) - 2000) / 10.0 : (double?)null;
 
 		public int OutputError
 		{
@@ -128,7 +138,8 @@ namespace RSMods.Audio
 				Volumes = new[] { BitConverter.ToSingle(response, 3116), BitConverter.ToSingle(response, 3120), BitConverter.ToSingle(response, 3124), BitConverter.ToSingle(response, 3128), BitConverter.ToSingle(response, 3132), BitConverter.ToSingle(response, 3136), BitConverter.ToSingle(response, 3140) },
 				OutputPeak = new[] { BitConverter.ToSingle(response, 3152), BitConverter.ToSingle(response, 3156) },
 				OutputRms = new[] { BitConverter.ToSingle(response, 3160), BitConverter.ToSingle(response, 3164) },
-				ProxyInputMode = (int)BitConverter.ToUInt32(response, 3168)
+				ProxyInputMode = (int)BitConverter.ToUInt32(response, 3168),
+				GateMeter = BitConverter.ToUInt32(response, 3172)
 			};
 		}
 	}

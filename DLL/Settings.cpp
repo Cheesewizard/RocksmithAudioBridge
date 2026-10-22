@@ -354,6 +354,10 @@ void Settings::Initialize()
 		{"OverrideInputVolume", 17},
 		{"AsioInputGain", 0},
 		{"NoiseGateThreshold", 0},
+		{"NoiseGateLastThreshold", -620},
+		{"NoiseGateDecay", 200},
+		{"NoiseGateReduction", -60},
+		{"NoiseGateAttack", 5},
 		{"CompressorStrength", 0},
 		{"RocksmithGateOverride", 0},
 		{"RocksmithGateThreshold", -593},
@@ -496,7 +500,11 @@ void Settings::ReadModSettings() {
 		{"CustomStringColors", reader.GetLongValue("Toggle Switches", "CustomStringColors", 0)}, //0 = default, 1 = Zag, 2 = custom colors
 		{"OverrideInputVolume", reader.GetLongValue("Mod Settings", "OverrideInputVolume", 17)}, // 17 is what Rocksmith calls default.
 		{"AsioInputGain", reader.GetLongValue("Mod Settings", "AsioInputGain", 0)}, // tenths of a dB of guitar input make-up gain (0 = off)
-		{"NoiseGateThreshold", reader.GetLongValue("Mod Settings", "NoiseGateThreshold", 0)}, // guitar input suppressor open threshold in tenths of a dB (0 = off, else negative)
+		{"NoiseGateThreshold", reader.GetLongValue("Mod Settings", "NoiseGateThreshold", 0)}, // Noise gate open threshold in tenths of a dB (0 = off, else negative)
+		{"NoiseGateLastThreshold", reader.GetLongValue("Mod Settings", "NoiseGateLastThreshold", -620)}, // Noise gate threshold to return to when switched back on (tenths of a dB)
+		{"NoiseGateDecay", reader.GetLongValue("Mod Settings", "NoiseGateDecay", 200)}, // Noise gate pedal: fade time once it closes, ms (50-2000)
+		{"NoiseGateReduction", reader.GetLongValue("Mod Settings", "NoiseGateReduction", -60)}, // Noise gate pedal: how far down it turns the signal while closed, dB (-80 to -10)
+		{"NoiseGateAttack", reader.GetLongValue("Mod Settings", "NoiseGateAttack", 5)}, // Noise gate pedal: fade-in time when it opens, tenths of a ms (1-200)
 		{"CompressorStrength", reader.GetLongValue("Mod Settings", "CompressorStrength", 0)}, // guitar input compressor strength, 0-100 (0 = off); flattens string-beat wobble before the game amp
 		{"RocksmithGateOverride", reader.GetLongValue("Mod Settings", "RocksmithGateOverride", 0)}, // 1 = take over the game's own amp noise gate (P1_NoiseFloor); 0 = leave the game's calibrated gate alone
 		{"RocksmithGateThreshold", reader.GetLongValue("Mod Settings", "RocksmithGateThreshold", -593)}, // forced P1_NoiseFloor in tenths of a dB while the override is on (-593 = game default; lower opens the gate for longer sustain)

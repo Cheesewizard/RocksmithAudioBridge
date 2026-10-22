@@ -176,6 +176,8 @@
     <Compile Include="Audio\StudioSlider.cs" />
     <Compile Include="Audio\StudioCheck.cs" />
     <Compile Include="Audio\StudioNumber.cs" />
+    <Compile Include="Audio\PedalKnob.cs" />
+    <Compile Include="Audio\NoiseGatePedalForm.cs" />
     <Compile Include="Features\AudioBridge\UI.BridgeSettingsSync.cs" />
     <Compile Include="Features\AudioBridge\UI.AudioBridgeSetup.cs" />
     <Compile Include="Features\AudioBridge\UI.AudioBridgeTab.cs" />

@@ -33,6 +33,9 @@ namespace Audio
 		float outputPeak[2]{};   // proxy output meter: peak-hold per channel [0,1] (0 when not metering)
 		float outputRms[2]{};    // proxy output meter: smoothed RMS per channel [0,1]
 		uint32_t proxyInputMode = 0; // 0 = physical ASIO/non-proxy, 1 = waiting for RTC, 2 = RTC fallback live
+		// Noise gate pedal meter (was struct padding, so the size and version are unchanged): 0 = no data; else bit 30 =
+		// the gate ran in the last 500 ms, bit 31 = open, bits 0..15 = detector level as dB * 10 + 2000.
+		uint32_t gateMeter = 0;
 	};
 	static_assert(sizeof(ControlResponse) == 3176, "Audio control response layout changed");
 

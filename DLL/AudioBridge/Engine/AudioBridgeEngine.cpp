@@ -317,8 +317,32 @@ namespace Audio::SharedOutput
 			{
 				AsioHook::SetNoiseGateThresholdDb(static_cast<float>(integer) / 10.0f);
 				response.result = PersistCustomSetting("NoiseGateThreshold", integer);
+				// Remembered while the pedal is off, so switching it back on returns to the same threshold.
+				if (SUCCEEDED(response.result) && integer < 0) response.result = PersistCustomSetting("NoiseGateLastThreshold", integer);
 			}
 			return true;
+		case 31:
+		{
+			// Noise gate pedal dials: "<decay ms>,<reduction dB>,<attack tenths of a ms>", e.g. "200,-60,5".
+			wchar_t* end = nullptr;
+			const long decay = wcstol(request.value, &end, 10);
+			if (end == request.value || *end != L',') { response.result = E_INVALIDARG; return true; }
+			wchar_t* reductionEnd = nullptr;
+			const long reduction = wcstol(end + 1, &reductionEnd, 10);
+			if (reductionEnd == end + 1 || *reductionEnd != L',') { response.result = E_INVALIDARG; return true; }
+			wchar_t* attackEnd = nullptr;
+			const long attackTenths = wcstol(reductionEnd + 1, &attackEnd, 10);
+			if (attackEnd == reductionEnd + 1 || (*attackEnd != 0 && *attackEnd != L'\n')
+				|| decay < 50 || decay > 2000 || reduction < -80 || reduction > -10 || attackTenths < 1 || attackTenths > 200)
+			{
+				response.result = E_INVALIDARG; return true;
+			}
+			AsioHook::SetNoiseGateShape(static_cast<float>(decay), static_cast<float>(reduction), static_cast<float>(attackTenths) / 10.0f);
+			response.result = PersistCustomSetting("NoiseGateDecay", decay);
+			if (SUCCEEDED(response.result)) response.result = PersistCustomSetting("NoiseGateReduction", reduction);
+			if (SUCCEEDED(response.result)) response.result = PersistCustomSetting("NoiseGateAttack", attackTenths);
+			return true;
+		}
 		case 20:
 			// Guitar input compressor strength, integer 0-100 (0 = off).
 			if (!parseInteger(integer) || integer < 0 || integer > 100) response.result = E_INVALIDARG;
@@ -1723,7 +1747,16 @@ namespace Audio::SharedOutput
 				std::lock_guard<std::mutex> guard(g_sessionMutex);
 				session = g_activeSession.lock();
 			}
-			return session ? session->HandleControl(request) : PassthroughStatus(request);
+			ControlResponse response = session ? session->HandleControl(request) : PassthroughStatus(request);
+			// Noise gate pedal meter, on every reply (the settings app polls op 1).
+			float gateDb = -120.0f;
+			bool gateOpen = false;
+			if (AsioHook::GetNoiseGateMeter(gateDb, gateOpen))
+			{
+				const long packed = (std::clamp)(std::lround(gateDb * 10.0f) + 2000, 0L, 0xFFFFL);
+				response.gateMeter = (1u << 30) | (gateOpen ? (1u << 31) : 0u) | static_cast<uint32_t>(packed);
+			}
+			return response;
 		}
 	}
 

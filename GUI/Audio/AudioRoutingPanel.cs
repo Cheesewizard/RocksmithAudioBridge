@@ -91,18 +91,30 @@ namespace RSMods.Audio
 		// fresh connection, push the persisted values once so the sliders match what is actually live, rather
 		// than showing a setting that only takes effect when the user nudges the control.
 		private bool pushInputSettingsOnConnect;
-		// Guitar input adaptive suppressor (transient-resistant downward expander in the DLL). The slider counts whole-dB
-		// threshold steps; the rightmost notch (-40) means Off. RSMods.ini and the DLL store tenths of a
-		// dB (0 = off, else a negative threshold).
-		// Adaptive suppressor: an on/off, a fine (0.1 dB) slider and a typeable box that share one threshold in tenths of a
-		// dBFS. Off collapses to just the checkbox. The slider works in tenths so each step is 0.1 dB (1 dB was far
-		// too coarse to sit on a noise floor); the numeric box takes an exact value and clamps silly input.
-		private readonly StudioCheck gateEnableCheck = new StudioCheck("Adaptive noise suppression");
-		private readonly StudioSlider noiseGateSlider = new StudioSlider { Minimum = -800, Maximum = -200, SmallChange = 1, LargeChange = 10, AccessibleName = "Adaptive noise suppression threshold for guitar input, tenths of a decibel" };
-		private readonly StudioNumber gateThresholdInput = new StudioNumber { DecimalPlaces = 1, Increment = 0.1M, Minimum = -80.0M, Maximum = -20.0M, Value = -50.0M };
+		// Guitar input noise gate (NoiseSuppressor in the DLL). The settings row is compact: the on/off check, a one-line
+		// summary, an open/closed light and a "Pedal" button that opens NoiseGatePedalForm, where the four knobs live.
+		// The panel owns the values and the pipe; the pedal only reports edits and shows what the panel pushes in.
+		//   op 19: threshold in signed tenths of a dB, 0 = off (RSMods.ini NoiseGateThreshold; the DLL also saves
+		//          NoiseGateLastThreshold when the value is negative).
+		//   op 31: "<decayMs>,<reductionDb>,<attackTenthsMs>" (NoiseGateDecay, NoiseGateReduction, NoiseGateAttack).
+		// While the gate is off, gateThresholdTenths is NoiseGateLastThreshold: what the pedal shows and what switching
+		// the gate back on sends. Edits are coalesced by the 100 ms mixerTimer (pending* fields) and flushed on release.
+		private readonly StudioCheck gateEnableCheck = new StudioCheck("Noise gate");
+		private readonly Label gateSummary = new Label { AutoSize = true, UseMnemonic = false, Font = StudioTheme.Body, ForeColor = StudioTheme.Muted };
+		private readonly PedalLed gateLight = new PedalLed(12);
+		private readonly StudioButton gatePedalButton = new StudioButton("Pedal");
+		private NoiseGatePedalForm gatePedal;
 		private bool syncingNoiseGate;
 		private int? pendingNoiseGateTenths;
 		private int persistedNoiseGateTenths;
+		private int persistedNoiseGateLastTenths;
+		private int gateThresholdTenths = DefaultGateThresholdTenths;
+		private int gateDecayMs = 200;
+		private int gateReductionDb = -60;
+		private int gateAttackTenths = 5;
+		private string pendingGateShape;
+		private string persistedGateShape;
+		private const int DefaultGateThresholdTenths = -620;
 		// Rocksmith gate (DLL forces the game's own P1_NoiseFloor RTPC). Its own on/off + threshold, kept
 		// separate from the pre-signal suppressor above; the two combine to give native / pre / both.
 		private readonly StudioCheck rgEnableCheck = new StudioCheck("Rocksmith gate");
@@ -280,13 +292,11 @@ namespace RSMods.Audio
 			inputGainEnableCheck.Checked = persistedInputGainTenths > 0;
 			SetInputGain(persistedInputGainTenths);
 			syncingInputGain = false;
-			// The suppressor threshold also lives in RSMods.ini (shared with the game DLL). 0 = off, else negative
-			// tenths of a dBFS; when off, seed the controls at -50 dB so enabling it starts somewhere sensible.
+			// The noise gate also lives in RSMods.ini (shared with the game DLL). NoiseGateThreshold is 0 = off, else
+			// negative tenths of a dB; while it is off the pedal shows NoiseGateLastThreshold (default -62 dB), and
+			// switching the gate on goes back to it.
 			syncingNoiseGate = true;
-			persistedNoiseGateTenths = ReadGateThresholdTenths();
-			gateEnableCheck.Checked = persistedNoiseGateTenths < 0;
-			SetGateThreshold(persistedNoiseGateTenths < 0 ? persistedNoiseGateTenths : -500);
-			ApplyGateVisibility();
+			LoadNoiseGate();
 			syncingNoiseGate = false;
 			// The Rocksmith gate override (on + forced P1_NoiseFloor threshold) also lives in RSMods.ini.
 			syncingRgGate = true;
@@ -958,8 +968,7 @@ namespace RSMods.Audio
 			var grid = FeatureGrid();
 			AddFeature(grid, inputGainEnableCheck, inputGainSlider, gainInput, "dB",
 				"Lifts a quiet interface input towards Real Tone Cable level, so the game's note gate stops cutting sustains short.");
-			AddFeature(grid, gateEnableCheck, noiseGateSlider, gateThresholdInput, "dB",
-				"Rejects idle noise and false signal bursts while preserving sustained notes. This level controls when an opened note closes.");
+			AddGateRow(grid, "Cuts the hiss and hum between notes and fades each note out smoothly. Open the pedal to set it against the live input meter.");
 			AddFeature(grid, compressorEnableCheck, compressorSlider, compInput, "%",
 				"Evens out level swings during sustained notes, the way a hot cable's signal already is.");
 			AddFeature(grid, rgEnableCheck, rgGateSlider, rgGateInput, "dB",
@@ -977,6 +986,32 @@ namespace RSMods.Audio
 			grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 			grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 			return grid;
+		}
+
+		/// <summary>The noise gate row: toggle | summary (stretches) | open light | Pedal button, then the hint.</summary>
+		private void AddGateRow(TableLayoutPanel grid, string hint)
+		{
+			int row = grid.RowStyles.Count;
+			grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+			gateEnableCheck.Anchor = AnchorStyles.Left;
+			gateEnableCheck.Margin = new Padding(0, 4, 8, 4);
+			gateSummary.Anchor = AnchorStyles.Left;
+			gateSummary.Margin = new Padding(0, 0, 8, 0);
+			gateLight.Anchor = AnchorStyles.None;
+			gateLight.Margin = new Padding(12, 0, 0, 0);
+			gatePedalButton.Anchor = AnchorStyles.Left;
+			gatePedalButton.Margin = new Padding(12, 2, 0, 2);
+			grid.Controls.Add(gateEnableCheck, 0, row);
+			grid.Controls.Add(gateSummary, 1, row);
+			grid.Controls.Add(gateLight, 2, row);
+			grid.Controls.Add(gatePedalButton, 3, row);
+			if (hint == null) return;
+			grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+			var text = StudioTheme.Hint(hint);
+			text.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+			text.Margin = new Padding(0, 0, 0, 10);
+			grid.Controls.Add(text, 0, row + 1);
+			grid.SetColumnSpan(text, 4);
 		}
 
 		private static void AddFeature(TableLayoutPanel grid, StudioCheck toggle, StudioSlider slider, StudioNumber box, string unit, string hint)
@@ -1172,18 +1207,12 @@ namespace RSMods.Audio
 				}
 				PersistInputGain();
 			};
-			noiseGateSlider.ValueChanged += OnNoiseGateChanged;
-			noiseGateSlider.MouseUp += (sender, args) => PersistNoiseGate();
-			noiseGateSlider.KeyUp += (sender, args) => PersistNoiseGate();
-			gateThresholdInput.ValueChanged += OnGateInputChanged;
 			gateEnableCheck.CheckedChanged += (sender, args) =>
 			{
 				if (syncingNoiseGate) return;
-				ApplyGateVisibility();
-				pendingNoiseGateTenths = GateEffectiveTenths();
-				lastMixerEdit = DateTime.UtcNow;
-				PersistNoiseGate();
+				OnGateSwitched();
 			};
+			gatePedalButton.Click += (sender, args) => OpenGatePedal();
 			compressorSlider.ValueChanged += OnCompressorChanged;
 			compressorSlider.MouseUp += (sender, args) => PersistCompressor();
 			compressorSlider.KeyUp += (sender, args) => PersistCompressor();
@@ -1224,9 +1253,10 @@ namespace RSMods.Audio
 			tips.SetToolTip(inputGainEnableCheck, "Adds gain to the guitar signal before Rocksmith hears it. 0 dB leaves the input unchanged. Applies live.");
 			tips.SetToolTip(inputGainSlider, "Input gain from 0 to +20 dB. Type an exact value in the box or nudge by 0.1 dB.");
 			tips.SetToolTip(gainInput, "Input gain from 0 to +20 dB. Type an exact value or nudge by 0.1 dB.");
-			tips.SetToolTip(gateEnableCheck, "Rejects idle noise and false signal bursts before input gain while preserving sustained notes. A note needs a clear attack to open; this threshold controls when its tail closes. Applies live.");
-			tips.SetToolTip(noiseGateSlider, "Sustain threshold from -80 to -20 dBFS. A clear attack opens the suppressor; the note remains open down to this level. Type an exact value or nudge by 0.1 dB.");
-			tips.SetToolTip(gateThresholdInput, "Sustain threshold from -80 to -20 dBFS. A clear attack opens the suppressor; the note remains open down to this level. Type an exact value or nudge by 0.1 dB.");
+			tips.SetToolTip(gateEnableCheck, "Turns the noise gate on or off. It opens at the threshold, listening to the guitar's own range rather than the hiss or hum, and fades each note out smoothly. Applies live.");
+			tips.SetToolTip(gateSummary, "Threshold, decay and reduction. Open the pedal to change them and to see the live input meter.");
+			tips.SetToolTip(gateLight, "Lights while the gate is open and letting your guitar through.");
+			tips.SetToolTip(gatePedalButton, "Opens the noise gate pedal: threshold, decay, reduction and attack, with a live input meter.");
 			tips.SetToolTip(compressorEnableCheck, "Compresses the guitar input to even out level swings during sustained notes. Applies live.");
 			tips.SetToolTip(compressorSlider, "Compressor strength from 0 to 100%. Type an exact value in the box.");
 			tips.SetToolTip(compInput, "Compressor strength from 0 to 100%. Type an exact value or nudge by 1.");
@@ -1395,6 +1425,7 @@ namespace RSMods.Audio
 			{
 				client = null;
 				latestStatus = null;
+				UpdateGateIndicators();
 				connectionChip.Set("Audio bridge off", ChipTone.Idle);
 				SetPollInterval(SearchingPollMilliseconds);
 				SetStatus(masterOffRequiresClose
@@ -1448,6 +1479,7 @@ namespace RSMods.Audio
 					// mid-edit on, so a fresh change is never clobbered by the persisted setting.
 					if (!pendingInputGainTenths.HasValue) pendingInputGainTenths = persistedInputGainTenths;
 					if (!pendingNoiseGateTenths.HasValue) pendingNoiseGateTenths = persistedNoiseGateTenths;
+					if (pendingGateShape == null) pendingGateShape = persistedGateShape;
 					if (!pendingCompressor.HasValue) pendingCompressor = persistedCompressor;
 					if (!pendingRocksmithGate.HasValue) pendingRocksmithGate = (persistedRgOverride, persistedRgTenths);
 				}
@@ -1498,6 +1530,7 @@ namespace RSMods.Audio
 				connectionChip.Set(broken ? "Connected · playback device unavailable" : "Connected", broken ? ChipTone.Bad : ChipTone.Good);
 				elapsedLabel.Text = StudioFormat.Timecode(TimeSpan.FromSeconds(latestStatus.Frames / 48000.0));
 				meter.SetLevel(latestStatus.Peak);
+				UpdateGateIndicators();
 				// The Master strip is the output master, so show the proxy's measured output level there (peak of
 				// L/R, 0..1 -> 0..1000). Falls back to the input peak when the proxy meter reports nothing.
 				float outLevel = latestStatus.OutputPeak != null && latestStatus.OutputPeak.Length >= 2
@@ -1532,6 +1565,7 @@ namespace RSMods.Audio
 				if (error is NotSupportedException) SetStatus(error.Message, ChipTone.Bad);
 				meter.Reset();
 				Strip(MixerChannel.Master).ResetLevel();
+				UpdateGateIndicators();
 			}
 			finally
 			{
@@ -1581,21 +1615,24 @@ namespace RSMods.Audio
 			foreach (var volume in pendingVolumes) hasPendingVolume |= volume.HasValue;
 			bool hasPendingGain = pendingInputGainTenths.HasValue;
 			bool hasPendingGate = pendingNoiseGateTenths.HasValue;
+			bool hasPendingGateShape = pendingGateShape != null;
 			bool hasPendingCompressor = pendingCompressor.HasValue;
 			bool hasPendingLimiter = pendingLimiter != null;
 			bool hasPendingRg = pendingRocksmithGate.HasValue;
-			if (!hasPendingVolume && !hasPendingGain && !hasPendingGate && !hasPendingCompressor && !hasPendingLimiter && !hasPendingRg) return;
+			if (!hasPendingVolume && !hasPendingGain && !hasPendingGate && !hasPendingGateShape && !hasPendingCompressor && !hasPendingLimiter && !hasPendingRg) return;
 			isCommandRunning = true;
 			isApplyingMixer = true;
 			var requestedVolumes = (int?[])pendingVolumes.Clone();
 			int? requestedGain = pendingInputGainTenths;
 			int? requestedGate = pendingNoiseGateTenths;
+			string requestedGateShape = pendingGateShape;
 			int? requestedCompressor = pendingCompressor;
 			string requestedLimiter = pendingLimiter;
 			(bool on, int tenths)? requestedRg = pendingRocksmithGate;
 			Array.Clear(pendingVolumes, 0, pendingVolumes.Length);
 			pendingInputGainTenths = null;
 			pendingNoiseGateTenths = null;
+			pendingGateShape = null;
 			pendingCompressor = null;
 			pendingLimiter = null;
 			pendingRocksmithGate = null;
@@ -1612,9 +1649,12 @@ namespace RSMods.Audio
 				// Operation 15 = guitar input make-up gain, sent as tenths of a dB (matches RSMods.ini).
 				if (requestedGain.HasValue)
 					latestStatus = await client.SendAsync(15, requestedGain.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
-				// Operation 19 = guitar input suppressor threshold, signed tenths of a dB (0 = off).
+				// Operation 19 = guitar input noise gate threshold, signed tenths of a dB (0 = off).
 				if (requestedGate.HasValue)
 					latestStatus = await client.SendAsync(19, requestedGate.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+				// Operation 31 = noise gate shape, "<decayMs>,<reductionDb>,<attackTenthsMs>". The DLL applies and saves it.
+				if (requestedGateShape != null)
+					latestStatus = await client.SendAsync(31, requestedGateShape);
 				// Operation 20 = guitar input compressor strength, integer 0-100 (0 = off).
 				if (requestedCompressor.HasValue)
 					latestStatus = await client.SendAsync(20, requestedCompressor.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
@@ -1636,11 +1676,16 @@ namespace RSMods.Audio
 				}
 				if (requestedGain.HasValue && !pendingInputGainTenths.HasValue) pendingInputGainTenths = requestedGain;
 				if (requestedGate.HasValue && !pendingNoiseGateTenths.HasValue) pendingNoiseGateTenths = requestedGate;
+				if (requestedGateShape != null && pendingGateShape == null) pendingGateShape = requestedGateShape;
+				// The game did not take the gate edit, so it will not save it either: write it to RSMods.ini here so
+				// it is not lost if Rocksmith has closed (it is re-sent on the next connection anyway).
+				if (requestedGate.HasValue || requestedGateShape != null) TryWriteNoiseGateIni();
 				if (requestedCompressor.HasValue && !pendingCompressor.HasValue) pendingCompressor = requestedCompressor;
 				if (requestedLimiter != null && pendingLimiter == null) pendingLimiter = requestedLimiter;
 				if (requestedRg.HasValue && !pendingRocksmithGate.HasValue) pendingRocksmithGate = requestedRg;
 				client = null;
 				latestStatus = null;
+				if (!IsDisposed) UpdateGateIndicators();
 				if (!IsDisposed) SetStatus("Live audio controls: " + error.Message, ChipTone.Bad);
 			}
 			finally
@@ -2355,90 +2400,178 @@ namespace RSMods.Audio
 			}
 		}
 
-		// Gate threshold is stored in tenths of a dBFS (0 = off, else negative). The slider works directly in tenths
-		// (0.1 dB per step); the numeric box works in dB. Both are clamped to the slider/box ranges.
+		// Noise gate settings in RSMods.ini, all integers in [Mod Settings]: NoiseGateThreshold (tenths of a dB, 0 = off),
+		// NoiseGateLastThreshold (tenths, the threshold kept while off), NoiseGateDecay (ms), NoiseGateReduction (dB) and
+		// NoiseGateAttack (tenths of a ms). While Rocksmith is connected the DLL saves what ops 19 and 31 carry, so the
+		// panel only writes the file itself when there is no live pipe (or a send failed), plus the last threshold
+		// while the gate is off, which op 19 cannot carry.
 		private static int ReadGateThresholdTenths()
 		{
 			string raw = RSMods.ReadSettings.ProcessSettings(RSMods.ReadSettings.NoiseGateThresholdIdentifier);
 			return int.TryParse(raw, out int tenths) ? Math.Max(-800, Math.Min(0, tenths)) : 0;
 		}
 
-		// The effective threshold to apply/persist: the box value in tenths when the gate is on, else 0 (off).
-		private int GateEffectiveTenths() => gateEnableCheck.Checked ? (int)Math.Round(gateThresholdInput.Value * 10m) : 0;
-
-		// Set both controls from a threshold in tenths without triggering each other (caller holds syncingNoiseGate).
-		private void SetGateThreshold(int tenths)
+		private static int ReadGateSetting(string identifier, int fallback, int minimum, int maximum)
 		{
-			int clamped = Math.Max(noiseGateSlider.Minimum, Math.Min(noiseGateSlider.Maximum, tenths));
-			noiseGateSlider.Value = clamped;
-			decimal db = Math.Max(gateThresholdInput.Minimum, Math.Min(gateThresholdInput.Maximum, clamped / 10m));
-			gateThresholdInput.Value = db;
+			string raw = RSMods.ReadSettings.ProcessSettings(identifier);
+			return int.TryParse(raw, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int value)
+				? Math.Max(minimum, Math.Min(maximum, value)) : fallback;
 		}
 
-		private void ApplyGateVisibility()
+		/// <summary>The pedal's threshold range, -80..-20 dB, in tenths.</summary>
+		private static int ClampGateThreshold(int tenths) => Math.Max(-800, Math.Min(-200, tenths));
+
+		private void LoadNoiseGate()
 		{
-			noiseGateSlider.Enabled = gateThresholdInput.Enabled = gateEnableCheck.Checked;
+			persistedNoiseGateTenths = ReadGateThresholdTenths();
+			persistedNoiseGateLastTenths = ReadGateSetting(RSMods.ReadSettings.NoiseGateLastThresholdIdentifier, DefaultGateThresholdTenths, -800, -200);
+			gateThresholdTenths = persistedNoiseGateTenths < 0 ? ClampGateThreshold(persistedNoiseGateTenths) : persistedNoiseGateLastTenths;
+			gateDecayMs = ReadGateSetting(RSMods.ReadSettings.NoiseGateDecayIdentifier, 200, 50, 2000);
+			gateReductionDb = ReadGateSetting(RSMods.ReadSettings.NoiseGateReductionIdentifier, -60, -80, -10);
+			gateAttackTenths = ReadGateSetting(RSMods.ReadSettings.NoiseGateAttackIdentifier, 5, 1, 200);
+			persistedGateShape = GateShapeCommand();
+			gateEnableCheck.Checked = persistedNoiseGateTenths < 0;
+			UpdateGateSummary();
 		}
 
-		// Slider moved: mirror to the numeric box, then apply live. Persist happens on mouse/key release.
-		private void OnNoiseGateChanged(object sender, EventArgs args)
+		// The value op 19 carries: the threshold in tenths when the gate is on, else 0 (off).
+		private int GateEffectiveTenths() => gateEnableCheck.Checked ? gateThresholdTenths : 0;
+
+		// The value op 31 carries: "<decayMs>,<reductionDb>,<attackTenthsMs>".
+		private string GateShapeCommand() => string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0},{1},{2}", gateDecayMs, gateReductionDb, gateAttackTenths);
+
+		private bool IsGateLive => client != null && latestStatus != null;
+
+		private void UpdateGateSummary()
 		{
-			if (syncingNoiseGate) return;
-			syncingNoiseGate = true;
-			gateThresholdInput.Value = Math.Max(gateThresholdInput.Minimum, Math.Min(gateThresholdInput.Maximum, noiseGateSlider.Value / 10m));
-			syncingNoiseGate = false;
+			gateSummary.Text = NoiseGateFormat.Threshold(gateThresholdTenths / 10.0)
+				+ " · decay " + NoiseGateFormat.Decay(gateDecayMs)
+				+ " · " + NoiseGateFormat.Reduction(gateReductionDb);
+			gateSummary.ForeColor = gateEnableCheck.Checked ? StudioTheme.Muted : StudioTheme.Faint;
+		}
+
+		// The row light and the pedal's LED and meter follow the GateMeter word of the latest status (0 = no data).
+		private void UpdateGateIndicators()
+		{
+			uint word = latestStatus != null ? latestStatus.GateMeter : 0u;
+			gateLight.Lit = NoiseGateFormat.MeterOpen(word);
+			if (gatePedal != null && !gatePedal.IsDisposed) gatePedal.SetMeter(word);
+		}
+
+		// The row's check or the pedal's footswitch turned the gate on or off: send op 19 now and keep both in step.
+		private void OnGateSwitched()
+		{
 			pendingNoiseGateTenths = GateEffectiveTenths();
 			lastMixerEdit = DateTime.UtcNow;
-		}
-
-		// Numeric box typed/spun (already clamped to its range): mirror to the slider, apply live, and persist -
-		// numeric commits are discrete, unlike a drag.
-		private void OnGateInputChanged(object sender, EventArgs args)
-		{
-			if (syncingNoiseGate) return;
-			syncingNoiseGate = true;
-			noiseGateSlider.Value = Math.Max(noiseGateSlider.Minimum, Math.Min(noiseGateSlider.Maximum, (int)Math.Round(gateThresholdInput.Value * 10m)));
-			syncingNoiseGate = false;
-			pendingNoiseGateTenths = GateEffectiveTenths();
-			lastMixerEdit = DateTime.UtcNow;
+			FlushMixerNow();
 			PersistNoiseGate();
+			if (gatePedal != null && !gatePedal.IsDisposed) gatePedal.SetGateOn(gateEnableCheck.Checked);
+			UpdateGateSummary();
+		}
+
+		// A pedal knob moved. Live edits only queue the value: the 100 ms mixerTimer sends the newest one, so a drag
+		// reaches the game at most every ~100 ms. A finished gesture flushes at once and persists.
+		private void OnPedalChanged(object sender, GatePedalChangeEventArgs args)
+		{
+			var pedal = sender as NoiseGatePedalForm;
+			if (pedal == null || pedal.IsDisposed) return;
+			if (args.IsThreshold)
+			{
+				gateThresholdTenths = ClampGateThreshold(pedal.ThresholdTenths);
+				if (gateEnableCheck.Checked) pendingNoiseGateTenths = gateThresholdTenths;
+			}
+			else
+			{
+				gateDecayMs = Math.Max(50, Math.Min(2000, pedal.DecayMs));
+				gateReductionDb = Math.Max(-80, Math.Min(-10, pedal.ReductionDb));
+				gateAttackTenths = Math.Max(1, Math.Min(200, pedal.AttackTenths));
+				pendingGateShape = GateShapeCommand();
+			}
+			lastMixerEdit = DateTime.UtcNow;
+			UpdateGateSummary();
+			if (args.Committed)
+			{
+				FlushMixerNow();
+				PersistNoiseGate();
+			}
+		}
+
+		// One pedal window; a second press of "Pedal" brings the open one to the front.
+		private void OpenGatePedal()
+		{
+			if (gatePedal != null && !gatePedal.IsDisposed)
+			{
+				if (gatePedal.WindowState == FormWindowState.Minimized) gatePedal.WindowState = FormWindowState.Normal;
+				gatePedal.Activate();
+				return;
+			}
+			var pedal = new NoiseGatePedalForm();
+			pedal.SetState(gateEnableCheck.Checked, gateThresholdTenths, gateDecayMs, gateReductionDb, gateAttackTenths);
+			pedal.SetMeter(latestStatus != null ? latestStatus.GateMeter : 0u);
+			pedal.GateToggled += (sender, args) => { if (!pedal.IsDisposed) gateEnableCheck.Checked = pedal.GateOn; };
+			pedal.SettingChanged += OnPedalChanged;
+			pedal.FormClosed += (sender, args) => { if (gatePedal == pedal) gatePedal = null; };
+			gatePedal = pedal;
+			// Open beside the Pedal button, then pull it back onto that screen once its DPI-scaled size is known.
+			pedal.Location = gatePedalButton.PointToScreen(new Point(gatePedalButton.Width + 16, -120));
+			pedal.Show(FindForm());
+			Rectangle work = Screen.FromControl(gatePedalButton).WorkingArea;
+			pedal.Location = new Point(
+				Math.Max(work.Left, Math.Min(pedal.Left, work.Right - pedal.Width)),
+				Math.Max(work.Top, Math.Min(pedal.Top, work.Bottom - pedal.Height)));
 		}
 
 		private void PersistNoiseGate()
 		{
 			int tenths = GateEffectiveTenths();
-			if (tenths == persistedNoiseGateTenths) return;
+			string shape = GateShapeCommand();
+			bool lastChanged = gateThresholdTenths != persistedNoiseGateLastTenths;
+			if (tenths == persistedNoiseGateTenths && !lastChanged && shape == persistedGateShape) return;
+			bool live = IsGateLive;
 			try
 			{
-				WriteNoiseGate(tenths);
+				if (!live)
+					WriteNoiseGateIni();
+				else if (lastChanged && tenths == 0)
+					// Op 19 cannot carry a threshold while the gate is off, and the DLL only saves the last
+					// threshold for a negative value, so keep the one the pedal shows ourselves.
+					WriteModSetting(RSMods.ReadSettings.NoiseGateLastThresholdIdentifier, gateThresholdTenths.ToString(System.Globalization.CultureInfo.InvariantCulture));
 				persistedNoiseGateTenths = tenths;
-				string where = tenths >= 0 ? "off" : (tenths / 10.0).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " dB";
-				SetStatus("Adaptive noise suppression " + where + " saved and applied. If you don't hear a change, restart Rocksmith (the input stage arms at launch).", ChipTone.Good);
+				persistedNoiseGateLastTenths = gateThresholdTenths;
+				persistedGateShape = shape;
+				string state = tenths < 0 ? "Noise gate on at " + NoiseGateFormat.Threshold(tenths / 10.0) : "Noise gate off";
+				SetStatus(live ? state + ", applied live." : state + ". Saved for when Rocksmith starts.", ChipTone.Good);
 			}
 			catch (Exception error)
 			{
-				SetStatus("Could not save adaptive noise suppression: " + error.Message, ChipTone.Bad);
+				SetStatus("Could not save the noise gate: " + error.Message, ChipTone.Bad);
 			}
 		}
 
-		private static void WriteNoiseGate(int tenths)
+		// Writes every noise gate key into RSMods.ini [Mod Settings] (surgical, one line per key).
+		private void WriteNoiseGateIni()
 		{
-			string iniPath = Path.Combine(RSMods.Util.GenUtil.GetRSDirectory(), "RSMods.ini");
-			string identifier = RSMods.ReadSettings.NoiseGateThresholdIdentifier;
-			string desired = identifier + tenths.ToString(System.Globalization.CultureInfo.InvariantCulture);
-			var lines = File.Exists(iniPath) ? new List<string>(File.ReadAllLines(iniPath)) : new List<string>();
-			bool replaced = false;
-			for (int i = 0; i < lines.Count; i++)
+			var invariant = System.Globalization.CultureInfo.InvariantCulture;
+			WriteModSetting(RSMods.ReadSettings.NoiseGateThresholdIdentifier, GateEffectiveTenths().ToString(invariant));
+			WriteModSetting(RSMods.ReadSettings.NoiseGateLastThresholdIdentifier, gateThresholdTenths.ToString(invariant));
+			WriteModSetting(RSMods.ReadSettings.NoiseGateDecayIdentifier, gateDecayMs.ToString(invariant));
+			WriteModSetting(RSMods.ReadSettings.NoiseGateReductionIdentifier, gateReductionDb.ToString(invariant));
+			WriteModSetting(RSMods.ReadSettings.NoiseGateAttackIdentifier, gateAttackTenths.ToString(invariant));
+		}
+
+		private void TryWriteNoiseGateIni()
+		{
+			try
 			{
-				if (lines[i].StartsWith(identifier, StringComparison.Ordinal))
-				{
-					lines[i] = desired;
-					replaced = true;
-					break;
-				}
+				WriteNoiseGateIni();
+				persistedNoiseGateTenths = GateEffectiveTenths();
+				persistedNoiseGateLastTenths = gateThresholdTenths;
+				persistedGateShape = GateShapeCommand();
 			}
-			if (!replaced) lines.Add(desired);
-			File.WriteAllLines(iniPath, lines);
+			catch (Exception error)
+			{
+				Trace.TraceError("Could not save the noise gate: {0}", error.Message);
+			}
 		}
 
 		// Reads the saved Rocksmith gate override: whether it is on, and the forced P1_NoiseFloor in tenths of
@@ -2996,6 +3129,8 @@ namespace RSMods.Audio
 				}
 				mixerTimer.Stop();
 				mixerTimer.Dispose();
+				if (gatePedal != null && !gatePedal.IsDisposed) gatePedal.Close();
+				gatePedal = null;
 				statusTimer.Dispose();
 				tips.Dispose();
 				video?.Dispose();

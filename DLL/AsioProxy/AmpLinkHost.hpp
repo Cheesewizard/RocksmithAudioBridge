@@ -8,6 +8,7 @@
 #include "AsioInterface.h"
 #include <atomic>
 
+#include "../AudioBridge/Input/NoiseSuppressor.hpp"
 namespace Audio { class AmpFeedConditioner; }
 
 namespace AmpLink
@@ -32,7 +33,7 @@ namespace AmpLink
 		void SetPitchSemitones(int semitones);
 		// The Input page's noise suppressor for the amp sim's input (AmpFeedConditioner.hpp): gateThreshold linear,
 		// 0 = off. Applied in Publish to the copy the guest gets; the host's own buffers (the game's input) stay untouched.
-		void ConfigureConditioner(float gateThreshold);
+		void ConfigureConditioner(float gateThreshold, const Audio::AsioHook::Detail::NoiseGateShape& gateShape = {});
 
 		// Start of a buffer, after the host's input buffers hold this block's samples (Int32LSB): copy up to two
 		// input channels into the next slot and wake the guest.

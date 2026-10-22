@@ -41,6 +41,15 @@ namespace Audio::AsioHook
 		// rejects idle floor and isolated spikes, then closes gradually after a note.
 		std::atomic<float> g_gateThresholdLinear{ 0.0f };
 		std::atomic<uint32_t> g_gateThresholdRevision{ 0 };
+		// The pedal's decay / reduction / attack (NoiseGateShape). Applied without a reset, so turning a dial
+		// mid-note does not click.
+		std::atomic<float> g_gateDecayMs{ 200.0f };
+		std::atomic<float> g_gateReductionDb{ -60.0f };
+		std::atomic<float> g_gateAttackMs{ 0.5f };
+		// Meter for the pedal: last block's detector level and open state, and when the gate last ran.
+		std::atomic<float> g_gateMeterDb{ -120.0f };
+		std::atomic<bool> g_gateMeterOpen{ false };
+		std::atomic<uint64_t> g_gateMeterTick{ 0 };
 
 		// Input compressor strength, 0..1 (0 = disabled). Emulates what the game's amp does when a hot
 		// Real Tone Cable drives it into compression: it squeezes the natural open-string AMPLITUDE
@@ -570,7 +579,11 @@ namespace Audio::AsioHook
 		{
 			const size_t channelCount = format.channelCount;
 			if (channelCount == 0) return;
-			g_noiseSuppressor.Configure(format.sampleRate, threshold);
+			Detail::NoiseGateShape shape;
+			shape.decayMs = g_gateDecayMs.load(std::memory_order_relaxed);
+			shape.reductionDb = g_gateReductionDb.load(std::memory_order_relaxed);
+			shape.attackMs = g_gateAttackMs.load(std::memory_order_relaxed);
+			g_noiseSuppressor.Configure(format.sampleRate, threshold, shape);
 
 			switch (format.sampleFormat)
 			{
@@ -1107,7 +1120,12 @@ namespace Audio::AsioHook
 				}
 				const float gateThreshold = g_gateThresholdLinear.load(std::memory_order_relaxed);
 				if (gateThreshold > 0.0f)
+				{
 					ProcessNoiseSuppressorInPlace(*data, routeFormats[routeIndex], *frameCount, gateThreshold);
+					g_gateMeterDb.store(g_noiseSuppressor.DetectorDb(), std::memory_order_relaxed);
+					g_gateMeterOpen.store(g_noiseSuppressor.IsOpen(), std::memory_order_relaxed);
+					g_gateMeterTick.store(GetTickCount64(), std::memory_order_relaxed);
+				}
 
 				// Compressor sits after the gate and before the make-up gain: it flattens the string-beat
 				// wobble so the game amp downstream cannot magnify it into a warble.
@@ -1768,6 +1786,38 @@ namespace Audio::AsioHook
 	{
 		const float gain = g_inputGainLinear.load(std::memory_order_relaxed);
 		return gain > 0.0f ? 20.0f * std::log10(gain) : -24.0f;
+	}
+
+	void SetNoiseGateShape(float decayMs, float reductionDb, float attackMs)
+	{
+		Detail::NoiseGateShape shape;
+		shape.decayMs = decayMs; shape.reductionDb = reductionDb; shape.attackMs = attackMs;
+		shape = shape.Clamped();
+		g_gateDecayMs.store(shape.decayMs, std::memory_order_relaxed);
+		g_gateReductionDb.store(shape.reductionDb, std::memory_order_relaxed);
+		g_gateAttackMs.store(shape.attackMs, std::memory_order_relaxed);
+	}
+
+	Detail::NoiseGateShape GetNoiseGateShape()
+	{
+		Detail::NoiseGateShape shape;
+		shape.decayMs = g_gateDecayMs.load(std::memory_order_relaxed);
+		shape.reductionDb = g_gateReductionDb.load(std::memory_order_relaxed);
+		shape.attackMs = g_gateAttackMs.load(std::memory_order_relaxed);
+		return shape;
+	}
+
+	bool GetNoiseGateMeter(float& detectorDb, bool& open)
+	{
+		const uint64_t tick = g_gateMeterTick.load(std::memory_order_relaxed);
+		if (tick == 0 || GetTickCount64() - tick > 500 || g_gateThresholdLinear.load(std::memory_order_relaxed) <= 0.0f)
+		{
+			detectorDb = -120.0f; open = false;
+			return false;
+		}
+		detectorDb = g_gateMeterDb.load(std::memory_order_relaxed);
+		open = g_gateMeterOpen.load(std::memory_order_relaxed);
+		return true;
 	}
 
 	float GetNoiseGateThresholdDb()

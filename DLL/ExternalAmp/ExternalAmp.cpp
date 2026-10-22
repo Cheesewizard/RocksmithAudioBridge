@@ -129,8 +129,11 @@ namespace ExternalAmp
 		{
 			const float gateDb = Audio::AsioHook::GetNoiseGateThresholdDb();   // 0 = off
 			const float gate = gateDb < 0.0f ? std::pow(10.0f, gateDb / 20.0f) : 0.0f;
+			const Audio::AsioHook::Detail::NoiseGateShape shape = Audio::AsioHook::GetNoiseGateShape();   // the pedal's dials
 			HMODULE proxy = Proxy();
-			if (!proxy) { CableAmpLink::ConfigureConditioner(gate); return; }
+			if (!proxy) { CableAmpLink::ConfigureConditioner(gate, shape); return; }
+			using GateFn = void(__cdecl*)(float, float, float, float);
+			if (auto fn = reinterpret_cast<GateFn>(GetProcAddress(proxy, "RSModsAsio_ConfigureAmpFeedGate"))) { fn(gate, shape.decayMs, shape.reductionDb, shape.attackMs); return; }
 			using ConditionerFn = void(__cdecl*)(float);
 			if (auto fn = reinterpret_cast<ConditionerFn>(GetProcAddress(proxy, "RSModsAsio_ConfigureAmpFeed"))) fn(gate);
 		}

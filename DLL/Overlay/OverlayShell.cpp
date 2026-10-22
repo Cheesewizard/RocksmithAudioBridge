@@ -4169,16 +4169,263 @@ namespace Overlay
 		// only runs on Player 1 so far (InputCaptureHook, route 0); Player 2's is planned.
 		enum class InputSource { None, Asio, Cable, CableStandIn, GameCable };
 
-		// Player 1's processing: input gain, noise suppressor, compressor, then the game's own amp gate.
+		// ---- Noise gate pedal -------------------------------------------------------------------------
+		// Player 1's noise gate (NoiseSuppressor.hpp): a row on the Input page, and its dials on a pop-out stomp box
+		// that stays over the game while the overlay is open. Threshold goes over op 19 (signed tenths of a dB, 0 = off);
+		// decay, reduction and attack over op 31 ("<ms>,<dB>,<tenths of a ms>"). Drags apply live (Preview*) and save
+		// once on release. The settings app has the same pedal (GUI/Audio/NoiseGatePedalForm.cs).
+		struct NoiseGatePedalState
+		{
+			bool seeded = false;
+			bool on = false;
+			bool windowOpen = false;
+			int thresholdTenths = -620;   // kept while off (NoiseGateLastThreshold) so the footswitch returns to it
+			int decayMs = 200;
+			int reductionDb = -60;
+			int attackTenths = 5;
+
+			void Seed()
+			{
+				if (seeded) return;
+				seeded = true;
+				const int threshold = Settings::GetModSetting("NoiseGateThreshold");
+				on = threshold < 0;
+				const int last = Settings::GetModSetting("NoiseGateLastThreshold");
+				thresholdTenths = on ? threshold : (last < 0 ? last : -620);
+				thresholdTenths = std::clamp(thresholdTenths, -800, -200);
+				decayMs = std::clamp(Settings::GetModSetting("NoiseGateDecay"), 50, 2000);
+				reductionDb = std::clamp(Settings::GetModSetting("NoiseGateReduction"), -80, -10);
+				attackTenths = std::clamp(Settings::GetModSetting("NoiseGateAttack"), 1, 200);
+			}
+
+			void SendThreshold(bool save) { if (save) SendInt(19, on ? thresholdTenths : 0); else if (on) PreviewInt(19, thresholdTenths); }
+
+			void SendShape(bool save)
+			{
+				wchar_t value[48];
+				swprintf_s(value, L"%d,%d,%d", decayMs, reductionDb, attackTenths);
+				if (save) BridgeControl(31, value); else PreviewControl(31, value);
+			}
+
+			void FormatDecay(char* out, size_t size) const
+			{
+				if (decayMs >= 1000) snprintf(out, size, "%.1f s", decayMs / 1000.0f);
+				else snprintf(out, size, "%d ms", decayMs);
+			}
+		};
+		NoiseGatePedalState g_gatePedal;
+
+		namespace PedalInk
+		{
+			constexpr ImU32 Body = IM_COL32(31, 91, 84, 255);
+			constexpr ImU32 Edge = IM_COL32(45, 122, 112, 255);
+			constexpr ImU32 Lettering = IM_COL32(234, 247, 243, 255);
+			constexpr ImU32 Label = IM_COL32(215, 239, 233, 255);
+			constexpr ImU32 Value = IM_COL32(168, 216, 206, 255);
+			constexpr ImU32 KnobSkirt = IM_COL32(20, 64, 58, 255);
+			constexpr ImU32 KnobSkirtEdge = IM_COL32(13, 42, 38, 255);
+			constexpr ImU32 KnobCap = IM_COL32(27, 31, 30, 255);
+			constexpr ImU32 KnobCapEdge = IM_COL32(58, 68, 66, 255);
+			constexpr ImU32 Pointer = IM_COL32(242, 245, 244, 255);
+			constexpr ImU32 MeterTrack = IM_COL32(18, 58, 53, 255);
+			constexpr ImU32 MeterFill = IM_COL32(93, 202, 165, 255);
+			constexpr ImU32 ThresholdLine = IM_COL32(250, 199, 117, 255);
+			constexpr ImU32 LedOn = IM_COL32(151, 196, 89, 255);
+			constexpr ImU32 LedOff = IM_COL32(51, 71, 63, 255);
+			constexpr ImU32 Switch = IM_COL32(201, 211, 209, 255);
+			constexpr ImU32 SwitchOff = IM_COL32(140, 153, 150, 255);
+			constexpr ImU32 SwitchText = IM_COL32(61, 74, 71, 255);
+		}
+
+		// One dial: drag up or down (150 px = the full sweep), mouse wheel steps, double-click resets. `t` is the
+		// 0..1 position. Returns true on any frame it moves; `commit` is set on the frame to save (drag released,
+		// a wheel step or a reset).
+		bool PedalKnob(const char* id, const char* label, const char* valueText, float& t, float defaultT, float step,
+			float cellWidth, bool& commit, const char* hint)
+		{
+			ImGui::PushID(id);
+			ImGuiIO& io = ImGui::GetIO();
+			const float radius = 27.0f;
+			const ImVec2 start = ImGui::GetCursorScreenPos();
+			ImGui::InvisibleButton("##dial", ImVec2(cellWidth, radius * 2.0f + 40.0f));
+			const bool hovered = ImGui::IsItemHovered(), active = ImGui::IsItemActive();
+			Hint(hint);
+			bool changed = false;
+			commit = false;
+			if (active && io.MouseDelta.y != 0.0f) { t -= io.MouseDelta.y / 150.0f; changed = true; }
+			if (ImGui::IsItemDeactivated()) commit = true;
+			if (hovered && io.MouseWheel != 0.0f) { t += io.MouseWheel * step; changed = commit = true; }
+			if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) { t = defaultT; changed = commit = true; }
+			t = std::clamp(t, 0.0f, 1.0f);
+
+			ImDrawList* list = ImGui::GetWindowDrawList();
+			const ImVec2 center(start.x + cellWidth * 0.5f, start.y + radius + 2.0f);
+			list->AddCircleFilled(center, radius, PedalInk::KnobSkirt, 32);
+			list->AddCircle(center, radius, PedalInk::KnobSkirtEdge, 32, 2.0f);
+			// Sweep marks at the two ends of the 270 degree travel.
+			for (const float end : { 0.0f, 1.0f }) {
+				const float a = (-135.0f + 270.0f * end) * 3.14159265f / 180.0f;
+				list->AddLine(ImVec2(center.x + std::sin(a) * (radius - 4.0f), center.y - std::cos(a) * (radius - 4.0f)),
+					ImVec2(center.x + std::sin(a) * (radius - 1.0f), center.y - std::cos(a) * (radius - 1.0f)), PedalInk::Value, 1.5f);
+			}
+			const float capRadius = radius - 6.0f;
+			list->AddCircleFilled(center, capRadius, hovered || active ? Mix(PedalInk::KnobCap, IM_COL32(255, 255, 255, 255), 0.06f) : PedalInk::KnobCap, 32);
+			list->AddCircle(center, capRadius, PedalInk::KnobCapEdge, 32, 2.0f);
+			const float angle = (-135.0f + 270.0f * t) * 3.14159265f / 180.0f;
+			list->AddLine(center, ImVec2(center.x + std::sin(angle) * (capRadius - 3.0f), center.y - std::cos(angle) * (capRadius - 3.0f)),
+				PedalInk::Pointer, 3.0f);
+
+			ImFont* caption = GetFonts().caption ? GetFonts().caption : ImGui::GetFont();
+			const ImVec2 labelSize = caption->CalcTextSizeA(caption->FontSize, FLT_MAX, 0.0f, label);
+			list->AddText(caption, caption->FontSize, ImVec2(center.x - labelSize.x * 0.5f, center.y + radius + 5.0f), PedalInk::Label, label);
+			const ImVec2 valueSize = caption->CalcTextSizeA(caption->FontSize, FLT_MAX, 0.0f, valueText);
+			list->AddText(caption, caption->FontSize, ImVec2(center.x - valueSize.x * 0.5f, center.y + radius + 5.0f + labelSize.y),
+				PedalInk::Value, valueText);
+			ImGui::PopID();
+			return changed;
+		}
+
+		// The pop-out stomp box. Drawn after the main overlay window, so it floats over it and the game.
+		void NoiseGatePedalWindow()
+		{
+			NoiseGatePedalState& gate = g_gatePedal;
+			gate.Seed();
+			const float width = 340.0f, height = 470.0f;
+			ImGui::SetNextWindowSize(ImVec2(width, height), ImGuiCond_Always);
+			ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - width - 40.0f, 80.0f), ImGuiCond_FirstUseEver);
+			ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::ColorConvertU32ToFloat4(Color::Window));
+			ImGui::PushStyleColor(ImGuiCol_Border, ImGui::ColorConvertU32ToFloat4(Color::CardEdge));
+			ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 10.0f);
+			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+			const bool shown = ImGui::Begin("Noise gate##pedal", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize
+				| ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+			ImGui::PopStyleVar(2);
+			ImGui::PopStyleColor(2);
+			if (!shown) { ImGui::End(); return; }
+
+			ImDrawList* list = ImGui::GetWindowDrawList();
+			const ImVec2 origin = ImGui::GetWindowPos();
+			ImFont* caption = GetFonts().caption ? GetFonts().caption : ImGui::GetFont();
+			ImFont* title = GetFonts().title ? GetFonts().title : ImGui::GetFont();
+
+			// Title bar: drag anywhere on the window that is not a control (ImGui moves windows by their background).
+			list->AddText(caption, caption->FontSize, ImVec2(origin.x + 14.0f, origin.y + 11.0f), Color::Muted, "Noise gate \xC2\xB7 Player 1");
+			ImGui::SetCursorScreenPos(ImVec2(origin.x + width - 34.0f, origin.y + 6.0f));
+			if (ImGui::InvisibleButton("##close", ImVec2(26.0f, 24.0f))) gate.windowOpen = false;
+			const bool closeHovered = ImGui::IsItemHovered();
+			Hint("Close the pedal. Its settings stay as they are.");
+			DrawIcon(list, ImVec2(origin.x + width - 21.0f, origin.y + 18.0f), Glyph::Close, closeHovered ? Color::Text : Color::Muted);
+			list->AddLine(ImVec2(origin.x, origin.y + 36.0f), ImVec2(origin.x + width, origin.y + 36.0f), Color::CardEdge);
+
+			// Enclosure
+			const ImVec2 box(origin.x + 20.0f, origin.y + 50.0f), boxEnd(origin.x + width - 20.0f, origin.y + height - 16.0f);
+			list->AddRectFilled(box, boxEnd, PedalInk::Body, 14.0f);
+			list->AddRect(box, boxEnd, PedalInk::Edge, 14.0f, 0, 2.0f);
+			list->AddText(title, title->FontSize, ImVec2(box.x + 16.0f, box.y + 12.0f), PedalInk::Lettering, "NOISE GATE");
+
+			float meterDb = -120.0f;
+			bool gateOpen = false;
+			const bool running = Audio::AsioHook::GetNoiseGateMeter(meterDb, gateOpen);
+			const ImVec2 led(boxEnd.x - 22.0f, box.y + 22.0f);
+			list->AddCircleFilled(led, 7.0f, running && gateOpen && gate.on ? PedalInk::LedOn : PedalInk::LedOff, 20);
+			list->AddCircle(led, 7.0f, PedalInk::KnobSkirtEdge, 20, 1.0f);
+			ImGui::SetCursorScreenPos(ImVec2(led.x - 9.0f, led.y - 9.0f));
+			ImGui::InvisibleButton("##led", ImVec2(18.0f, 18.0f));
+			Hint("Lit while the gate is open and your guitar comes through.");
+
+			// Dials, two by two
+			const float cell = (boxEnd.x - box.x - 24.0f) / 2.0f;
+			char text[32];
+			bool commit = false;
+			const float rowTop = box.y + 52.0f, rowStep = 102.0f;
+
+			ImGui::SetCursorScreenPos(ImVec2(box.x + 12.0f, rowTop));
+			float t = (gate.thresholdTenths / 10.0f + 80.0f) / 60.0f;
+			snprintf(text, sizeof(text), "%.1f dB", gate.thresholdTenths / 10.0f);
+			if (PedalKnob("threshold", "THRESHOLD", text, t, (-62.0f + 80.0f) / 60.0f, 0.5f / 60.0f, cell, commit,
+				"Where it opens. It listens to the guitar's own range, not the hiss or hum. Lower keeps quieter note tails; if noise gets through between notes, raise it a few dB.")) {
+				gate.thresholdTenths = std::clamp(static_cast<int>(std::lround((-80.0f + 60.0f * t) * 2.0f)) * 5, -800, -200);
+				gate.SendThreshold(false);
+			}
+			if (commit) gate.SendThreshold(true);
+
+			ImGui::SetCursorScreenPos(ImVec2(box.x + 12.0f + cell, rowTop));
+			t = std::log(gate.decayMs / 50.0f) / std::log(40.0f);
+			gate.FormatDecay(text, sizeof(text));
+			if (PedalKnob("decay", "DECAY", text, t, std::log(200.0f / 50.0f) / std::log(40.0f), 0.02f, cell, commit,
+				"How long a note takes to fade once the gate closes.")) {
+				gate.decayMs = std::clamp(static_cast<int>(std::lround(50.0f * std::pow(40.0f, t))), 50, 2000);
+				gate.SendShape(false);
+			}
+			if (commit) gate.SendShape(true);
+
+			ImGui::SetCursorScreenPos(ImVec2(box.x + 12.0f, rowTop + rowStep));
+			t = (gate.reductionDb + 80.0f) / 70.0f;
+			snprintf(text, sizeof(text), "%d dB", gate.reductionDb);
+			if (PedalKnob("reduction", "REDUCTION", text, t, 20.0f / 70.0f, 1.0f / 70.0f, cell, commit,
+				"How far it turns the noise down. -60 dB is near silence; around -20 dB leaves a faint natural floor.")) {
+				gate.reductionDb = std::clamp(static_cast<int>(std::lround(-80.0f + 70.0f * t)), -80, -10);
+				gate.SendShape(false);
+			}
+			if (commit) gate.SendShape(true);
+
+			ImGui::SetCursorScreenPos(ImVec2(box.x + 12.0f + cell, rowTop + rowStep));
+			t = std::log(gate.attackTenths / 1.0f) / std::log(200.0f);
+			if (gate.attackTenths < 10) snprintf(text, sizeof(text), "%.1f ms", gate.attackTenths / 10.0f);
+			else snprintf(text, sizeof(text), "%d ms", static_cast<int>(std::lround(gate.attackTenths / 10.0f)));
+			if (PedalKnob("attack", "ATTACK", text, t, std::log(5.0f) / std::log(200.0f), 0.02f, cell, commit,
+				"How fast it opens. Keep it short so your pick attack stays sharp.")) {
+				gate.attackTenths = std::clamp(static_cast<int>(std::lround(std::pow(200.0f, t))), 1, 200);
+				gate.SendShape(false);
+			}
+			if (commit) gate.SendShape(true);
+
+			// Input meter with the threshold line (-90 dB empty, 0 dB full), on the gate's own detector.
+			const float meterTop = rowTop + rowStep * 2.0f + 6.0f;
+			list->AddText(caption, caption->FontSize, ImVec2(box.x + 16.0f, meterTop), PedalInk::Label, "Input");
+			if (running) snprintf(text, sizeof(text), "%.0f dB", meterDb); else strcpy_s(text, gate.on ? "No signal" : "Off");
+			const float textW = caption->CalcTextSizeA(caption->FontSize, FLT_MAX, 0.0f, text).x;
+			list->AddText(caption, caption->FontSize, ImVec2(boxEnd.x - 16.0f - textW, meterTop), PedalInk::Label, text);
+			const ImVec2 track(box.x + 16.0f, meterTop + caption->FontSize + 5.0f), trackEnd(boxEnd.x - 16.0f, track.y + 10.0f);
+			list->AddRectFilled(track, trackEnd, PedalInk::MeterTrack, 5.0f);
+			const float fill = running ? std::clamp((meterDb + 90.0f) / 90.0f, 0.0f, 1.0f) : 0.0f;
+			if (fill > 0.0f) list->AddRectFilled(track, ImVec2(track.x + (trackEnd.x - track.x) * fill, trackEnd.y), PedalInk::MeterFill, 5.0f);
+			const float lineX = track.x + (trackEnd.x - track.x) * std::clamp((gate.thresholdTenths / 10.0f + 90.0f) / 90.0f, 0.0f, 1.0f);
+			list->AddRectFilled(ImVec2(lineX - 1.0f, track.y - 2.0f), ImVec2(lineX + 1.0f, trackEnd.y + 2.0f), PedalInk::ThresholdLine);
+			ImGui::SetCursorScreenPos(ImVec2(track.x, trackEnd.y + 5.0f));
+			ImGui::PushFont(caption);
+			ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(PedalInk::Value));
+			ImGui::PushTextWrapPos(trackEnd.x);
+			ImGui::TextUnformatted("Yellow line = threshold. Set it just above where the meter rests when you're not playing.");
+			ImGui::PopTextWrapPos();
+			ImGui::PopStyleColor();
+			ImGui::PopFont();
+
+			// Footswitch
+			const ImVec2 foot(box.x + (boxEnd.x - box.x) * 0.5f, boxEnd.y - 40.0f);
+			ImGui::SetCursorScreenPos(ImVec2(foot.x - 28.0f, foot.y - 28.0f));
+			if (ImGui::InvisibleButton("##footswitch", ImVec2(56.0f, 56.0f))) { gate.on = !gate.on; gate.SendThreshold(true); }
+			const bool footHovered = ImGui::IsItemHovered();
+			Hint("Switches the gate on or off.");
+			list->AddCircleFilled(foot, 27.0f, gate.on ? PedalInk::Switch : PedalInk::SwitchOff, 32);
+			list->AddCircle(foot, 27.0f, footHovered ? PedalInk::Lettering : PedalInk::SwitchOff, 32, 4.0f);
+			const char* footText = gate.on ? "ON" : "OFF";
+			const ImVec2 footSize = caption->CalcTextSizeA(caption->FontSize, FLT_MAX, 0.0f, footText);
+			list->AddText(caption, caption->FontSize, ImVec2(foot.x - footSize.x * 0.5f, foot.y - footSize.y * 0.5f), PedalInk::SwitchText, footText);
+			ImGui::End();
+		}
+
+		// Player 1's processing: input gain, noise gate, compressor, then the game's own amp gate.
 		void PlayerOneProcessing()
 		{
 			// Seeded once from the keys the DLL applies at launch, then user-driven.
 			static bool seeded = false;
-			static bool gainOn, gateOn, compOn, rgOn;
-			static int gainTenths, gateTenths, compPct, rgTenths;
+			static bool gainOn, compOn, rgOn;
+			static int gainTenths, compPct, rgTenths;
+			NoiseGatePedalState& gate = g_gatePedal;
+			gate.Seed();
 			if (!seeded) {
 				gainTenths = Settings::GetModSetting("AsioInputGain");        gainOn = gainTenths > 0;
-				gateTenths = Settings::GetModSetting("NoiseGateThreshold");   gateOn = gateTenths < 0; if (!gateOn) gateTenths = -500;
 				compPct = Settings::GetModSetting("CompressorStrength");      compOn = compPct > 0;
 				rgOn = Settings::GetModSetting("RocksmithGateOverride") != 0; rgTenths = Settings::GetModSetting("RocksmithGateThreshold"); if (rgTenths == 0) rgTenths = -593;
 				seeded = true;
@@ -4187,7 +4434,7 @@ namespace Overlay
 			BeginCard("Processing");
 			// The capture hook is installed at launch only when one of these is on (ModManager); switching the first one
 			// on mid-session has no effect until the game restarts.
-			if ((gainOn || gateOn || compOn) && !Audio::AsioHook::InputChainRunning())
+			if ((gainOn || gate.on || compOn) && !Audio::AsioHook::InputChainRunning())
 				WarnCaption("Not running this launch: restart the game once to start the input processing.");
 			// Input make-up gain (op 15, tenths of dB; off = 0).
 			if (ToggleRow("Input gain", "Raises a quiet guitar.", &gainOn)) SendInt(15, gainOn ? gainTenths : 0);
@@ -4198,14 +4445,30 @@ namespace Overlay
 			if (gainSaved) SendInt(15, gainTenths);
 			ImGui::EndDisabled();
 
-			// Noise suppressor (op 19, signed tenths of dB; off = 0). Also applied to the amp sim's feed (AmpFeedConditioner.hpp).
-			if (ToggleRow("Noise suppressor", "Silent between notes: a clear attack opens it, and the note rings down to the sustain threshold.", &gateOn)) SendInt(19, gateOn ? gateTenths : 0);
-			ImGui::BeginDisabled(!gateOn);
-			float gateDb = gateTenths / 10.0f;
-			bool gateSaved = false;
-			if (SliderRow("Sustain threshold", &gateDb, -80.0f, -20.0f, "%.1f dB", &gateSaved, "Lower values keep quieter note tails after a valid attack.")) { gateTenths = static_cast<int>(gateDb * 10 - 0.5f); PreviewInt(19, gateTenths); }
-			if (gateSaved) SendInt(19, gateTenths);
-			ImGui::EndDisabled();
+			// Noise gate: one row here, its dials on the pedal pop-out (NoiseGatePedalWindow). Also applied to the amp sim's
+			// feed (AmpFeedConditioner.hpp).
+			{
+				char decay[16], summary[96];
+				gate.FormatDecay(decay, sizeof(decay));
+				snprintf(summary, sizeof(summary), "%.1f dB \xC2\xB7 decay %s \xC2\xB7 %d dB", gate.thresholdTenths / 10.0f, decay, gate.reductionDb);
+				if (ToggleRow("Noise gate", gate.on ? summary : "Silent between notes, without cutting your sustain.", &gate.on, "Switches the gate on or off. Open the pedal for its dials."))
+					gate.SendThreshold(true);
+				if (Button(gate.windowOpen ? "Close pedal" : "Open pedal", false, "The gate's dials: threshold, decay, reduction and attack, with a level meter."))
+					gate.windowOpen = !gate.windowOpen;
+				float meterDb = -120.0f;
+				bool gateOpen = false;
+				const bool lit = gate.on && Audio::AsioHook::GetNoiseGateMeter(meterDb, gateOpen) && gateOpen;
+				ImGui::SameLine(0.0f, 14.0f);
+				const ImVec2 dotAt = ImGui::GetCursorScreenPos();
+				const float rowH = ImGui::GetItemRectSize().y;
+				ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(dotAt.x + 5.0f, dotAt.y + rowH * 0.5f), 5.0f, lit ? PedalInk::LedOn : PedalInk::LedOff, 16);
+				ImGui::Dummy(ImVec2(12.0f, rowH));
+				ImGui::SameLine(0.0f, 6.0f);
+				ImGui::AlignTextToFramePadding();
+				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Color::Muted));
+				ImGui::TextUnformatted(!gate.on ? "Off" : lit ? "Open" : "Closed");
+				ImGui::PopStyleColor();
+			}
 
 			// Compressor (op 20, 0..100; off = 0).
 			if (ToggleRow("Compressor", "Evens out level swings during sustained notes.", &compOn)) SendInt(20, compOn ? compPct : 0);
@@ -4871,6 +5134,8 @@ namespace Overlay
 		}
 		lastPosition = ImGui::GetWindowPos();
 		ImGui::End();
+		// The Noise gate pedal floats over the game while the overlay is open, whatever page is showing.
+		if (g_gatePedal.windowOpen) NoiseGatePedalWindow();
 		// Layout edit mode is the Note by Note page: its sliders and the on-screen blocks move together.
 		if (visible && page == Page::NoteByNote) HudEditor();
 		if (fonts.body) ImGui::PopFont();

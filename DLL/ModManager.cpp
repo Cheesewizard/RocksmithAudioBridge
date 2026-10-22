@@ -272,6 +272,8 @@ namespace ModManager {
 		const int compressorStrength = Settings::GetModSetting("CompressorStrength");
 		Audio::AsioHook::SetInputGainDb(inputGainTenths / 10.0f);
 		Audio::AsioHook::SetNoiseGateThresholdDb(suppressorThresholdTenths / 10.0f);
+		Audio::AsioHook::SetNoiseGateShape(static_cast<float>(Settings::GetModSetting("NoiseGateDecay")),
+			static_cast<float>(Settings::GetModSetting("NoiseGateReduction")), Settings::GetModSetting("NoiseGateAttack") / 10.0f);
 		Audio::AsioHook::SetCompressorStrength(compressorStrength / 100.0f);
 		LOG_INFO("[InputCapture] Startup conditioner configured: gain " << inputGainTenths / 10.0f
 			<< " dB, suppressor " << suppressorThresholdTenths / 10.0f

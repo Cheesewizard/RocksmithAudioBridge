@@ -34,10 +34,16 @@ namespace Audio::AsioHook
 	// otherwise makes the game's level-sensitive gate mute sustains and bends early. 0 dB = off.
 	void SetInputGainDb(float decibels);
 
-	// Adaptive suppressor threshold in dBFS, keyed to the raw pre-gain input. It requires a sustained
-	// onset, rejects idle noise and brief spikes, and closes gradually after notes. >= 0 dB = off.
+	// Noise gate threshold in dBFS on the gate's filtered detector (NoiseSuppressor.hpp), keyed to the raw
+	// pre-gain input. >= 0 dB = off.
 	void SetNoiseGateThresholdDb(float decibels);
 	float GetNoiseGateThresholdDb();
+	// The Noise gate pedal's other dials: decay (ms), reduction (dB) and attack (ms). Clamped to the pedal's ranges.
+	void SetNoiseGateShape(float decayMs, float reductionDb, float attackMs);
+	Detail::NoiseGateShape GetNoiseGateShape();
+	// For the pedal's meter and light: the detector level (dBFS) and open state of Player 1's gate. False when the gate
+	// has not run in the last 500 ms (off, or no input).
+	bool GetNoiseGateMeter(float& detectorDb, bool& open);
 
 	// Logs "(INPUT STAGES)" every 10 s: Player 1's peak at the device (proxy), at the game capture
 	// before the conditioner, and after it, so a dead input stretch shows which stage went silent.

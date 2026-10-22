@@ -117,7 +117,7 @@ namespace AmpLink
 		m_pitchSemitones.store(std::clamp(semitones, -24, 24), std::memory_order_relaxed);
 	}
 
-	void Host::ConfigureConditioner(float gateThreshold)
+	void Host::ConfigureConditioner(float gateThreshold, const Audio::AsioHook::Detail::NoiseGateShape& gateShape)
 	{
 		Audio::AmpFeedConditioner* conditioner = m_conditioner.load(std::memory_order_acquire);
 		if (!conditioner)
@@ -130,7 +130,7 @@ namespace AmpLink
 			if (m_conditioner.compare_exchange_strong(expected, created, std::memory_order_acq_rel)) conditioner = created;
 			else { delete created; conditioner = expected; }
 		}
-		conditioner->Configure(gateThreshold);
+		conditioner->Configure(gateThreshold, gateShape);
 	}
 
 	bool Host::GuestConnected(LONG newestSeq) const noexcept

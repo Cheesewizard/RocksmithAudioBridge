@@ -26,9 +26,13 @@ namespace Audio
 	public:
 		static constexpr size_t kChannels = 2;
 
-		// gateThreshold: the noise suppressor's threshold, linear, 0 = off.
-		void Configure(float gateThreshold)
+		// gateThreshold: the noise suppressor's threshold, linear, 0 = off. gateShape: the Noise gate pedal's dials.
+		void Configure(float gateThreshold, const AsioHook::Detail::NoiseGateShape& gateShape = {})
 		{
+			const AsioHook::Detail::NoiseGateShape shape = gateShape.Clamped();
+			m_gateDecayMs.store(shape.decayMs, std::memory_order_relaxed);
+			m_gateReductionDb.store(shape.reductionDb, std::memory_order_relaxed);
+			m_gateAttackMs.store(shape.attackMs, std::memory_order_relaxed);
 			m_gateThreshold.store(gateThreshold > 0.0f ? gateThreshold : 0.0f, std::memory_order_relaxed);
 		}
 
@@ -40,11 +44,15 @@ namespace Audio
 			const float gate = m_gateThreshold.load(std::memory_order_relaxed);
 			if (gate <= 0.0f || frames == 0) return;
 			count = count < kChannels ? count : kChannels;
+			AsioHook::Detail::NoiseGateShape shape;
+			shape.decayMs = m_gateDecayMs.load(std::memory_order_relaxed);
+			shape.reductionDb = m_gateReductionDb.load(std::memory_order_relaxed);
+			shape.attackMs = m_gateAttackMs.load(std::memory_order_relaxed);
 			for (size_t ch = 0; ch < count; ++ch)
 			{
 				int32_t* samples = channels[ch];
 				if (!samples) continue;
-				m_gate[ch].Configure(sampleRate, gate);
+				m_gate[ch].Configure(sampleRate, gate, shape);
 				for (uint32_t i = 0; i < frames; ++i)
 				{
 					float x = static_cast<float>(samples[i]) * (1.0f / 2147483648.0f);
@@ -58,5 +66,8 @@ namespace Audio
 	private:
 		AsioHook::Detail::NoiseSuppressor m_gate[kChannels];
 		std::atomic<float> m_gateThreshold{ 0.0f };
+		std::atomic<float> m_gateDecayMs{ 200.0f };       // the Noise gate pedal's dials (NoiseGateShape)
+		std::atomic<float> m_gateReductionDb{ -60.0f };
+		std::atomic<float> m_gateAttackMs{ 0.5f };
 	};
 }

@@ -173,6 +173,14 @@ extern "C" __declspec(dllexport) void RSModsAsio_ConfigureAmpFeed(float gateThre
 {
 	g_ampLink.ConfigureConditioner(gateThreshold);
 }
+// The same plus the Noise gate pedal's dials (decay ms, reduction dB, attack ms). ExternalAmp.cpp prefers this one;
+// RSModsAsio_ConfigureAmpFeed stays for an older game DLL.
+extern "C" __declspec(dllexport) void RSModsAsio_ConfigureAmpFeedGate(float gateThreshold, float decayMs, float reductionDb, float attackMs)
+{
+	Audio::AsioHook::Detail::NoiseGateShape shape;
+	shape.decayMs = decayMs; shape.reductionDb = reductionDb; shape.attackMs = attackMs;
+	g_ampLink.ConfigureConditioner(gateThreshold, shape);
+}
 // Fills `status` (sizeof(AmpLink::Status) bytes, checked against `size`). Returns 1 when filled.
 extern "C" __declspec(dllexport) int RSModsAsio_GetAmpLinkStatus(AmpLink::Status* status, int size)
 {
