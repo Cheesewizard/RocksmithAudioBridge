@@ -714,6 +714,38 @@ namespace
 			&& std::fabs(start - startMirror) <= BOUNDARY_EPSILON
 			&& std::fabs(end - endMirror) <= BOUNDARY_EPSILON;
 	}
+	// Every owned release runs COORDINATED_REBUILD (slot +0x54), which rewrites the
+	// start pair to min(releaseEpoch, end): the start marches to the last released note.
+	// The pair is also the section window 0x7E9ED0 tests (owner+0x3B0, start at +0x14 =
+	// +0x3C4), so after a loop wrap every note of the new pass sits before the stale start
+	// and answers "outside": the whole highway greys until the first release marches the
+	// start back. Stock never marches it, so nothing native resets it on the wrap.
+	// Verified live 2026-10-19: wrapped pass holding 290.307 with start still 292.724.
+	// Restoring the latched authored start returns the window to its stock value.
+	void RestoreNativeSectionStart(void* owner, const char* reason)
+	{
+		if (!isEpochConfirmed || !hasSectionEndBoundary || owner == nullptr) return;
+		const auto address = reinterpret_cast<uintptr_t>(owner);
+		uintptr_t vtable = 0;
+		float start = 0.0f, startMirror = 0.0f, end = 0.0f;
+		if (!TryRead(address, vtable) || vtable != LAS_OWNER_VTABLE
+			|| !TryRead(address + LAS_SECTION_START, start)
+			|| !TryRead(address + LAS_SECTION_START_MIRROR, startMirror)
+			|| !TryRead(address + LAS_SECTION_END, end))
+		{
+			return;
+		}
+		// Only the march is undone: the end must still be the latched section's end, and the
+		// start must sit inside the section past the latched start.
+		if (std::fabs(end - sectionEndBoundary) > BOUNDARY_EPSILON) return;
+		if (!(start > greyCutoff + BOUNDARY_EPSILON && start < end)) return;
+		const bool wroteStart = TryWriteGameFloat(address + LAS_SECTION_START, greyCutoff);
+		const bool wroteMirror = TryWriteGameFloat(address + LAS_SECTION_START_MIRROR, greyCutoff);
+		LOG_INFO("(NBN LAS WINDOW) Restored the marched native section start "
+			<< std::fixed << std::setprecision(3) << start << "/" << startMirror
+			<< " -> " << greyCutoff << " (end " << end << ", " << reason << "); wrote="
+			<< wroteStart << wroteMirror << "." << std::endl);
+	}
 	std::string DescribeNativeSectionRange(void* owner)
 	{
 		const auto address = reinterpret_cast<uintptr_t>(owner);
@@ -777,38 +809,6 @@ namespace
 			std::ostringstream reason;
 			reason << "section vector spans " << span << " bytes (stride " << PHRASE_SECTION_STRIDE << ", max "
 				<< PHRASE_SECTION_MAX << " rows)";
-	// Every owned release runs COORDINATED_REBUILD (slot +0x54), which rewrites the
-	// start pair to min(releaseEpoch, end): the start marches to the last released note.
-	// The pair is also the section window 0x7E9ED0 tests (owner+0x3B0, start at +0x14 =
-	// +0x3C4), so after a loop wrap every note of the new pass sits before the stale start
-	// and answers "outside": the whole highway greys until the first release marches the
-	// start back. Stock never marches it, so nothing native resets it on the wrap.
-	// Verified live 2026-10-19: wrapped pass holding 290.307 with start still 292.724.
-	// Restoring the latched authored start returns the window to its stock value.
-	void RestoreNativeSectionStart(void* owner, const char* reason)
-	{
-		if (!isEpochConfirmed || !hasSectionEndBoundary || owner == nullptr) return;
-		const auto address = reinterpret_cast<uintptr_t>(owner);
-		uintptr_t vtable = 0;
-		float start = 0.0f, startMirror = 0.0f, end = 0.0f;
-		if (!TryRead(address, vtable) || vtable != LAS_OWNER_VTABLE
-			|| !TryRead(address + LAS_SECTION_START, start)
-			|| !TryRead(address + LAS_SECTION_START_MIRROR, startMirror)
-			|| !TryRead(address + LAS_SECTION_END, end))
-		{
-			return;
-		}
-		// Only the march is undone: the end must still be the latched section's end, and the
-		// start must sit inside the section past the latched start.
-		if (std::fabs(end - sectionEndBoundary) > BOUNDARY_EPSILON) return;
-		if (!(start > greyCutoff + BOUNDARY_EPSILON && start < end)) return;
-		const bool wroteStart = TryWriteGameFloat(address + LAS_SECTION_START, greyCutoff);
-		const bool wroteMirror = TryWriteGameFloat(address + LAS_SECTION_START_MIRROR, greyCutoff);
-		LOG_INFO("(NBN LAS WINDOW) Restored the marched native section start "
-			<< std::fixed << std::setprecision(3) << start << "/" << startMirror
-			<< " -> " << greyCutoff << " (end " << end << ", " << reason << "); wrote="
-			<< wroteStart << wroteMirror << "." << std::endl);
-	}
 			gridReadRejectReason = reason.str();
 			return false;
 		}
@@ -7093,6 +7093,9 @@ namespace
 					<< " owned; abandoning the hold without release and re-bootstrapping"
 					<< " in place." << std::endl);
 				SetNativeFreezeFlag(owner, false);
+				// Before the reset clears the latch: the re-latch snaps +0x3C0, and a marched
+				// start would not snap.
+				RestoreNativeSectionStart(owner, "external rollback");
 				ResetBootstrap("an external rollback occurred while a native hold was owned");
 				trackedOwner = owner;
 			}
@@ -7115,6 +7118,7 @@ namespace
 				++epochIndex;
 				ClearSelection();
 				consumedRecords.clear();
+				RestoreNativeSectionStart(owner, "loop wrap");
 				TryWriteDedupeGlobal(-1);
 				LOG_INFO("(NBN LAS BOOTSTRAP) Native epoch restart -> epoch " << epochIndex
 					<< " at updateTime=" << std::fixed << std::setprecision(6) << updateTime
@@ -7335,9 +7339,6 @@ namespace
 		uintptr_t record = 0;
 		float recordTime = 0.0f;
 		if (!TryRead(reinterpret_cast<uintptr_t>(note) + NOTE_RECORD, record) || record == 0
-				// Before the reset clears the latch: the re-latch snaps +0x3C0, and a marched
-				// start would not snap.
-				RestoreNativeSectionStart(owner, "external rollback");
 			|| !TryRead(record + RECORD_TIME, recordTime))
 		{
 			return originalHitDecision(owner, unusedEdx, note);
@@ -7360,7 +7361,6 @@ namespace
 				}
 				return true;
 			}
-				RestoreNativeSectionStart(owner, "loop wrap");
 			if (gatePhase == GatePhase::Armed
 				&& NoteByNote::ShouldBlockPreHoldHitDecision(
 					isFlowUntilMissEnabled, isHoldSuppressed))
