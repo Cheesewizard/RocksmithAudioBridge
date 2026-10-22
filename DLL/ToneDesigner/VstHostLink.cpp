@@ -15,6 +15,7 @@
 #include <atomic>
 #include <thread>
 #include <mutex>
+#include "HostProcessIdentity.hpp"
 #include "ToneGates.hpp"
 
 namespace VstHostLink
@@ -29,6 +30,7 @@ namespace VstHostLink
 		constexpr ULONGLONG kSongPollMs = 500;
 		constexpr ULONGLONG kPrepareDwellMs = 2000;   // a song highlighted this long gets its tone's plugins loaded
 		constexpr ULONGLONG kHungMs = 6000;
+		constexpr wchar_t kHostWindowClass[] = L"RocksmithAudioBridgeVstHostMain";
 
 		HANDLE g_mapping = nullptr;
 		VstHostControl::Shared* g_shared = nullptr;
@@ -64,6 +66,13 @@ namespace VstHostLink
 		// a big plugin loads leaves the note up long after the reload has finished, reading as a broken tone).
 		std::string g_recoveringWhat;
 		ULONGLONG g_recoveringSince = 0;
+		enum class RecoveryResult : int { Idle, Running, Succeeded, Failed };
+		std::atomic<int> g_recoveryResult{ static_cast<int>(RecoveryResult::Idle) };
+		std::atomic<bool> g_recoveryRestart{ false };
+		std::atomic<DWORD> g_recoveryExitedPid{ 0 };
+		std::atomic<DWORD> g_launchError{ 0 };
+		std::mutex g_recoveryLock;
+		std::string g_recoveryError;
 
 		bool g_autoStartChecked = false;
 		bool g_mutedForTuning = false;
@@ -178,6 +187,120 @@ namespace VstHostLink
 			return false;
 		}
 
+		bool ProcessPathMatches(HANDLE process)
+		{
+			return HostProcessIdentity::MatchesProcess(process, HostPath());
+		}
+
+		DWORD VerifiedHostProcess(DWORD preferredPid, bool enumerate)
+		{
+			return HostProcessIdentity::FindProcess(preferredPid, enumerate, HostPath(), kHostWindowClass);
+		}
+
+		bool HostAlive(VstHostControl::Shared* shared);
+		void Launch(const std::wstring& plugin, bool standby = false);
+
+		void PollRecovery()
+		{
+			if (const DWORD launchError = g_launchError.exchange(0))
+			{
+				g_crashNote = "Tone designer could not be started (launch error " + std::to_string(launchError) + ").";
+				LOG_ERROR("(VST HOST) launch failed, error " << launchError << std::endl);
+				g_snapshotAt = 0;
+			}
+			const RecoveryResult result = static_cast<RecoveryResult>(g_recoveryResult.load());
+			if (result == RecoveryResult::Running || result == RecoveryResult::Idle) return;
+			const bool restart = g_recoveryRestart.load();
+			const DWORD exitedPid = g_recoveryExitedPid.exchange(0);
+			g_recoveryResult.store(static_cast<int>(RecoveryResult::Idle));
+			if (result == RecoveryResult::Failed)
+			{
+				std::lock_guard<std::mutex> lock(g_recoveryLock);
+				g_crashNote = g_recoveryError.empty() ? "Tone designer could not be restarted." : g_recoveryError;
+				g_snapshotAt = 0;
+				return;
+			}
+			g_commands.clear();
+			g_sentCommand = 0;
+			g_sentOp = Command::None;
+			g_lastHostBeat = 0;
+			g_hostBeatSeenAt = 0;
+			g_wasRunning = false;
+			g_recoveringSince = 0;
+			if (exitedPid != 0)
+			{
+				if (VstHostControl::Shared* shared = Shared()) InterlockedCompareExchange(&shared->hostPid, 0, static_cast<LONG>(exitedPid));
+			}
+			g_snapshotAt = 0;
+			if (restart)
+			{
+				g_crashNote = "Tone designer restart requested. Your last saved chain will load again.";
+				Launch({});
+			}
+		}
+
+		void BeginRecovery(bool restart, bool allowHealthy)
+		{
+			int expected = static_cast<int>(RecoveryResult::Idle);
+			if (!g_recoveryResult.compare_exchange_strong(expected, static_cast<int>(RecoveryResult::Running))) return;
+			VstHostControl::Shared* shared = Shared();
+			if (!allowHealthy && shared && HostAlive(shared))
+			{
+				std::lock_guard<std::mutex> lock(g_recoveryLock);
+				g_recoveryError = "Tone designer is responding; it was left running.";
+				g_recoveryResult.store(static_cast<int>(RecoveryResult::Failed));
+				return;
+			}
+			g_recoveryRestart.store(restart);
+			const DWORD preferredPid = shared ? static_cast<DWORD>(shared->hostPid) : 0;
+			std::thread([preferredPid]
+			{
+				const DWORD pid = VerifiedHostProcess(preferredPid, true);
+				if (pid == 0)
+				{
+					std::lock_guard<std::mutex> lock(g_recoveryLock);
+					if (HostProcessGone())
+					{
+						LOG_INFO("(VST HOST) recovery found no process and no single-instance mutex; treating host as already gone" << std::endl);
+						g_recoveryResult.store(static_cast<int>(RecoveryResult::Succeeded));
+					}
+					else
+					{
+						g_recoveryError = "Tone designer is still running, but Windows could not identify its process. It could not be restarted.";
+						LOG_ERROR("(VST HOST) recovery failed: no verified process while mutex is held (H001)" << std::endl);
+						g_recoveryResult.store(static_cast<int>(RecoveryResult::Failed));
+					}
+					return;
+				}
+				HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pid);
+				if (!process || !ProcessPathMatches(process))
+				{
+					if (process) CloseHandle(process);
+					std::lock_guard<std::mutex> lock(g_recoveryLock);
+					g_recoveryError = "The Tone designer process changed before it could be safely closed.";
+					LOG_ERROR("(VST HOST) recovery failed: process changed before termination (H002)" << std::endl);
+					g_recoveryResult.store(static_cast<int>(RecoveryResult::Failed));
+					return;
+				}
+				LOG_WARNING("(VST HOST) closing verified unresponsive host" << std::endl);
+				const bool wasGone = WaitForSingleObject(process, 0) == WAIT_OBJECT_0;
+				const bool terminated = wasGone || TerminateProcess(process, 1) != FALSE;
+				const DWORD failure = terminated ? ERROR_SUCCESS : GetLastError();
+				const bool exited = terminated && WaitForSingleObject(process, 5000) == WAIT_OBJECT_0;
+				CloseHandle(process);
+				if (!exited)
+				{
+					std::lock_guard<std::mutex> lock(g_recoveryLock);
+					g_recoveryError = "Tone designer did not exit after the restart was requested.";
+					LOG_ERROR("(VST HOST) recovery failed: verified process did not exit; Win32 error " << failure << std::endl);
+					g_recoveryResult.store(static_cast<int>(RecoveryResult::Failed));
+					return;
+				}
+				g_recoveryExitedPid.store(pid);
+				g_recoveryResult.store(static_cast<int>(RecoveryResult::Succeeded));
+			}).detach();
+		}
+
 		bool HostAlive(VstHostControl::Shared* shared)
 		{
 			const ULONGLONG now = GetTickCount64();
@@ -193,11 +316,26 @@ namespace VstHostLink
 		}
 
 		// standby: start it off (the game's amp plays), only to have the plugins loaded and ready.
-		void Launch(const std::wstring& plugin, bool standby = false)
+		void Launch(const std::wstring& plugin, bool standby)
 		{
 			if (VstHostControl::Shared* shared = Shared()) InterlockedExchange(&shared->quitRequested, 0);
+			const std::wstring executable = HostPath();
 			const std::wstring args = L"--overlay" + std::wstring(standby ? L" --standby" : L"") + (plugin.empty() ? std::wstring() : L" \"" + plugin + L"\"");
-			ShellOpenAsync::Open(HostPath(), args);   // never on the render thread: it took 401 ms there
+			std::thread([executable, args]
+			{
+				std::wstring commandLine = L"\"" + executable + L"\" " + args;
+				STARTUPINFOW startup{ sizeof(startup) };
+				startup.dwFlags = STARTF_USESHOWWINDOW;
+				startup.wShowWindow = SW_SHOWNOACTIVATE;
+				PROCESS_INFORMATION process{};
+				if (!CreateProcessW(executable.c_str(), commandLine.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &startup, &process))
+				{
+					g_launchError.store(GetLastError());
+					return;
+				}
+				CloseHandle(process.hThread);
+				CloseHandle(process.hProcess);
+			}).detach();
 		}
 
 		void Queue(Command op, LONG arg = 0, LONG arg2 = 0, std::wstring text = {})
@@ -922,6 +1060,9 @@ namespace VstHostLink
 				s.standby = s.hostRunning && shared->standby != 0;
 				s.hostHung = !s.hostRunning && shared->hostPid != 0 && shared->loading == 0 && shared->preloading == 0 && !HostProcessGone()
 					&& GetTickCount64() - g_hostBeatSeenAt > kHungMs;
+				s.hostRecovering = g_recoveryResult.load() == static_cast<int>(RecoveryResult::Running);
+				s.hostDisconnected = !s.hostRunning && !s.hostHung
+					&& (!HostProcessGone() || VerifiedHostProcess(static_cast<DWORD>(shared->hostPid), false) != 0);
 				if (s.hostRunning)
 				{
 					const int count = std::clamp(static_cast<int>(shared->slotCount), 0, VstHostControl::kMaxSlots);
@@ -963,6 +1104,7 @@ namespace VstHostLink
 
 	void OnFrame(bool overlayVisible)
 	{
+		PollRecovery();
 		g_overlayVisible = overlayVisible;
 		VstHostControl::Shared* shared = Shared();
 		if (!shared) return;
@@ -1208,8 +1350,17 @@ namespace VstHostLink
 	// A host in standby turns on at once; otherwise a new one starts (on, or in standby).
 	void StartHost(bool standby)
 	{
+		g_crashRestarts.clear();
+		g_crashNote.clear();
+		g_recoveringSince = 0;
 		VstHostControl::Shared* shared = Shared();
 		if (shared && HostAlive(shared)) { if (!standby && shared->standby != 0) Queue(Command::SetStandby, 0); g_snapshotAt = 0; return; }
+		if (!HostProcessGone() || VerifiedHostProcess(shared ? static_cast<DWORD>(shared->hostPid) : 0, false) != 0)
+		{
+			g_crashNote = "Tone designer is already running but is not connected. Use Restart Tone designer to recover it.";
+			g_snapshotAt = 0;
+			return;
+		}
 		Launch({}, standby);
 	}
 
@@ -1227,16 +1378,15 @@ namespace VstHostLink
 
 	void ForceCloseHost()
 	{
-		VstHostControl::Shared* shared = Shared();
-		if (!shared || shared->hostPid == 0) return;
-		if (HANDLE process = OpenProcess(PROCESS_TERMINATE, FALSE, static_cast<DWORD>(shared->hostPid)))
-		{
-			LOG_WARNING("(VST HOST) not answering; closing it by force" << std::endl);
-			TerminateProcess(process, 1);
-			CloseHandle(process);
-		}
-		InterlockedExchange(&shared->hostPid, 0);
-		g_commands.clear();
+		BeginRecovery(false, false);
+	}
+
+	void RestartHost()
+	{
+		g_crashRestarts.clear();
+		g_crashNote.clear();
+		g_recoveringSince = 0;
+		BeginRecovery(true, true);
 	}
 
 	void DismissCrashNote() { g_crashNote.clear(); g_snapshotAt = 0; }

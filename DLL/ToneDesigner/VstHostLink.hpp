@@ -25,6 +25,8 @@ namespace VstHostLink
 		bool hostRunning = false;
 		bool standby = false;         // running but off: the game's amp plays, the plugins stay loaded (TurnOff)
 		bool hostHung = false;        // the process is there but has stopped answering (not while loading)
+		bool hostRecovering = false;
+		bool hostDisconnected = false; // the host executable is present but has no usable shared protocol connection
 		bool busy = false;            // plugins loading, or commands not yet handled
 		std::vector<SlotView> slots;
 		int shownSlot = -1;
@@ -107,6 +109,7 @@ namespace VstHostLink
 	void TurnOff();                      // the power button: standby, plugins kept loaded so turning on is instant
 	void StopHost();                     // closes the host completely (its plugins unload)
 	void ForceCloseHost();               // only for a host that has stopped answering
+	void RestartHost();                  // closes a verified stuck or disconnected host, then starts it again
 	void SetAutoStart(bool on);
 	void SetMuteWhileTuning(bool on);   // the chain goes quiet in the tuner screens
 	void SetPopout(bool wanted);

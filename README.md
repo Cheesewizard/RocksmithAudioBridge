@@ -186,7 +186,9 @@ Works with an ASIO interface and with the Real Tone Cable. With the cable, the
 bridge reads it directly over USB through UsbDk when it can, about 10 ms sooner
 than the Windows cable input, and uses the Windows input otherwise.
 
-**Overlay page:** Amp sim, Tone designer tab.
+**Overlay page:** Amp sim, Tone designer tab. If a plugin stops responding,
+**Restart Tone designer** reloads the last saved chain without restarting the game.
+The restart control remains available while a plugin is loading.
 
 ## External amp
 

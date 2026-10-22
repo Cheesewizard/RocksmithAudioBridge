@@ -2895,13 +2895,34 @@ namespace Overlay
 				EndCard();
 			}
 
+			if (vst.hostRecovering) {
+				BeginCard();
+				Caption("Restarting Tone designer with your saved chain...");
+				EndCard();
+				return;
+			}
 			if (vst.hostHung) {
 				BeginCard();
 				WarnCaption("Tone designer has stopped answering.");
-				if (Button("Force close", false, "Ends it. The game's amp comes back if fallback is on; the chain is as it was at its last autosave."))
-					VstHostLink::ForceCloseHost();
+				if (Button("Restart Tone designer", true, "Closes the verified stuck host and starts Tone designer again."))
+					VstHostLink::RestartHost();
 				EndCard();
 				return;
+			}
+			if (vst.hostDisconnected) {
+				BeginCard();
+				WarnCaption("Tone designer is running but is not connected to the game.");
+				if (Button("Restart Tone designer", true, "Closes the verified disconnected host and starts Tone designer again."))
+					VstHostLink::RestartHost();
+				EndCard();
+				return;
+			}
+			if (vst.hostRunning && (vst.loading || vst.busy)) {
+				BeginCard();
+				WarnCaption("Tone designer is still loading.");
+				if (Button("Restart Tone designer", true, "Stops the current load and starts Tone designer again."))
+					VstHostLink::RestartHost();
+				EndCard();
 			}
 			// Off: either closed, or in standby (the power button), where the host keeps its plugins loaded and goes on
 			// loading the always-loaded ones, so turning it on is instant.

@@ -29,6 +29,7 @@
 #include <TlHelp32.h>
 #include <DbgHelp.h>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <string>
 
@@ -251,43 +252,6 @@ namespace
 		wcsncpy_s(destination, VstHostControl::kPathChars, path.c_str(), _TRUNCATE);
 	}
 
-	// The game's process once found: waiting on its handle costs nothing, where listing every process on the system
-	// (until it is found, or if the handle cannot be opened) costs a kernel walk each time.
-	HANDLE g_gameProcess = nullptr;
-
-	bool RocksmithRunning()
-	{
-		if (g_gameProcess)
-		{
-			if (WaitForSingleObject(g_gameProcess, 0) == WAIT_TIMEOUT) return true;
-			CloseHandle(g_gameProcess);
-			g_gameProcess = nullptr;
-			return false;
-		}
-		HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-		if (snapshot == INVALID_HANDLE_VALUE) return true;   // cannot tell: assume it is, never close by mistake
-		PROCESSENTRY32W entry{ sizeof(entry) };
-		bool found = false;
-		for (BOOL more = Process32FirstW(snapshot, &entry); more && !found; more = Process32NextW(snapshot, &entry))
-			found = _wcsicmp(entry.szExeFile, L"Rocksmith2014.exe") == 0;
-		CloseHandle(snapshot);
-		if (found) g_gameProcess = OpenProcess(SYNCHRONIZE, FALSE, entry.th32ProcessID);
-		return found;
-	}
-
-	// The host is the game's companion: once it has seen Rocksmith, it closes (saving the chain) when the game
-	// does, instead of staying behind with nothing to play and its exe locked. Started by hand with no game, it
-	// stays until closed. Checked every 2 s.
-	bool GameClosed()
-	{
-		static bool seen = false;
-		static int tick = 0;
-		if (++tick % 4 != 0) return false;
-		const bool running = RocksmithRunning();
-		seen = seen || running;
-		return seen && !running;
-	}
-
 	bool IsRocksmithProcess(DWORD pid)
 	{
 		HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
@@ -299,6 +263,73 @@ namespace
 		if (!ok) return false;
 		const wchar_t* name = wcsrchr(path, L'\\');
 		return _wcsicmp(name ? name + 1 : path, L"Rocksmith2014.exe") == 0;
+	}
+
+	// ---- Closing with the game --------------------------------------------------------------------------------
+	// The host is the game's companion: once it has seen Rocksmith, it closes (saving the chain) when the game does.
+	// The game starts it, so Steam counts it as part of the game: a host left behind keeps Steam showing Rocksmith
+	// as running. This used to be a 2 s check on the window thread's timer, which asked for WM_CLOSE and then
+	// trusted the close to finish; when it did not (a plugin's teardown or its DLL unloading at exit can hang, as
+	// can a window thread already stuck in a plugin), the host stayed. Now a thread of its own waits on the game's
+	// process, asks the window thread to close, and ends the process itself if the close does not finish in time.
+	// Started by hand with no game, the host stays until closed.
+	std::atomic<bool> g_closeHandled{ false };   // the window thread runs its timers, so it handles WM_CLOSE
+	std::atomic<bool> g_chainSaved{ false };     // WM_CLOSE saved the chain; only teardown is left
+	constexpr ULONGLONG kCloseSaveMs = 30000;     // a heavy chain's plugin states can take many seconds to save
+	constexpr ULONGLONG kCloseTeardownMs = 5000;  // after the save: releasing the plugins and the audio link
+
+	DWORD ParentProcessId()
+	{
+		HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+		if (snapshot == INVALID_HANDLE_VALUE) return 0;
+		PROCESSENTRY32W entry{ sizeof(entry) };
+		DWORD parent = 0;
+		for (BOOL more = Process32FirstW(snapshot, &entry); more; more = Process32NextW(snapshot, &entry))
+			if (entry.th32ProcessID == GetCurrentProcessId()) { parent = entry.th32ParentProcessID; break; }
+		CloseHandle(snapshot);
+		return parent;
+	}
+
+	// The game's process: the parent when the overlay started the host (its ShellExecute runs in the game), else
+	// the first Rocksmith2014.exe running.
+	HANDLE OpenGameProcess()
+	{
+		const DWORD parent = ParentProcessId();
+		if (parent && IsRocksmithProcess(parent))
+			if (HANDLE game = OpenProcess(SYNCHRONIZE, FALSE, parent)) return game;
+		HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+		if (snapshot == INVALID_HANDLE_VALUE) return nullptr;
+		PROCESSENTRY32W entry{ sizeof(entry) };
+		HANDLE game = nullptr;
+		for (BOOL more = Process32FirstW(snapshot, &entry); more && !game; more = Process32NextW(snapshot, &entry))
+			if (_wcsicmp(entry.szExeFile, L"Rocksmith2014.exe") == 0) game = OpenProcess(SYNCHRONIZE, FALSE, entry.th32ProcessID);
+		CloseHandle(snapshot);
+		return game;
+	}
+
+	DWORD WINAPI WatchGame(void*)
+	{
+		HANDLE game = nullptr;
+		while (!(game = OpenGameProcess())) Sleep(2000);
+		WaitForSingleObject(game, INFINITE);
+		CloseHandle(game);
+		Log("host: Rocksmith has closed, closing too");
+		// Still restoring the chain (no timers yet): nothing has changed that needs saving.
+		if (!g_closeHandled) { Log("host: closed while starting"); TerminateProcess(GetCurrentProcess(), 0); }
+		PostMessageW(g_main, WM_CLOSE, 0, 0);
+		const ULONGLONG start = GetTickCount64();
+		ULONGLONG savedAt = 0;
+		for (;;)
+		{
+			Sleep(100);
+			const ULONGLONG now = GetTickCount64();
+			if (g_chainSaved && savedAt == 0) savedAt = now;
+			if (savedAt ? now - savedAt >= kCloseTeardownMs : now - start >= kCloseSaveMs) break;
+		}
+		Log(savedAt ? "host: saved, but releasing the plugins did not finish; ending the process"
+			: "host: the chain did not save in time; ending the process");
+		TerminateProcess(GetCurrentProcess(), 0);
+		return 0;
 	}
 
 	// The game's main window: its largest visible top-level window.
@@ -1090,12 +1121,6 @@ namespace
 			}
 			if (g_control) InterlockedIncrement(&g_control->hostBeat);
 			InstallCrashReporter();   // a plugin may have replaced it with its own
-			if (GameClosed())
-			{
-				Log("host: Rocksmith has closed, closing too");
-				PostMessageW(window, WM_CLOSE, 0, 0);
-				return 0;
-			}
 			if (g_chain.TakeRestartRequest() && !g_standby) StartAudio(window);
 			if (g_ticks % 4 == 0) RefreshKeepSettings();
 			PreloadStep();
@@ -1111,6 +1136,7 @@ namespace
 			KillTimer(window, kHousekeepingTimer);
 			g_audio.Stop();
 			SaveCurrentChain();
+			g_chainSaved = true;     // WatchGame: only teardown is left
 			RememberOpenWindows();   // reopened next time
 			CloseAllWindows();
 			DestroyWindow(window);
@@ -1371,6 +1397,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 		InterlockedIncrement(&g_control->hostBeat);
 		InterlockedExchange(&g_control->hostPid, static_cast<LONG>(GetCurrentProcessId()));
 	}
+	// Before the chain restores: a game that closes meanwhile ends a host that is still loading.
+	if (HANDLE watcher = CreateThread(nullptr, 0, WatchGame, nullptr, 0, nullptr)) CloseHandle(watcher);
 	g_chain.SetLoadReporter(ReportLoading);
 	// A starred plugin that took the host down while it loaded in the background (PreloadStep) is not tried again.
 	if (const std::wstring crashed = ReadString(L"PreloadingNow"); !crashed.empty())
@@ -1439,6 +1467,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 	UpdateWindows();
 	SetTimer(g_main, kHousekeepingTimer, kHousekeepingMs, nullptr);
 	SetTimer(g_main, kKeyTimer, kKeyMs, nullptr);
+	g_closeHandled = true;
 
 	MSG message;
 	while (GetMessageW(&message, nullptr, 0, 0) > 0)

@@ -312,6 +312,7 @@
     <ClInclude Include="ExternalAmp\ExternalAmp.hpp" />
     <ClInclude Include="ToneDesigner\VstHostLink.hpp" />
     <ClInclude Include="ToneDesigner\ToneGates.hpp" />
+    <ClInclude Include="ToneDesigner\HostProcessIdentity.hpp" />
     <ClInclude Include="ToneDesigner\ToneSwitchPopup.hpp" />
     <ClInclude Include="ExternalAmp\CableAmpLink.hpp" />
     <ClInclude Include="Core\RsModsHelper.hpp" />
