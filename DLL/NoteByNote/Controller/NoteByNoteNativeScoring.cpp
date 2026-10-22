@@ -23,6 +23,8 @@
 #include "NoteByNote/Detection/ArrangementInstrument.hpp"
 #include "NoteByNote/Detection/FlowSpeedCap.hpp"
 #include "NoteByNoteNativeScoring.hpp"
+#include "NoteByNote/Controller/TablaturePreviewData.hpp"
+#include "NoteByNote/Controller/AuthoredTablatureReader.hpp"
 #include "NoteByNoteScoringCore.hpp"
 
 #define NOMINMAX
@@ -315,6 +317,30 @@ namespace
 	};
 
 	std::recursive_mutex controllerMutex;
+	std::atomic<bool> tablaturePreviewDemand{ false };
+	std::vector<ResearchProtocol::PreviewEvent> tablaturePreviewEvents;
+	std::unordered_map<uintptr_t, uint64_t> tablaturePreviewRecordIds;
+	ResearchProtocol::PreviewState tablaturePreviewState = {};
+	bool tablaturePreviewCacheValid = false;
+	void* tablaturePreviewOwner = nullptr;
+	uintptr_t tablaturePreviewContainer = 0;
+	uint64_t tablaturePreviewEpoch = 0;
+	uint64_t tablaturePreviewSignature = 0;
+	std::chrono::steady_clock::time_point tablaturePreviewValidatedAt{};
+	// A failed build is not retried for a second: the window requests data every
+	// frame and an error clears the cache, so without this a bad chart reread the
+	// whole arrangement on the scoring thread every frame.
+	bool tablaturePreviewHasFailure = false;
+	std::chrono::steady_clock::time_point tablaturePreviewFailedAt{};
+	// Last target record resolved to a tab event, so the per-frame copy does not
+	// reread the record's time once it has been matched.
+	uintptr_t tablatureResolvedRecord = 0;
+	uint64_t tablatureResolvedGeneration = 0;
+	uint64_t tablatureResolvedId = 0;
+	// Level mode the window asked for (100% or the player's current level) and
+	// the mode of the cached snapshot.
+	std::atomic<uint8_t> tablaturePreviewRequestedMode{ ResearchProtocol::TAB_PREVIEW_LEVEL_CURRENT };
+	uint8_t tablaturePreviewMode = ResearchProtocol::TAB_PREVIEW_LEVEL_MAXIMUM;
 	bool isInitialized = false;
 	void* trackedOwner = nullptr;
 	float lastUpdateTime = 0.0f;
@@ -371,6 +397,10 @@ namespace
 	uintptr_t nextNoteMidiRecord = 0;
 	int nextNoteMidi = -1;
 	constexpr float SAME_TIME_GROUP_EPSILON_SECONDS = 0.002f;
+	// Lower difficulty levels reuse the authored beat times of the hardest
+	// level, so a matching event is normally within the grouping epsilon; the
+	// wider window still follows when a reduced level shifts a note slightly.
+	constexpr float TABLATURE_TARGET_TIME_TOLERANCE_SECONDS = 0.25f;
 	constexpr uint32_t SAME_TIME_SIBLING_CONFIRM_TICKS = 2;
 	uintptr_t sameTimeTrackedRecord = 0;
 	float sameTimeGroupTime = -1.0f;
@@ -654,6 +684,39 @@ namespace
 		value = *reinterpret_cast<const T*>(address);
 		return true;
 	}
+
+	// Copies a block that may span several committed regions. One VirtualQuery
+	// per region instead of one per field keeps whole-arrangement reads cheap.
+	bool TryReadBytes(uintptr_t address, void* destination, size_t size)
+	{
+		if (address == 0 || destination == nullptr || size > UINTPTR_MAX - address) return false;
+		uintptr_t cursor = address;
+		const uintptr_t end = address + size;
+		while (cursor < end)
+		{
+			MEMORY_BASIC_INFORMATION memory = {};
+			if (VirtualQuery(reinterpret_cast<void*>(cursor), &memory, sizeof(memory)) == 0) return false;
+			if (memory.State != MEM_COMMIT
+				|| (memory.Protect & PAGE_GUARD) != 0
+				|| (memory.Protect & PAGE_NOACCESS) != 0)
+			{
+				return false;
+			}
+			const uintptr_t regionEnd = reinterpret_cast<uintptr_t>(memory.BaseAddress) + memory.RegionSize;
+			if (regionEnd <= cursor) return false;
+			cursor = regionEnd < end ? regionEnd : end;
+		}
+		std::memcpy(destination, reinterpret_cast<const void*>(address), size);
+		return true;
+	}
+
+	struct GameMemoryReader
+	{
+		template <typename T>
+		bool operator()(uintptr_t address, T& value) const { return TryRead(address, value); }
+		bool ReadBytes(uintptr_t address, void* destination, size_t size) const { return TryReadBytes(address, destination, size); }
+	};
+
 	bool TryWriteDedupeGlobal(int32_t value) noexcept
 	{
 		__try
@@ -2804,6 +2867,184 @@ namespace
 		return true;
 	}
 
+	void InvalidateTablaturePreview()
+	{
+		const uint64_t previousGeneration = tablaturePreviewState.generation;
+		tablaturePreviewCacheValid = false;
+		tablaturePreviewOwner = nullptr;
+		tablaturePreviewContainer = 0;
+		tablaturePreviewEpoch = 0;
+		tablaturePreviewSignature = 0;
+		tablaturePreviewValidatedAt = {};
+		tablaturePreviewEvents.clear();
+		tablaturePreviewRecordIds.clear();
+		tablaturePreviewState = {};
+		tablaturePreviewState.generation = previousGeneration + 1;
+		tablaturePreviewState.stringCount = 6;
+		strncpy_s(tablaturePreviewState.error, "No authored tablature snapshot is available.", _TRUNCATE);
+	}
+
+	void ReportTablaturePreviewError(const char* message)
+	{
+		static std::string lastError;
+		if (lastError != message)
+		{
+			LOG_ERROR("(NBN TAB) " << message << std::endl);
+			lastError = message;
+		}
+		InvalidateTablaturePreview();
+		strncpy_s(tablaturePreviewState.error, message, _TRUNCATE);
+		tablaturePreviewHasFailure = true;
+		tablaturePreviewFailedAt = std::chrono::steady_clock::now();
+	}
+
+	// The tab is built from each phrase's hardest level, so a target at a lower
+	// difficulty has a record address the tab does not contain. Fall back to the
+	// tab event nearest the target's authored time.
+	uint64_t ResolveTablatureTargetId()
+	{
+		if (selectedRecord == 0) return 0;
+		const auto exact = tablaturePreviewRecordIds.find(selectedRecord);
+		if (exact != tablaturePreviewRecordIds.end()) return exact->second;
+		if (tablatureResolvedRecord == selectedRecord && tablatureResolvedGeneration == tablaturePreviewState.generation)
+			return tablatureResolvedId;
+		float time = 0.0f;
+		const uint64_t id = TryRead(selectedRecord + RECORD_TIME, time) && std::isfinite(time)
+			? NoteByNote::Controller::FindTablatureEventNearTime(tablaturePreviewEvents, time, TABLATURE_TARGET_TIME_TOLERANCE_SECONDS)
+			: 0;
+		tablatureResolvedRecord = selectedRecord;
+		tablatureResolvedGeneration = tablaturePreviewState.generation;
+		tablatureResolvedId = id;
+		return id;
+	}
+
+	void BuildTablaturePreview(void* owner)
+	{
+		if (tablaturePreviewHasFailure
+			&& std::chrono::steady_clock::now() - tablaturePreviewFailedAt < std::chrono::seconds(1)) return;
+		uintptr_t container = 0;
+		if (owner == nullptr
+			|| !TryRead(reinterpret_cast<uintptr_t>(owner) + LAS_PHRASE_SECTION_CONTAINER, container)
+			|| container == 0)
+		{
+			ReportTablaturePreviewError("The song's authored arrangement is unavailable.");
+			return;
+		}
+		const auto now = std::chrono::steady_clock::now();
+		const bool sameArrangement = tablaturePreviewCacheValid
+			&& tablaturePreviewOwner == owner
+			&& tablaturePreviewContainer == container
+			&& tablaturePreviewEpoch == epochIndex;
+		const uint8_t mode = tablaturePreviewRequestedMode.load();
+		const bool sameMode = tablaturePreviewMode == mode;
+		if (sameArrangement && sameMode && now - tablaturePreviewValidatedAt < std::chrono::seconds(1)) return;
+		const GameMemoryReader read;
+		std::string error;
+		uint64_t signature = 0;
+		if (!NoteByNote::Controller::ReadAuthoredTablatureIdentity(container, read, signature, error))
+		{
+			ReportTablaturePreviewError(error.c_str());
+			return;
+		}
+		// Current mode: Dynamic Difficulty and the Riff Repeater slider change the
+		// per-phrase levels at runtime, so they are part of the cache signature.
+		std::vector<int32_t> currentLevels;
+		bool currentLevelsRead = false;
+		if (mode == ResearchProtocol::TAB_PREVIEW_LEVEL_CURRENT)
+		{
+			std::string levelError;
+			currentLevelsRead = NoteByNote::Controller::ReadCurrentIterationLevels(
+				reinterpret_cast<uintptr_t>(owner), read, currentLevels, levelError);
+			static std::string lastLevelError;
+			if (!currentLevelsRead && levelError != lastLevelError)
+				LOG_WARNING("(NBN TAB) Current phrase levels unavailable (" << levelError << "); showing 100% levels." << std::endl);
+			lastLevelError = currentLevelsRead ? std::string() : levelError;
+			for (const int32_t level : currentLevels)
+			{
+				signature ^= static_cast<uint32_t>(level);
+				signature *= 1099511628211ull;
+			}
+		}
+		signature ^= mode;
+		signature *= 1099511628211ull;
+		tablaturePreviewValidatedAt = now;
+		if (sameArrangement && sameMode && signature == tablaturePreviewSignature) return;
+		std::vector<ResearchProtocol::PreviewEvent> events;
+		NoteByNote::Controller::TablatureLevelRequest levelRequest;
+		levelRequest.iterationLevels = currentLevelsRead ? &currentLevels : nullptr;
+		levelRequest.observedRecord = currentLevelsRead ? selectedRecord : 0;
+		NoteByNote::Controller::TablatureLevelResult levelResult;
+		if (!NoteByNote::Controller::BuildAuthoredTablatureEvents(container, read, events, error, levelRequest, &levelResult))
+		{
+			ReportTablaturePreviewError(error.c_str());
+			return;
+		}
+		if (currentLevelsRead && !levelResult.usedIterationLevels)
+			LOG_WARNING("(NBN TAB) Difficulty state has " << currentLevels.size()
+				<< " phrase entries, which does not match the arrangement; showing 100% levels." << std::endl);
+		if (levelResult.observedDisagreed)
+			LOG_WARNING("(NBN TAB) Difficulty state disagrees with the target note's level for phrase iteration "
+				<< levelResult.observedIteration << " (target is on level " << levelResult.observedLevel
+				<< "); using the target's level there." << std::endl);
+		NoteByNote::Controller::GroupTablatureEvents(events, tablaturePreviewRecordIds, SAME_TIME_GROUP_EPSILON_SECONDS);
+		tablaturePreviewEvents = std::move(events);
+		tablaturePreviewOwner = owner;
+		tablaturePreviewContainer = container;
+		tablaturePreviewEpoch = epochIndex;
+		tablaturePreviewSignature = signature;
+		tablaturePreviewMode = mode;
+		tablaturePreviewValidatedAt = std::chrono::steady_clock::now();
+		tablaturePreviewCacheValid = true;
+		tablaturePreviewHasFailure = false;
+		tablaturePreviewState.levelMode = mode;
+		tablaturePreviewState.currentLevelsRead = levelResult.usedIterationLevels ? 1 : 0;
+		tablaturePreviewState.iterationsBelowMax = levelResult.iterationsBelowMax;
+		{
+			std::vector<float> sectionStarts;
+			std::string sectionError;
+			if (!NoteByNote::Controller::ReadSectionStarts(container, read, sectionStarts, sectionError))
+				LOG_WARNING("(NBN TAB) Section lines unavailable: " << sectionError << std::endl);
+			const uint32_t count = static_cast<uint32_t>((std::min)(sectionStarts.size(),
+				static_cast<size_t>(ResearchProtocol::PreviewState::MaxSections)));
+			tablaturePreviewState.sectionCount = count;
+			for (uint32_t index = 0; index < count; ++index) tablaturePreviewState.sectionStarts[index] = sectionStarts[index];
+		}
+		{
+			std::vector<std::pair<float, int32_t>> measures;
+			std::string barError;
+			if (!NoteByNote::Controller::ReadMeasureStarts(container, read, measures, barError))
+				LOG_WARNING("(NBN TAB) Bar lines unavailable: " << barError << std::endl);
+			const uint32_t count = static_cast<uint32_t>((std::min)(measures.size(),
+				static_cast<size_t>(ResearchProtocol::PreviewState::MaxBars)));
+			tablaturePreviewState.barCount = count;
+			for (uint32_t index = 0; index < count; ++index)
+			{
+				tablaturePreviewState.barStarts[index] = measures[index].first;
+				tablaturePreviewState.barNumbers[index] = measures[index].second;
+			}
+		}
+		tablaturePreviewState.arrangementKey = (static_cast<uint64_t>(container) << 32) ^ epochIndex;
+		++tablaturePreviewState.generation;
+		tablaturePreviewState.eventCount = static_cast<uint32_t>(tablaturePreviewEvents.size());
+		tablaturePreviewState.currentTargetId = ResolveTablatureTargetId();
+		tablaturePreviewState.available = 1;
+		tablaturePreviewState.error[0] = '\0';
+		LOG_INFO("(NBN TAB) Cached full arrangement: " << tablaturePreviewEvents.size()
+			<< " events, " << (tablaturePreviewEvents.empty() ? 0.0f : tablaturePreviewEvents.front().time)
+			<< ".." << (tablaturePreviewEvents.empty() ? 0.0f : tablaturePreviewEvents.back().time)
+			<< " seconds, " << (mode == ResearchProtocol::TAB_PREVIEW_LEVEL_CURRENT
+				? (levelResult.usedIterationLevels ? "current levels" : "current levels unavailable, 100% levels")
+				: "100% levels")
+			<< ", " << levelResult.rejectedLevels << " out-of-range level(s)." << std::endl);
+		tablaturePreviewState.stringCount = IsBassArrangement() ? 4u : 6u;
+		for (uint32_t index = 0; index < tablaturePreviewState.stringCount; ++index)
+		{
+			int16_t tuningOffset = 0;
+			if (TryRead(TUNING_OFFSETS + static_cast<uintptr_t>(index) * 2, tuningOffset))
+				tablaturePreviewState.tuningOffsets[index] = tuningOffset;
+		}
+	}
+
 
 	int NextSingleNoteMidi()
 	{
@@ -4437,6 +4678,7 @@ namespace
 	}
 	void ResetBootstrap(const char* reason, void* liveOwner = nullptr, bool releaseStoppedMusic = false)
 	{
+		InvalidateTablaturePreview();
 		if (releaseStoppedMusic && musicStoppedByHold && liveOwner != nullptr)
 		{
 			LOG_ERROR("(NBN LAS LIFECYCLE) Resuming the music the hold stopped before resetting (" << reason << ")." << std::endl);
@@ -8140,6 +8382,8 @@ bool NoteByNoteNativeScoring::GetChordWindowSlideEnabled()
 void NoteByNoteNativeScoring::Shutdown()
 {
 	std::lock_guard<std::recursive_mutex> lock(controllerMutex);
+	tablaturePreviewDemand.store(false);
+	InvalidateTablaturePreview();
 	ClearSelection();
 	ResetBootstrap("the reloadable controller is shutting down");
 	originalScoringUpdate = nullptr;
@@ -8155,6 +8399,22 @@ void NoteByNoteNativeScoring::ProcessScoringUpdate(
 	if (original == nullptr) return;
 	originalScoringUpdate = reinterpret_cast<ScoringUpdateFn>(original);
 	ScoringUpdateDetour(owner, updateTime);
+	if (tablaturePreviewDemand.exchange(false))
+	{
+		std::lock_guard<std::recursive_mutex> lock(controllerMutex);
+		if (ResearchProbeRuntime::IsNoteByNoteEnabled() && owner == trackedOwner)
+		{
+			BuildTablaturePreview(owner);
+			// The loop range moves whenever the player changes the Riff Repeater
+			// section, so it is read every frame rather than with the snapshot.
+			float loopStart = 0.0f;
+			float loopEnd = 0.0f;
+			const bool loopValid = TryReadNativeSectionRange(owner, loopStart, loopEnd);
+			tablaturePreviewState.loopValid = loopValid ? 1 : 0;
+			tablaturePreviewState.loopStart = loopValid ? loopStart : 0.0f;
+			tablaturePreviewState.loopEnd = loopValid ? loopEnd : 0.0f;
+		}
+	}
 }
 
 bool NoteByNoteNativeScoring::ProcessHitDecision(
@@ -8285,6 +8545,27 @@ ResearchProtocol::NoteByNoteState NoteByNoteNativeScoring::GetResearchState()
 	return state;
 }
 
+uint8_t NoteByNoteNativeScoring::CopyTablaturePreview(
+	ResearchProtocol::PreviewEvent* events,
+	uint32_t capacity,
+	ResearchProtocol::PreviewState* state)
+{
+	if (state == nullptr) return 0;
+	std::lock_guard<std::recursive_mutex> lock(controllerMutex);
+	if (state->levelMode == ResearchProtocol::TAB_PREVIEW_LEVEL_MAXIMUM
+		|| state->levelMode == ResearchProtocol::TAB_PREVIEW_LEVEL_CURRENT)
+		tablaturePreviewRequestedMode.store(state->levelMode);
+	tablaturePreviewDemand.store(true);
+	*state = tablaturePreviewState;
+	state->currentTargetId = tablaturePreviewCacheValid ? ResolveTablatureTargetId() : 0;
+	const uint32_t total = static_cast<uint32_t>(tablaturePreviewEvents.size());
+	state->eventCount = total;
+	if (events == nullptr || capacity == 0) return 1;
+	if (capacity < total) return 0;
+	for (uint32_t index = 0; index < total; ++index) events[index] = tablaturePreviewEvents[index];
+	return 1;
+}
+
 void NoteByNoteScoringCore::ObserveRenderedAttack(
 	const NoteByNoteProbe::NativeRenderedAttack& attack)
 {
@@ -8311,6 +8592,8 @@ void NoteByNoteScoringCore::ObserveRenderedAttack(
 void NoteByNoteScoringCore::Stop()
 {
 	std::lock_guard<std::recursive_mutex> lock(controllerMutex);
+	InvalidateTablaturePreview();
+	tablaturePreviewDemand.store(false);
 	detectionFeedback = {};
 	mlRescueRecord = 0;
 	enhancedRescueFeedback = {};

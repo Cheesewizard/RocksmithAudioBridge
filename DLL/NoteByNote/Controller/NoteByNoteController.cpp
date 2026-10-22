@@ -113,6 +113,14 @@ namespace
 		*state = NoteByNoteNativeScoring::GetResearchState();
 		return 1;
 	}
+
+	uint8_t __cdecl CopyTablaturePreview(
+		ResearchProtocol::PreviewEvent* events,
+		uint32_t capacity,
+		ResearchProtocol::PreviewState* state)
+	{
+		return NoteByNoteNativeScoring::CopyTablaturePreview(events, capacity, state);
+	}
 	namespace StoppedPreviewFilter
 	{
 		void RestorePending();
@@ -844,7 +852,8 @@ namespace
 		&ObserveNeckPlacementStep,
 		nullptr,
 		&RequestReArmProbe,
-		&DescribeSelectedChordFingering
+		&DescribeSelectedChordFingering,
+		&CopyTablaturePreview
 	};
 }
 

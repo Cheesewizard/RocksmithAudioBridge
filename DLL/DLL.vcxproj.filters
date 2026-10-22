@@ -297,6 +297,12 @@
     <ClCompile Include="NoteByNote\Ui\NoteByNoteMenu.cpp">
       <Filter>NoteByNote\Ui</Filter>
     </ClCompile>
+    <ClCompile Include="NoteByNote\Ui\TablatureRenderer.cpp">
+      <Filter>NoteByNote\Ui</Filter>
+    </ClCompile>
+    <ClCompile Include="NoteByNote\Ui\TablaturePreviewWindow.cpp">
+      <Filter>NoteByNote\Ui</Filter>
+    </ClCompile>
     <ClCompile Include="NoteByNote\Ui\NoteByNoteHudLabel.cpp">
       <Filter>NoteByNote\Ui</Filter>
     </ClCompile>
@@ -649,6 +655,18 @@
 	</ClInclude>
     <ClInclude Include="NoteByNote\Ui\NoteByNoteMenu.hpp">
       <Filter>NoteByNote\Ui</Filter>
+    </ClInclude>
+    <ClInclude Include="NoteByNote\Ui\TablatureRenderer.hpp">
+      <Filter>NoteByNote\Ui</Filter>
+    </ClInclude>
+    <ClInclude Include="NoteByNote\Ui\TablaturePreviewWindow.hpp">
+      <Filter>NoteByNote\Ui</Filter>
+    </ClInclude>
+    <ClInclude Include="NoteByNote\Controller\TablaturePreviewData.hpp">
+      <Filter>NoteByNote\Controller</Filter>
+    </ClInclude>
+    <ClInclude Include="NoteByNote\Protocol\TablaturePreview.hpp">
+      <Filter>NoteByNote\Protocol</Filter>
     </ClInclude>
     <ClInclude Include="NoteByNote\Ui\NoteByNoteHudLabel.hpp">
       <Filter>NoteByNote\Ui</Filter>

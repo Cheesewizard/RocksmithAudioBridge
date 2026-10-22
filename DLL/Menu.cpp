@@ -9,6 +9,7 @@
 #include "ToneDesigner/ToneBackup.hpp"
 #include "GameState.hpp"
 #include "Overlay/OverlayUi.hpp"
+#include "NoteByNote/Ui/TablaturePreviewWindow.hpp"
 
 namespace Menu {
 	void GenerateTestingTextures(IDirect3DDevice9* pDevice) {
@@ -71,7 +72,7 @@ namespace Menu {
 
 		// Rocksmith hides the OS cursor in-song, so draw a software cursor while a panel is open (only then,
 		// so gameplay is untouched otherwise). This is what makes the overlay clickable over the game.
-		ImGui::GetIO().MouseDrawCursor = Menu::menuEnabled || Menu::audioBridgeMenuEnabled;
+		ImGui::GetIO().MouseDrawCursor = Menu::menuEnabled || Menu::audioBridgeMenuEnabled || NoteByNote::Ui::IsTablaturePreviewVisible();
 
 		ImGui_ImplDX9_NewFrame();
 		ImGui_ImplWin32_NewFrame();
@@ -95,6 +96,7 @@ namespace Menu {
 		QueryPerformanceCounter(&start);
 		if (Menu::audioBridgeMenuEnabled)
 			Overlay::DrawShell(&Menu::audioBridgeMenuEnabled);
+		NoteByNote::Ui::DrawTablaturePreview();
 		QueryPerformanceCounter(&drawn);
 		VstHostLink::OnFrame(Menu::audioBridgeMenuEnabled);   // the VST host's plugin windows show only with the overlay
 		ToneBackup::OnFrame(GameState::GameLoaded);           // the daily backup, and a restore's steps
@@ -142,6 +144,7 @@ namespace Menu {
 		ImFont* font = io.Fonts->AddFontFromMemoryCompressedTTF(RobotoFont_data, RobotoFont_size, 20);
 		io.FontDefault = font;
 		Overlay::LoadFonts(io);   // overlay body/caption/heading/icon fonts; must precede the first NewFrame
+		Overlay::ApplyTheme();
 
 		// Hook WndProc (Keypress manager)
 		D3DDEVICE_CREATION_PARAMETERS d3dcp;

@@ -3,11 +3,13 @@
 #include <cstddef>
 #include <cstdint>
 #include "NoteByNote/Protocol/NoteByNoteTypes.hpp"
+#include "NoteByNote/Protocol/TablaturePreview.hpp"
 
 namespace ResearchProtocol
 {
-	constexpr uint32_t PROBE_API_VERSION = 13;
-	constexpr uint32_t PROBE_API_MIN_VERSION = 13;
+	constexpr uint32_t PROBE_API_VERSION = 17;
+	constexpr uint32_t PROBE_API_MIN_VERSION = 14;
+
 	constexpr uint32_t NECK_PLACEMENT_STEP_PRE = 0x100;
 	struct HookRequest
 	{
@@ -61,6 +63,8 @@ namespace ResearchProtocol
 		void(__cdecl* RequestReArm)() = nullptr;
 		uint8_t(__cdecl* DescribeSelectedChordFingering)(uintptr_t record, char* buffer,
 			uint32_t bufferLength, int32_t* lowestPlayedString) = nullptr;
+		uint8_t(__cdecl* CopyTablaturePreview)(PreviewEvent* events, uint32_t capacity,
+			PreviewState* state) = nullptr;
 	};
 	constexpr size_t REQUIRED_PROBE_API_SIZE = offsetof(ProbeApi, GetRequestedHooks);
 

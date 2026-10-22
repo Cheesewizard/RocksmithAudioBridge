@@ -35,10 +35,13 @@ namespace Settings {
 	int GetNoteByNoteLineSpacing();
 	bool SetNoteByNoteLineSpacing(int percent, bool persist);
 	// How the target is written: Detailed "low E string, fret 7 (B)", Simple "7" / "7 half bend" beside the string
-	// colour (chords keep their fingering), or Tab, a six-line tab with the fret(s) on their strings.
-	enum class NoteByNoteTargetStyle { Detailed, Simple, Tab };
+	// colour (chords keep their fingering), Tab for the current gesture, or TabTimeline for the scrollable song tab.
+	enum class NoteByNoteTargetStyle { Detailed, Simple, Tab, TabTimeline };
 	NoteByNoteTargetStyle GetNoteByNoteTargetStyle();
 	bool SetNoteByNoteTargetStyle(NoteByNoteTargetStyle style);
+	// Look ahead tab window: docked across the top of the screen instead of floating.
+	bool GetNoteByNoteTabDocked();
+	bool SetNoteByNoteTabDocked(bool docked);
 
 	// Drop Pedal settings edited from the in-game overlay: updates the live value (a runtime override read through ReturnSettingValue, never the shared map; what the
 	// DLL reads) and, when persist is true, the [Drop Pedal] iniKey in RSMods.ini. The caller reloads the feature.

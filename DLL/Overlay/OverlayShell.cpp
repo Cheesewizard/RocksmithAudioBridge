@@ -342,9 +342,9 @@ namespace Overlay
 				Settings::SetNoteByNoteTargetSize(static_cast<int>(targetSize + 0.5f), false);
 			if (committed) Settings::SetNoteByNoteTargetSize(static_cast<int>(targetSize + 0.5f), true);
 
-			static const char* const styles[] = { "Detailed", "Simple", "Tab" };
+			static const char* const styles[] = { "Detailed", "Simple", "Tab", "Look ahead" };
 			int style = static_cast<int>(Settings::GetNoteByNoteTargetStyle());
-			if (SegmentedRow("Style", &style, styles, 3, "Detailed names the string, fret and note. Simple shows just the fret next to the string colour, plus the bend (half bend, full bend). Tab draws a six-line tab with the fret on its string, chords included."))
+			if (SegmentedRow("Style", &style, styles, 4, "Detailed names the string, fret and note. Simple shows just the fret next to the string colour, plus the bend (half bend, full bend). Tab shows the current note or chord. Look ahead opens a resizable song tab; scrolling never changes the current target."))
 				Settings::SetNoteByNoteTargetStyle(static_cast<Settings::NoteByNoteTargetStyle>(style));
 
 			// Custom is the only draggable position. Its spot is remembered while Under readout or Center is chosen,
@@ -353,6 +353,7 @@ namespace Overlay
 			static const char* const positions[] = { "Under readout", "Center", "Custom" };
 			const Position current = Settings::GetNoteByNoteTargetPosition();
 			int position = current == Position::Custom ? 2 : current == Position::Center ? 1 : 0;
+			ImGui::BeginDisabled(style == static_cast<int>(Settings::NoteByNoteTargetStyle::TabTimeline));
 			if (SegmentedRow("Position", &position, positions, 3, "Under readout stacks it below the detection lines. Center puts it near the gameplay area. Custom is wherever you drag it, and is remembered.")) {
 				if (position == 2 && !Settings::GetNoteByNoteHudPlacement(Block::Target).IsSet()) {
 					// First time in Custom: start from where the target is drawn now.
@@ -362,6 +363,9 @@ namespace Overlay
 				}
 				Settings::SetNoteByNoteTargetPosition(position == 2 ? Position::Custom : position == 1 ? Position::Center : Position::Left);
 			}
+			ImGui::EndDisabled();
+			if (style == static_cast<int>(Settings::NoteByNoteTargetStyle::TabTimeline))
+				Caption("Drag the tab window by its title and resize it using its edges. Scroll to peek ahead; Back to current resumes following.");
 			EndCard();
 
 			BeginCard("Layout");

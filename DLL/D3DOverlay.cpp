@@ -798,7 +798,7 @@ void GameOverlay::DisplayMlStringFretOverlay()
 		targetRowTop = readoutBottom + textHeight + textHeight * 4;
 	}
 	const int targetLeft = targetValueX;
-	if (!useTab && targetColorString >= 0 && targetColorString < 6)
+	if (targetStyle != Settings::NoteByNoteTargetStyle::TabTimeline && !useTab && targetColorString >= 0 && targetColorString < 6)
 	{
 		RSColor stringColor;
 		const bool hasStringColor = ERMode::TryGetActiveStringColor(targetColorString, stringColor);
@@ -963,6 +963,8 @@ void GameOverlay::DisplayMlStringFretOverlay()
 		Overlay::HudLayout::Publish(HudBlock::Readout, static_cast<float>(baseX), static_cast<float>(baseY),
 			static_cast<float>(valueX + widestValue), static_cast<float>(readoutBottom));
 	}
+
+	if (targetStyle == Settings::NoteByNoteTargetStyle::TabTimeline) return;
 
 	if (useTab)
 	{

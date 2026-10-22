@@ -12,7 +12,8 @@ namespace
 	std::atomic<uint32_t> noteByNoteColors[] = { 0xFFFFFFFF, 0xFF55DD77, 0xFFFFAA44, 0xFFFF5555 };
 	std::atomic<int> noteByNoteLineSpacing{ 100 };
 	std::atomic<Settings::NoteByNoteTargetStyle> noteByNoteTargetStyle{ Settings::NoteByNoteTargetStyle::Detailed };
-	const char* const kNoteByNoteTargetStyles[] = { "Detailed", "Simple", "Tab" };
+	const char* const kNoteByNoteTargetStyles[] = { "Detailed", "Simple", "Tab", "TabTimeline" };
+	std::atomic<bool> noteByNoteTabDocked{ false };
 	// HUD block placements in 1/10000ths of the window (-1 = built-in layout); index = NoteByNoteHudBlock.
 	// Packed x << 16 | y so a reader never sees a new x with an old y.
 	std::atomic<uint32_t> noteByNotePlacements[2] = { 0xFFFFFFFFu, 0xFFFFFFFFu };
@@ -234,8 +235,24 @@ Settings::NoteByNoteTargetStyle Settings::GetNoteByNoteTargetStyle()
 
 bool Settings::SetNoteByNoteTargetStyle(NoteByNoteTargetStyle style)
 {
+	if (style < NoteByNoteTargetStyle::Detailed || style > NoteByNoteTargetStyle::TabTimeline)
+	{
+		LOG_ERROR("Invalid NoteByNoteTargetStyle value." << std::endl);
+		return false;
+	}
 	noteByNoteTargetStyle.store(style);
 	return WriteNoteByNoteKey("NoteByNoteTargetStyle", kNoteByNoteTargetStyles[static_cast<int>(style)]);
+}
+
+bool Settings::GetNoteByNoteTabDocked()
+{
+	return noteByNoteTabDocked.load();
+}
+
+bool Settings::SetNoteByNoteTabDocked(bool docked)
+{
+	noteByNoteTabDocked.store(docked);
+	return WriteNoteByNoteKey("NoteByNoteTabDocked", docked ? "on" : "off");
 }
 
 /// <summary>
@@ -643,10 +660,11 @@ void Settings::ReadModSettings() {
 	{
 		const std::string style = reader.GetValue("Note by Note", "NoteByNoteTargetStyle", "Detailed");
 		bool known = false;
-		for (int index = 0; index < 3; ++index)
+		for (int index = 0; index < 4; ++index)
 			if (style == kNoteByNoteTargetStyles[index]) { noteByNoteTargetStyle.store(static_cast<NoteByNoteTargetStyle>(index)); known = true; }
-		if (!known) LOG_ERROR("Invalid NoteByNoteTargetStyle: expected Detailed, Simple or Tab; keeping Detailed." << std::endl);
+		if (!known) LOG_ERROR("Invalid NoteByNoteTargetStyle: expected Detailed, Simple, Tab or TabTimeline; keeping Detailed." << std::endl);
 	}
+	noteByNoteTabDocked.store(std::string(reader.GetValue("Note by Note", "NoteByNoteTabDocked", "off")) == "on");
 	for (int index = 0; index < 2; ++index)
 	{
 		// "Default" (or absent) = built-in layout; otherwise "x,y" as fractions of the game window.

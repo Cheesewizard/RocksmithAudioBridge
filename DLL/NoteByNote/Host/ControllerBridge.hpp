@@ -107,4 +107,8 @@ namespace ResearchBridge
 	void PublishNoteByNoteEvent(const NoteByNoteProbe::NativeExpectedAttackEvent& event);
 	void Shutdown();
 	bool TryGetNoteByNoteState(ResearchProtocol::NoteByNoteState& state);
+	bool CopyTablaturePreview(
+		ResearchProtocol::PreviewEvent* events,
+		uint32_t capacity,
+		ResearchProtocol::PreviewState& state);
 }

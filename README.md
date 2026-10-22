@@ -171,6 +171,24 @@ sits just below it.
 **Overlay page:** Note by Note (settings only: readout, target style and size,
 colours, and dragging the on-screen readout into place).
 
+Choose **Look ahead** as the target style for a native tablature window.
+Drag its title to move it and its edges or corner to resize it; the window
+remembers its size. Scroll horizontally to inspect upcoming notes without
+seeking or advancing Note by Note. **Back to current** resumes following the
+current target. The target Size control changes the tab text size.
+The window shows the whole song at the difficulty you are playing each phrase
+at, following Dynamic Difficulty and the Riff Repeater slider. **Compare with
+100%** switches to the full chart and **Back to my level** switches back,
+keeping your place in the song. Notes are spaced by time, so a fast run reads
+as a tight group and a rest as a gap. Slides are drawn as the usual / or \
+stroke between the frets. Bar lines with measure numbers come from
+the chart's beat grid, heavier lines mark the song's sections, the Riff
+Repeater loop is shaded (when the whole loop fits, it starts at the left edge
+and stays put on every repeat), notes you have played are dimmed, and the
+current note sits a quarter of the way in so the notes before it stay visible.
+The strings stretch to fill the window's height. **Dock to top** pins the
+window across the top of the screen.
+
 Works on guitar and bass arrangements. Bass support is experimental: it uses
 the game's own detection with a bass-trained machine-learning model.
 

@@ -213,6 +213,17 @@ bool ResearchBridge::TryGetNoteByNoteState(ResearchProtocol::NoteByNoteState& st
 	return false;
 }
 
+bool ResearchBridge::CopyTablaturePreview(
+	ResearchProtocol::PreviewEvent* events,
+	uint32_t capacity,
+	ResearchProtocol::PreviewState& state)
+{
+	std::lock_guard<std::recursive_mutex> lock(probeMutex);
+	state = {};
+	if (!loadedProbe.isInitialized || loadedProbe.api.CopyTablaturePreview == nullptr) return false;
+	return loadedProbe.api.CopyTablaturePreview(events, capacity, &state) != 0;
+}
+
 
 bool ResearchBridge::DescribeSelectedChordFingering(uintptr_t record, char* buffer, size_t bufferLength,
 	int& lowestPlayedString)

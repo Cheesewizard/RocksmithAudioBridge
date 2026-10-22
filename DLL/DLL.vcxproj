@@ -183,6 +183,8 @@
     <ClCompile Include="NoteByNote\Host\NativeScoringHooks.cpp" />
     <ClCompile Include="NoteByNote\Ui\NoteByNoteMenu.cpp" />
     <ClCompile Include="NoteByNote\Ui\NoteByNoteHudLabel.cpp" />
+    <ClCompile Include="NoteByNote\Ui\TablatureRenderer.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="NoteByNote\Ui\TablaturePreviewWindow.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="Mods\TrueTuning.cpp">
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../stdafx.h</PrecompiledHeaderFile>
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug with Wwise Logging|Win32'">../stdafx.h</PrecompiledHeaderFile>
@@ -409,6 +411,11 @@
     <ClInclude Include="Overlay\OverlayShell.hpp" />
     <ClInclude Include="Overlay\OverlayUi.hpp" />
     <ClInclude Include="NoteByNote\Ui\NoteByNoteHudLayout.hpp" />
+    <ClInclude Include="NoteByNote\Ui\TablatureRenderer.hpp" />
+    <ClInclude Include="NoteByNote\Ui\TablaturePreviewWindow.hpp" />
+    <ClInclude Include="NoteByNote\Protocol\TablaturePreview.hpp" />
+    <ClInclude Include="NoteByNote\Controller\TablaturePreviewData.hpp" />
+    <ClInclude Include="NoteByNote\Controller\AuthoredTablatureReader.hpp" />
     <ClInclude Include="Overlay\AudioBridgeLogo.h" />
     <ClInclude Include="MidiPedal.h" />
     <ClInclude Include="ModManager.hpp" />
@@ -907,6 +914,10 @@ if exist "$(OutDir)$(TargetName).map" copy /Y "$(OutDir)$(TargetName).map" "$(Bu
       <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
+  <ItemGroup>
+    <ResourceCompile Include="NoteByNote\Ui\TablatureNotices.rc" />
+    <None Include="NoteByNote\Ui\ThirdParty\VexFlow-LICENSE.txt" />
+  </ItemGroup>
   <!-- The overlay and its companion must ship the same shared-control protocol. -->
   <ItemGroup Condition="'$(Configuration)' != 'Master'">
     <ProjectReference Include="..\VstHost\RocksmithAudioBridgeVstHost.vcxproj">

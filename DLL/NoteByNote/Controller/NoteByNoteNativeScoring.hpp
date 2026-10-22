@@ -23,6 +23,10 @@ namespace NoteByNoteNativeScoring
 	void Stop();
 	void RequestReArm();
 	bool TryGetResearchState(ResearchProtocol::NoteByNoteState& state);
+	uint8_t CopyTablaturePreview(
+		ResearchProtocol::PreviewEvent* events,
+		uint32_t capacity,
+		ResearchProtocol::PreviewState* state);
 	void SetChordHoldsEnabled(bool enabled);
 	void SetFreezePromptSoundEnabled(bool enabled);
 	void SetFlowUntilMissEnabled(bool enabled);

@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "NoteByNote/Ui/TablaturePreviewWindow.hpp"
 #include "Main.hpp"
 #include "NoteByNote/Controller/NoteByNoteNativeScoring.hpp"
 #include "NoteByNote/Host/NoteByNoteHostServices.hpp"
@@ -155,7 +156,7 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM keyPressed, LPARAM lParam) {
 	// cursor is over a panel, and keyboard navigation while the panel owns it. This lets sliders and
 	// buttons work over exclusive-fullscreen Rocksmith without the clicks also driving the game, while leaving
 	// gameplay input live when the cursor is outside the panel.
-	if (Menu::menuEnabled || Menu::audioBridgeMenuEnabled) {
+	if (Menu::menuEnabled || Menu::audioBridgeMenuEnabled || NoteByNote::Ui::IsTablaturePreviewVisible()) {
 		const ImGuiIO& io = ImGui::GetIO();
 		OverlayInputCapture::SetMouseCapture(io.WantCaptureMouse);
 		const bool isMouse = (msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST);
@@ -273,7 +274,7 @@ HRESULT APIENTRY D3DHooks::Hook_EndScene(IDirect3DDevice9* pDevice) {
 	static const bool inputCaptureInstalled = OverlayInputCapture::Install();
 	(void)inputCaptureInstalled;
 	Menu::RenderImGuiMenu();
-	OverlayInputCapture::SetMouseCapture((Menu::menuEnabled || Menu::audioBridgeMenuEnabled) && ImGui::GetIO().WantCaptureMouse);
+	OverlayInputCapture::SetMouseCapture((Menu::menuEnabled || Menu::audioBridgeMenuEnabled || NoteByNote::Ui::IsTablaturePreviewVisible()) && ImGui::GetIO().WantCaptureMouse);
 	// Keyboard: only while a text field is being typed into, not whenever a panel has focus, so gameplay keys keep
 	// working with the overlay open. The capture holds until every key is released, so the Enter / Escape that
 	// closes the field does not leak its key-up into the game.
@@ -282,7 +283,7 @@ HRESULT APIENTRY D3DHooks::Hook_EndScene(IDirect3DDevice9* pDevice) {
 		const ImGuiIO& io = ImGui::GetIO();
 		bool anyKeyDown = false;
 		for (bool down : io.KeysDown) anyKeyDown |= down;
-		keyboardCaptured = ((Menu::menuEnabled || Menu::audioBridgeMenuEnabled) && io.WantTextInput) || (keyboardCaptured && anyKeyDown);
+		keyboardCaptured = ((Menu::menuEnabled || Menu::audioBridgeMenuEnabled || NoteByNote::Ui::IsTablaturePreviewVisible()) && io.WantTextInput) || (keyboardCaptured && anyKeyDown);
 		OverlayInputCapture::SetKeyboardCapture(keyboardCaptured);
 	}
 	Menu::UpdateStringTextures(pDevice);
