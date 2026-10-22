@@ -105,8 +105,9 @@
       <DependentUpon>GUI.cs</DependentUpon>
     </Compile>
     <!-- Optional developer-only file, absent from the repository. Debug builds only, so a Release installer built on
-         a machine that has the file still never contains it. -->
-    <Compile Include="GUI.Private.cs" Condition="Exists('GUI.Private.cs') And '$(Configuration)' == 'Debug'">
+         a machine that has the file still never contains it, unless asked for with -p:DeveloperInstaller=true (a
+         Release-payload installer for the developer's own test folders; build it into its own OutputPath). -->
+    <Compile Include="GUI.Private.cs" Condition="Exists('GUI.Private.cs') And ('$(Configuration)' == 'Debug' Or '$(DeveloperInstaller)' == 'true')">
       <DependentUpon>GUI.cs</DependentUpon>
     </Compile>
     <Compile Include="MainFunction.cs" />

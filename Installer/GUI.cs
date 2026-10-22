@@ -45,7 +45,7 @@ namespace RS2014_Mod_Installer
         private void UseModsButton_Click(object sender, EventArgs e)
         {
             string originalButtonText = UseModsButton.Text;
-            UseModsButton.Text += "\n(Please wait as we get the mods setup. This should take but a moment).";
+            UseModsButton.Text += "\n(Please wait as we get the mods setup. This should only take a moment).";
 
             string rsPath = WhereIsRocksmith();
             if (string.IsNullOrEmpty(rsPath))

@@ -65,7 +65,7 @@
             this.label1.Name = "label1";
             this.label1.Size = new System.Drawing.Size(518, 40);
             this.label1.TabIndex = 2;
-            this.label1.Text = "Install, repair or uninstall Rocksmith Audio Bridge.\r\nYour recordings are never touched.";
+            this.label1.Text = "Install, repair, or uninstall Rocksmith Audio Bridge.\r\nYour recordings are never touched.";
             // 
             // GUI
             // 
