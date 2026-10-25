@@ -105,19 +105,21 @@ namespace GameTones
 `ToneSwitchPopup` then calls `GameTones::PlayingSongObject()` instead of keeping its own copy. That is a pure
 move with no behaviour change: land it as its own commit.
 
-### 1.2 Find the current-slot field
+### 1.2 The current-slot field (found statically; live check outstanding)
 
-1. Log `g_tonesComponent` and the song object once per song.
-2. Inspect the component in a memory viewer (x32dbg or Cheat Engine attached to `Rocksmith2014.exe`).
-   - Press 1–4 in a song. Find the dword or byte that cycles through four or five values.
-   - Confirm it also changes when the chart's own tone change fires: use a CDLC with known tone changes and
-     compare against the SNG times in Rocksmith2014.NET's tone list.
-3. A second way in: `ShowNotification` type 7 is raised for each change. Break on it and walk up the call stack
-   to the code that wrote the new tone index. That code is the source of truth.
-4. Watch out: the stored value may be a **tone key string pointer** rather than an index. If so, map it to
-   Base/A–D by comparing it with the arrangement's `Tone_Base`/`Tone_A..D` keys (§1.3).
-5. Add the offset as a named constant with a byte-signature check, like the existing `TONES_UPDATE_*` constants.
-   Log once if the signature does not match.
+Static analysis of the September 2022 build located the field. The evidence is in
+`VstHost/Documentation/Game-tone-slot-evidence.md`. The diagnostic reader in `GameTones` already logs it.
+
+- **The field:** `component+0x10` holds the committed tone. Raw `0..3` = Tone_A..D, and raw `5` = the base or
+  default sentinel. `GameComponentTones::Update` commits it at VA `0x464F39`.
+- **Where the chart lookup happens:** the game finds the chart event itself, at VA `0x559DB0`. It walks the
+  `{time, toneId}` records in `PlayerSong+0xDC..0xE0` backwards from the song clock, so seeks and loops are
+  handled by the game.
+- **What remains:** a live check. The log must change exactly at chart events, after seeks, in Riff Repeater,
+  at 50% speed and on keys 1–4, for lead, rhythm and bass. The diagnostic logs the raw index and the current key
+  together, which catches a hotkey that changes the key without changing the index.
+- **Map raw values explicitly:** 5 → Base and 0..3 → A..D. Any other value is logged and treated as "no
+  change". It is never guessed.
 
 ### 1.3 Find the arrangement identity
 
@@ -340,12 +342,13 @@ to that tab, so you always hear what you edit. Say so in the bar.
   3. Log rejections with the reason.
 - **DLL side:** `SongLibrary` gains `struct Arrangement` and reads both files.
 
-### 5.2 Shared-memory v8 and new commands
+### 5.2 Next shared-memory version and new commands
 
-Bump `kMappingName`/`kVersion` to v8 (the file's rule: a new name per version). Add the fields:
+The checkout is already at **v9** (v8 added `chainLatencySamples`, v9 `overlayKey`), so this is **v10**. Bump
+`kMappingName`/`kVersion` to v10 (the file's rule: a new name per version). Add the fields:
 
 ```cpp
-	// Written by the overlay (v8): the game's tone slot during a song (GameTones), read by the host's audio
+	// Written by the overlay (v10): the game's tone slot during a song (GameTones), read by the host's audio
 	// thread once per block. Packed so one 32-bit read is consistent: bits 0-7 slot (0 base, 1-4 A-D,
 	// 255 none), bits 8-31 sequence.
 	volatile LONG toneSlotWord;
@@ -438,6 +441,17 @@ safety limiter (-1 dBFS, fixed lookahead 0, fast attack) -> output
 
 Implementation notes:
 
+- **CPU during a switch (measured offline).** The prototype harness timed an A2 amp at Full quality, an
+  8,192-sample IR, Chamber2 and TapeDelay2. The 99.9th-percentile block time was 1,578 µs for one chain at 128
+  frames and 2,380 µs for two chains. The half-block budget is 1,333 µs. See
+  `VstHost/Documentation/Implementation-status.md`. The bundled NAM plugin runs the same core, so expect the same
+  cost.
+  - **Never run two NAM instances at once.** The switch is a short dip: fade the outgoing scene out over about
+    10 ms, then fade the incoming scene in over about 10 ms.
+  - **Tails.** Only the outgoing scene's non-NAM plugins (`bundled:airwindows`) join the tail pool. Its NAM slot
+    stops at the end of the fade-out, so a tail costs Airwindows CPU only.
+  - **Listening test.** Whether the dip is audible has not been checked. If it is, decide against the measured
+    budget, never against averages.
 - **Tail blocks** keep their state because the same objects are kept running, so nothing is copied.
 - **A scene in two slots** (A and B both "Clean") has a single instance, so switching between those two slots
   does nothing, which is correct.

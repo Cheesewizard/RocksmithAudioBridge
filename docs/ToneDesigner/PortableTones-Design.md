@@ -105,7 +105,7 @@ same model bytes and the same parameter values, so the same DI input produces th
   song-start load and unacceptable for a mid-song scene change.
 - **Tone files.** `RABTONE2` holds plugin paths, bypass flags and opaque JUCE plugin states. The trims are
   written level-neutral on purpose, because player trims are global.
-- **Overlay-to-host link.** `VstHostControl.hpp` (shared memory v7) is a one-at-a-time acknowledged command
+- **Overlay-to-host link.** `VstHostControl.hpp` (shared memory, v9 on the current branch) is a one-at-a-time acknowledged command
   channel. It is right for edits and wrong for timing.
 - **Song-start routing only.** `VstHostLink.cpp` `FollowSong` picks a tone per **song key** at song start. The
   song key comes from the preview event name (`GameState::GetSongKey`), so it identifies a song, not an
@@ -187,7 +187,7 @@ or two amps across their scenes.
  GUI (C#)                       Game DLL (x86)                     VstHost (x64, AmpLink guest)
  ─────────                      ──────────────                     ─────────────────────────────
  PSARC indexer ──bank cache──▶  arrangement PersistentID ──┐
- Tone bank export/import        current tone slot (0..4) ──┼─ shared memory v8 ─▶ SceneSet (≤5 prepared graphs)
+ Tone bank export/import        current tone slot (0..4) ──┼─ shared memory v10 ▶ SceneSet (≤5 prepared graphs)
                                 song start / end          ─┘   (atomic slot word)   └ audio thread: crossfade,
                                                                                        spillover tails
 ```
@@ -321,13 +321,13 @@ which arrangement is playing. Candidates, in order:
 
 ### 5.2 Current tone slot (Unproven, small spike)
 
-- **What to find.** The value the game switches when a chart tone event fires: the tone component's current-slot
-  index. Find it by RE inside `GameComponentTones::Update`. The tone-change notification (type 7) that
-  `ToneSwitchPopup` already intercepts is a confirmation signal, not the source of truth, because the game
-  delays the readout by about 0.5 s.
+- **What it is.** Static analysis found it at `component+0x10`: raw 0..3 = A..D, 5 = base
+  (`VstHost/Documentation/Game-tone-slot-evidence.md`). The game itself looks up the chart's tone events from
+  the song clock, which makes it seek-aware. The live check is still outstanding. The tone-change notification
+  (type 7) is only a confirmation signal, because the game delays the readout by about 0.5 s.
 - **How to read it.** Read it in the existing `TonesUpdateDetour` with guarded reads and the same vtable
   identity checks `PlayingSongObject` uses. Publish `{arrangementId, slot 0..4, sequence}` to the host.
-- **New shared field.** Add a single atomic word in a new shared-memory version (`v8`, per the file's
+- **New shared field.** Add a single atomic word in a new shared-memory version (`v10`, per the file's
   one-name-per-version rule), next to the command channel rather than through it. The host's audio thread reads
   it lock-free.
 - **Expected latency.** One game frame (about 16.7 ms at 60 fps) plus one audio block. Compared with the 30 ms
@@ -559,7 +559,7 @@ song never sounds different without the player being able to see why.
 | 1 | Built-in blocks as JUCE processors in the existing chain (§4.1), saved as a new local tone format (`RABTONE3`, JSON plus asset hashes). | |
 | 1b | Tab split: today's page becomes **VST rig**, and a new **Tone designer** tab gets on-board knobs (§7). | |
 | 2 | Managed asset library, and bank export/import as a sidecar. Includes the offline-disappearance test (§12). | |
-| 3 | `SceneSet`, shared memory v8 slot word, crossfades and spillover tails. | |
+| 3 | `SceneSet`, shared memory v10 slot word, crossfades and spillover tails. | |
 | 4 | PSARC-embedded banks, the indexer and `PersistentID` mapping. In-game test of unknown entries. | |
 | 5 | Acceptance on a clean machine (§12). | |
 

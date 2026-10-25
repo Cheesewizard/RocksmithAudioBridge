@@ -18,7 +18,6 @@
 
 #include "BridgeAudio.hpp"
 #include "Chain.hpp"
-#include "../Tools/BuiltinCheck.hpp"
 #include "HostLog.hpp"
 
 #include "../../DLL/Shared/VstHostControl.hpp"
@@ -1362,8 +1361,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 	// JUCE hosts the plugins (PluginHost.cpp). This thread is its message thread; the Win32 loop below dispatches
 	// its messages too. Plugins and the format list are released before this goes out of scope.
 	juce::ScopedJuceInitialiser_GUI juce;
-	int toolExitCode = 0;
-	if (VstHost::Tools::TryRunBuiltinCheck(toolExitCode)) return toolExitCode;
 	g_mainThread = GetCurrentThreadId();
 	InstallCrashReporter();
 

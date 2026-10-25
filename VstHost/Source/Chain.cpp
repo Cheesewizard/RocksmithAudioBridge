@@ -1,8 +1,6 @@
 #include "Chain.hpp"
 
 #include "HostLog.hpp"
-#include "Builtin/BuiltinId.hpp"
-#include "Builtin/BuiltinTone.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -150,22 +148,8 @@ namespace VstHost
 		return true;
 	}
 
-	bool Chain::LoadSlot(Slot& slot, const std::wstring& path, std::string& error, const std::vector<char>* state)
+	bool Chain::LoadSlot(Slot& slot, const std::wstring& path, std::string& error)
 	{
-		if (Builtin::IsBuiltinId(path) != m_builtin)
-		{
-			error = "Built-in tones and VST rigs use separate chains.";
-			return false;
-		}
-		if (m_builtin && state)
-		{
-			auto plugin = std::make_unique<PluginHost>();
-			if (!plugin->Load(path, error, state, m_library)) return false;
-			if (m_frames > 0 && !plugin->Prepare(m_frames, error)) return false;
-			slot.plugin = std::move(plugin);
-			slot.path = path;
-			return true;
-		}
 		if (std::unique_ptr<PluginHost> spare = TakeSpare(path))
 		{
 			// Already loaded: only prepared for the stream (a fraction of a second).
@@ -248,8 +232,8 @@ namespace VstHost
 		std::vector<char> state;
 		m_slots[index]->plugin->GetState(state);
 		auto slot = std::make_unique<Slot>();
-		if (!LoadSlot(*slot, m_slots[index]->path, error, m_builtin ? &state : nullptr)) return false;
-		if (!m_builtin) slot->plugin->SetState(state);   // before it plays: no stream thread yet
+		if (!LoadSlot(*slot, m_slots[index]->path, error)) return false;
+		slot->plugin->SetState(state);   // before it plays: no stream thread yet
 		slot->bypass = m_slots[index]->bypass.load();
 		Pause();
 		m_slots.insert(m_slots.begin() + index + 1, std::move(slot));
@@ -343,8 +327,6 @@ namespace VstHost
 		Pause();
 		std::vector<std::unique_ptr<Slot>> old;
 		old.swap(m_slots);
-		m_toneOutputDb = 0.0f;
-		m_toneGain = 1.0f;
 		m_structureDirty = true;
 		Resume();
 		for (auto& slot : old) Park(std::move(slot->plugin), slot->path);
@@ -440,7 +422,7 @@ namespace VstHost
 			std::swap(inR, outR);
 		}
 
-		const float outputGain = m_muted.load(std::memory_order_relaxed) ? 0.0f : m_outputGain.load(std::memory_order_relaxed) * m_toneGain.load(std::memory_order_relaxed);
+		const float outputGain = m_muted.load(std::memory_order_relaxed) ? 0.0f : m_outputGain.load(std::memory_order_relaxed);
 		for (int i = 0; i < frames; ++i)
 		{
 			left[i] = inL[i] * outputGain;
@@ -458,70 +440,6 @@ namespace VstHost
 		return total;
 	}
 
-	bool Chain::SaveBuiltinTone(const std::wstring& file, std::string& error)
-	{
-		if (!m_builtin) { error = "Only a built-in chain can save a portable tone."; return false; }
-		try
-		{
-			Builtin::BuiltinTone tone;
-			tone.outputDb = m_toneOutputDb;
-			for (const auto& slot : m_slots)
-			{
-				std::vector<char> state;
-				if (!slot->plugin->GetState(state)) throw std::runtime_error("Cannot read built-in block state.");
-				juce::var json;
-				const auto result = juce::JSON::parse(juce::String::fromUTF8(state.data(), static_cast<int>(state.size())), json);
-				if (result.failed()) throw std::runtime_error(result.getErrorMessage().toStdString());
-				tone.blocks.push_back({ slot->path, slot->bypass.load(), json });
-			}
-			tone.Write(juce::File(file.c_str()));
-			SavePluginSettings();
-			m_structureDirty = false;
-			return true;
-		}
-		catch (const std::exception& exception)
-		{
-			error = exception.what();
-			Log("builtin tone save failed: %s", error.c_str());
-			return false;
-		}
-	}
-
-	bool Chain::LoadBuiltinTone(const std::wstring& file, std::string& error)
-	{
-		if (!m_builtin) { error = "Only a built-in chain can load a portable tone."; return false; }
-		try
-		{
-			const auto tone = Builtin::BuiltinTone::Read(juce::File(file.c_str()));
-			std::vector<std::unique_ptr<Slot>> slots;
-			for (const auto& block : tone.blocks)
-			{
-				auto slot = std::make_unique<Slot>();
-				slot->path = block.id;
-				slot->bypass = block.isBypassed;
-				slot->plugin = std::make_unique<PluginHost>();
-				const auto json = juce::JSON::toString(block.state, true).toStdString();
-				const std::vector<char> state(json.begin(), json.end());
-				if (!slot->plugin->Load(block.id, error, &state, m_library)) return false;
-				if (m_frames > 0 && !slot->plugin->Prepare(m_frames, error)) return false;
-				slots.push_back(std::move(slot));
-			}
-			Pause();
-			m_slots.swap(slots);
-			m_toneOutputDb = tone.outputDb;
-			m_toneGain = juce::Decibels::decibelsToGain(tone.outputDb);
-			m_structureDirty = false;
-			Resume();
-			return true;
-		}
-		catch (const std::exception& exception)
-		{
-			error = exception.what();
-			Log("builtin tone load failed: %s", error.c_str());
-			return false;
-		}
-	}
-
 	// Tone file: magic "RABTONE2", input and output trim (int32 tenths of a dB), slot count (uint32), then per slot
 	// the plugin path (uint32 length in UTF-16 units + text), bypass (uint8), and the plugin's settings as JUCE
 	// keeps them (uint32 length + bytes). "RABTONE1" files (before JUCE) have two blocks per slot instead, the raw
@@ -529,7 +447,6 @@ namespace VstHost
 	// as version 2 the next time they are saved.
 	bool Chain::SaveTone(const std::wstring& file)
 	{
-		if (m_builtin) { Log("tone: built-in chains require the portable JSON format"); return false; }
 		// The reloading copies are out of the chain: a tone written now would leave them out (an autosave, or the
 		// host closing with the game). The file keeps the chain as it was until the reload is done.
 		if (m_reloading) { Log("tone: not saved while a plugin reloads (%ls)", file.c_str()); return false; }
@@ -600,7 +517,6 @@ namespace VstHost
 
 	bool Chain::LoadTone(const std::wstring& file, std::string& error, std::string& missing)
 	{
-		if (m_builtin) { error = "VST tone files cannot be loaded into the built-in chain."; return false; }
 		FILE* in = nullptr;
 		if (_wfopen_s(&in, file.c_str(), L"rb") != 0 || !in) { error = "The tone file could not be opened."; return false; }
 		char magic[sizeof(kToneMagic)]{};

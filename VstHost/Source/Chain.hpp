@@ -29,12 +29,6 @@ namespace VstHost
 	public:
 		static constexpr int kMaxSlots = 8;
 
-		explicit Chain(bool builtin = false, std::shared_ptr<Builtin::AssetLibrary> library = {})
-			: m_builtin(builtin), m_library(std::move(library)) { }
-
-		bool SaveBuiltinTone(const std::wstring& file, std::string& error);
-		bool LoadBuiltinTone(const std::wstring& file, std::string& error);
-
 		// Main thread. `frames` is the stream's block size (0 before audio starts; slots are prepared then).
 		bool Add(const std::wstring& path, std::string& error);
 		bool Replace(int index, const std::wstring& path, std::string& error);
@@ -114,7 +108,7 @@ namespace VstHost
 
 		void Pause();
 		void Resume();
-		bool LoadSlot(Slot& slot, const std::wstring& path, std::string& error, const std::vector<char>* state = nullptr);
+		bool LoadSlot(Slot& slot, const std::wstring& path, std::string& error);
 		bool HasSpare(const std::wstring& path) const;
 		std::unique_ptr<PluginHost> TakeSpare(const std::wstring& path);
 		void Park(std::unique_ptr<PluginHost> plugin, const std::wstring& path);   // saves its settings first
@@ -127,10 +121,6 @@ namespace VstHost
 		LoadReporter m_report;
 		int m_loadStep = 1, m_loadTotal = 1;   // LoadTone counts its plugins; one plugin otherwise
 		int m_frames = 0;
-		bool m_builtin = false;
-		std::shared_ptr<Builtin::AssetLibrary> m_library;
-		float m_toneOutputDb = 0.0f;
-		std::atomic<float> m_toneGain{ 1.0f };
 		std::atomic<bool> m_running{ false };
 		std::atomic<bool> m_inProcess{ false };
 		bool m_structureDirty = false;

@@ -55,7 +55,6 @@
     <ClCompile Include="Source\Chain.cpp" />
     <ClCompile Include="Source\HostLog.cpp" />
     <ClCompile Include="Source\SourceRouter.cpp" />
-    <ClCompile Include="Tools\BuiltinCheck.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\BridgeAudio.hpp" />
@@ -102,7 +101,6 @@
     <ClCompile Include="Lib\JUCE\modules\juce_graphics\juce_graphics_libwebp_utils.c" />
     <ClCompile Include="Lib\JUCE\modules\juce_graphics\juce_graphics_lunasvg.c" />
   </ItemGroup>
-  <Import Project="Builtin.props" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <!-- Into the game root after every build, next to the 64-bit bridge driver (shared DeployToGame.targets). -->
   <Target Name="CollectGameDeployFiles" BeforeTargets="DeployToGame">

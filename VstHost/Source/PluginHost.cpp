@@ -2,8 +2,6 @@
 
 #include "HostLog.hpp"
 #include "AudioFormat.hpp"
-#include "Builtin/BuiltinId.hpp"
-#include "Builtin/BuiltinRegistry.hpp"
 
 #include <ShlObj.h>
 #include <algorithm>
@@ -65,34 +63,10 @@ namespace VstHost
 
 	PluginHost::~PluginHost() { Unload(); }
 
-	bool PluginHost::Load(const std::wstring& path, std::string& error, const std::vector<char>* builtinState, std::shared_ptr<Builtin::AssetLibrary> library)
+	bool PluginHost::Load(const std::wstring& path, std::string& error)
 	{
 		Unload();
 		m_dirty = false;
-
-		if (Builtin::IsBuiltinId(path))
-		{
-			try
-			{
-				m_plugin = Builtin::BuiltinRegistry::Create(path, std::move(library));
-				if (builtinState) m_plugin->setStateInformation(builtinState->data(), static_cast<int>(builtinState->size()));
-				m_name = m_plugin->getName().toStdString();
-				m_identifier = juce::String(path.c_str()).toStdString();
-				m_legacyUid = 0;
-				m_plugin->setPlayHead(m_playHead.get());
-				m_plugin->addListener(this);
-				ChooseBuses();
-				m_quietUntil = GetTickCount64() + kSettleMs;
-				return true;
-			}
-			catch (const std::exception& exception)
-			{
-				error = exception.what();
-				Log("builtin load failed: %s", error.c_str());
-				Unload();
-				return false;
-			}
-		}
 
 		// A file can hold several plugins (a bundle with an effect and an instrument): take the first effect.
 		juce::OwnedArray<juce::PluginDescription> types;
@@ -168,13 +142,7 @@ namespace VstHost
 		if (!m_plugin) { error = "No plugin loaded."; return false; }
 		m_frames = frames;
 		m_plugin->setRateAndBufferSizeDetails(SAMPLE_RATE, frames);
-		try { m_plugin->prepareToPlay(SAMPLE_RATE, frames); }
-		catch (const std::exception& exception)
-		{
-			error = exception.what();
-			Log("prepare failed: %s", error.c_str());
-			return false;
-		}
+		m_plugin->prepareToPlay(SAMPLE_RATE, frames);
 		const int channels = std::max({ m_plugin->getTotalNumInputChannels(), m_plugin->getTotalNumOutputChannels(), 2 });
 		m_buffer.setSize(channels, frames, false, true, false);
 		m_midi.ensureSize(256);
@@ -330,29 +298,8 @@ namespace VstHost
 	{
 		if (!m_plugin || state.empty()) return false;
 		m_quietUntil = GetTickCount64() + kSettleMs;
-		const bool builtin = dynamic_cast<Builtin::BuiltinProcessor*>(m_plugin.get()) != nullptr;
-		const bool wasProcessing = m_processing.load();
-		if (builtin) Suspend();
-		try
-		{
-			m_plugin->setStateInformation(state.data(), static_cast<int>(state.size()));
-			if (builtin && wasProcessing)
-			{
-				std::string error;
-				return Prepare(m_frames, error);
-			}
-			return true;
-		}
-		catch (const std::exception& exception)
-		{
-			Log("state rejected: %s", exception.what());
-			if (builtin && wasProcessing)
-			{
-				std::string error;
-				if (!Prepare(m_frames, error)) Log("previous built-in state could not resume: %s", error.c_str());
-			}
-			return false;
-		}
+		m_plugin->setStateInformation(state.data(), static_cast<int>(state.size()));
+		return true;
 	}
 
 	std::vector<char> PluginHost::StateFromVst3Parts(const std::vector<char>& component, const std::vector<char>& controller)
@@ -372,7 +319,6 @@ namespace VstHost
 	// File: magic, then the state as a uint32 length plus bytes.
 	bool PluginHost::SaveState()
 	{
-		if (dynamic_cast<Builtin::BuiltinProcessor*>(m_plugin.get())) { m_dirty = false; return true; }
 		std::vector<char> state;
 		if (!GetState(state)) return false;
 		const std::wstring path = StatePath();
