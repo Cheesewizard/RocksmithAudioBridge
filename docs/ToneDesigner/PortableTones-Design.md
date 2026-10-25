@@ -16,8 +16,16 @@ Evidence labels, as in the handover:
 
 ## Decisions (agreed 25 October 2026)
 
-1. **Built-in tones only.** Portable tones use the built-in blocks only: NAM amp, cab IR and Airwindows. No
-   conversion of VST rigs (§10).
+1. **Built-in tones only.** Portable tones use only the **bundled plugins**: pinned builds of the open-source
+   NAM VST3 and Airwindows Consolidated VST3, which the mod ships in its own folder. No conversion of VST rigs
+   (§10).
+   - **Revision 3 (supersedes §4.1, §4.4 and §7.2):** there are no custom built-in processors, no on-board
+     knobs and no new editor UI.
+   - **Their own windows:** double-click opens the plugin's own window, and several can be open at once, as for
+     any VST3. The NAM plugin includes the gate, Bass/Mid/Treble, the IR loader, input calibration and the A2
+     quality setting.
+   - **Export:** export reads their states, embeds the NAM model and IR files those states point to, and
+     rewrites the paths on import. See the implementation guide §2–§3.
 2. **Three tabs.** **Tone designer** is new, built-in and exportable. **VST rig** is today's page, renamed: local
    only, with backup and restore. **External app** is unchanged (§7.1).
 3. **No mixing.** VST and built-in blocks are never mixed in one tone.
@@ -197,7 +205,7 @@ The design has three boundaries, each with one job:
 
 ## 4. Host: built-in processors and the scene graph
 
-### 4.1 Built-in blocks as JUCE processors (Proposal)
+### 4.1 Built-in blocks as JUCE processors (superseded by Revision 3: bundled plugins)
 
 Each built-in block is a `juce::AudioPluginInstance` subclass created by a small factory inside the host. They
 are not separate plugin files. `PluginHost` already wraps a `juce::AudioPluginInstance`, so a built-in block
@@ -465,7 +473,7 @@ Rules:
   - the bottom browser: VST plugins, or the built-in block list plus the model and IR library;
   - what a double-click does: open the plugin window, or edit the knobs in place.
 
-### 7.2 Built-in blocks on the board
+### 7.2 Built-in blocks on the board (superseded by Revision 3: the plugins' own windows)
 
 - **Pedal looks.** The board's pedal looks (`LookFor`, by `Kind`) gain built-in kinds: Amp (NAM), Cab (IR),
   Dynamics (gate, compressor), Drive, Modulation, Delay and Reverb.
