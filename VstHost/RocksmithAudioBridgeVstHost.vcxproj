@@ -55,12 +55,16 @@
     <ClCompile Include="Source\Chain.cpp" />
     <ClCompile Include="Source\HostLog.cpp" />
     <ClCompile Include="Source\SourceRouter.cpp" />
+    <ClCompile Include="Source\StompboxEngine.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\BridgeAudio.hpp" />
     <ClInclude Include="Source\PluginHost.hpp" />
     <ClInclude Include="Source\Chain.hpp" />
     <ClInclude Include="Source\HostLog.hpp" />
+    <ClInclude Include="Source\SourceRouter.hpp" />
+    <ClInclude Include="Source\StompboxEngine.hpp" />
+    <ClInclude Include="Source\AudioFormat.hpp" />
   </ItemGroup>
   <!-- JUCE 9 (Lib\JUCE, AGPLv3: Lib\JUCE\LICENSE.txt; this program is AGPLv3 because of it, see LICENSE.txt
        next to this project). One translation unit per module; its own VST3 SDK copy is used, so the
@@ -103,9 +107,18 @@
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <!-- Into the game root after every build, next to the 64-bit bridge driver (shared DeployToGame.targets). -->
+  <!-- The Stompbox engine (Stompbox\UPSTREAM.md), built separately by Stompbox\Build-Stompbox.ps1. The host runs
+       without it (the VST chain plays); with it, StompboxDev can route the stream through it. -->
+  <PropertyGroup>
+    <StompboxDll>$(ProjectDir)Stompbox\bin\stompbox-capi.dll</StompboxDll>
+  </PropertyGroup>
+  <Target Name="CopyStompboxEngine" AfterTargets="Build" Condition="Exists('$(StompboxDll)')">
+    <Copy SourceFiles="$(StompboxDll)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
   <Target Name="CollectGameDeployFiles" BeforeTargets="DeployToGame">
     <ItemGroup>
       <GameDeployFile Include="$(TargetPath)" Destination="$(RocksmithInstallDir)\$(TargetName)$(TargetExt)" />
+      <GameDeployFile Include="$(StompboxDll)" Destination="$(RocksmithInstallDir)\stompbox-capi.dll" Condition="Exists('$(StompboxDll)')" />
     </ItemGroup>
   </Target>
   <Import Project="$(MSBuildThisFileDirectory)..\DeployToGame.targets" />

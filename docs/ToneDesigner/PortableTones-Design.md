@@ -16,6 +16,14 @@ Evidence labels, as in the handover:
 
 ## Decisions (agreed 25 October 2026)
 
+0. **Revision 4 (supersedes Revision 3 below):** the Tone designer runs the open-source **Stompbox engine**
+   (mikeoliphant/stompbox, GPL-3) inside the host. The engine provides NAM amps, circuit-modelled tone stacks,
+   cabinet IRs and effects in one fixed rig. Its window is drawn natively in the overlay, and saved tones are
+   Stompbox's plain-text presets.
+   - **No plugin windows, no .NET for players.** Stompbox's own C# remote is used only to evaluate the engine
+     during development.
+   - **Status:** `VstHost/Documentation/Implementation-status.md`.
+
 1. **Built-in tones only.** Portable tones use only the **bundled plugins**: pinned builds of the open-source
    NAM VST3 and Airwindows Consolidated VST3, which the mod ships in its own folder. No conversion of VST rigs
    (§10).

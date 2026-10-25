@@ -3,8 +3,15 @@
 Branch `dev_portable-tone-designer`. This is a partial implementation, not the finished portable Tone Designer
 feature.
 
-**Design:** [PortableTones-Design.md](../../docs/ToneDesigner/PortableTones-Design.md), Revision 3. The Tone
-designer uses bundled, pinned builds of the NAM and Airwindows Consolidated VST3 plugins, with their own windows.
+**Design:** [PortableTones-Design.md](../../docs/ToneDesigner/PortableTones-Design.md). **Revision 4 (current
+direction):**
+
+- **Engine:** the Tone designer runs the **Stompbox engine** (NAM amps, tone stacks, cabinets and effects) inside
+  the host.
+- **Window:** the shipped window is drawn natively in the overlay.
+- **Development stand-in:** Stompbox's own desktop remote is used only during development.
+
+Revision 3's bundled-plugin approach is superseded.
 
 **Implementation guide:** [PortableTones-Implementation.md](../../docs/ToneDesigner/PortableTones-Implementation.md).
 
@@ -61,9 +68,23 @@ The full reports are `Offline-A2-full.json` and `Offline-A2-lite.json`.
   overlapping crossfade, and only non-NAM plugins ring out as tails (guide §6.2).
 - **Limit:** these offline measurements do not prove live ASIO deadline behaviour.
 
+## Stompbox engine (Revision 4)
+
+- **`VstHost/Stompbox/`:** `UPSTREAM.md` (pin, licence, local change) and `Build-Stompbox.ps1`. The script
+  builds `stompbox-capi.dll` from commit `17bc652`, with its remote server bound to 127.0.0.1.
+- **`VstHost/Source/StompboxEngine.{hpp,cpp}`:** loads the DLL, creates the engine on
+  `%APPDATA%\RocksmithAudioBridge\Stompbox`, prepares it while the stream is stopped, and processes mono into
+  stereo.
+- **`Main.cpp`:** the stream now goes through `SourceRouter`. With `HKCU\Software\RSMods\VstHost`
+  `StompboxDev` = 1, the host plays through Stompbox (with the safety limiter) and starts its local server for
+  StompboxRemote. It logs block timing every 30 s. Without the setting, or without the DLL, the VST chain plays as
+  before.
+- **Not built or run yet.** Only `StompboxEngine.cpp` passed a syntax check, against Windows header stubs.
+
 ## Next work
 
-1. Validate the M0a diagnostic build in a live game session, and resolve the arrangement identity.
-2. Build the pinned NAM and Airwindows Consolidated VST3s. Load them through the existing host, and measure
-   block times on the real callback (M0b).
-3. M1: `bundled:` ids, the Tone designer chain and `SourceRouter` wired into the host.
+1. Build `stompbox-capi.dll` and the host. Turn on `StompboxDev`, edit the rig with StompboxRemote, and judge
+   the sound and the logged p99.9/max block times at 64 and 128 frames.
+2. Validate the M0a diagnostic build in a live game session, and resolve the arrangement identity.
+3. If Stompbox passes: draw the Tone designer window in the overlay, sending Stompbox commands through the host.
+   Store song tones as Stompbox preset text plus the models and IRs they use.

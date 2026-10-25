@@ -19,6 +19,9 @@
 #include "BridgeAudio.hpp"
 #include "Chain.hpp"
 #include "HostLog.hpp"
+#include "SourceRouter.hpp"
+#include "StompboxEngine.hpp"
+#include "AudioFormat.hpp"
 
 #include "../../DLL/Shared/VstHostControl.hpp"
 
@@ -53,6 +56,10 @@ namespace
 
 	Chain g_chain;
 	BridgeAudio g_audio;
+	// The stream's sink: the VST chain, or the Stompbox engine while StompboxDev is on (LoadStompboxForDevelopment).
+	SourceRouter g_router;
+	StompboxEngine g_stompbox;
+	bool g_stompboxPlays = false;
 	HWND g_main = nullptr;            // message-only window (kMainClass)
 	HINSTANCE g_instance = nullptr;
 	HFONT g_font = nullptr;
@@ -142,6 +149,34 @@ namespace
 	}
 
 	std::wstring CurrentChainFile() { return DataDirectory() + L"\\Current.rabtone"; }
+
+	// Development only, until the Tone designer page drives Stompbox itself: with HKCU\Software\RSMods\VstHost
+	// StompboxDev = 1 the host plays through the Stompbox engine instead of the VST chain and starts Stompbox's local
+	// server, so its desktop remote (StompboxRemote, connect to 127.0.0.1) can edit the rig. Stompbox's models,
+	// cabinets and presets live in %APPDATA%\RocksmithAudioBridge\Stompbox.
+	void LoadStompboxForDevelopment()
+	{
+		DWORD enabled = 0;
+		if (!ReadDword(L"StompboxDev", enabled) || enabled == 0) return;
+		PWSTR appData = nullptr;
+		if (FAILED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, KF_FLAG_CREATE, nullptr, &appData)))
+		{
+			Log("stompbox: no AppData folder; the VST chain plays");
+			return;
+		}
+		const std::wstring dataPath = std::wstring(appData) + L"\\RocksmithAudioBridge\\Stompbox";
+		CoTaskMemFree(appData);
+		SHCreateDirectoryExW(nullptr, dataPath.c_str(), nullptr);
+		std::string error;
+		if (!g_stompbox.Load(dataPath, error))
+		{
+			Log("stompbox: StompboxDev is on but the engine did not load (%s); the VST chain plays", error.c_str());
+			return;
+		}
+		g_stompbox.StartRemoteServer();
+		g_stompboxPlays = true;
+		Log("stompbox: StompboxDev is on; the stream plays through Stompbox");
+	}
 
 	// Tone names become file names: keep them to characters every file system takes.
 	std::wstring SafeFilePart(const std::wstring& part)
@@ -1053,10 +1088,25 @@ namespace
 	void PublishMeters()
 	{
 		if (!g_control) return;
-		g_inputMeter = std::max(g_chain.TakeInputPeak(), g_inputMeter * 0.85f);
-		g_outputMeter = std::max(g_chain.TakeOutputPeak(), g_outputMeter * 0.85f);
+		const float inputPeak = g_stompboxPlays ? g_stompbox.TakeInputPeak() : g_chain.TakeInputPeak();
+		const float outputPeak = g_stompboxPlays ? g_stompbox.TakeOutputPeak() : g_chain.TakeOutputPeak();
+		g_inputMeter = std::max(inputPeak, g_inputMeter * 0.85f);
+		g_outputMeter = std::max(outputPeak, g_outputMeter * 0.85f);
 		g_control->inputPeak = static_cast<LONG>(std::min(g_inputMeter, 4.0f) * 1000.0f);
 		g_control->outputPeak = static_cast<LONG>(std::min(g_outputMeter, 4.0f) * 1000.0f);
+	}
+
+	// Every 30 s while Stompbox plays: how long the stream's blocks took, against the block period. The 99.9th
+	// percentile and the maximum are what decide late buffers, not the median.
+	void LogStreamTiming()
+	{
+		const BlockTiming timing = g_router.TakeTiming();
+		if (timing.blocks == 0) return;
+		const double periodMicroseconds = 1000000.0 * g_audio.Frames() / SAMPLE_RATE;
+		Log("stompbox: %llu blocks of %d frames (%.0f us each): median %.0f us, p99 %.0f us, p99.9 %.0f us, max %.0f us, limiter %.1f dB on the last block",
+			static_cast<unsigned long long>(timing.blocks), g_audio.Frames(), periodMicroseconds, timing.medianMicroseconds,
+			timing.percentile99Microseconds, timing.percentile999Microseconds, timing.maximumMicroseconds,
+			20.0 * std::log10(std::max(1e-6, 1.0 - g_router.LimiterReduction())));
 	}
 
 	// Open (or reopen after the game changed its buffer size) the stream and run the chain on it.
@@ -1065,7 +1115,14 @@ namespace
 		g_audio.Stop();
 		g_chain.Suspend();
 		std::string error;
-		if (!g_audio.Open(window, &g_chain, error) || !g_chain.Prepare(g_audio.Frames(), error) || !g_audio.Start(error))
+		if (!g_audio.Open(window, &g_router, error) || !g_chain.Prepare(g_audio.Frames(), error))
+		{
+			ShowError(error);
+			return false;
+		}
+		if (g_stompboxPlays) g_stompbox.Prepare(g_audio.Frames());   // the stream is stopped: Stompbox may allocate
+		g_router.SetSource(g_stompboxPlays ? static_cast<AudioSink*>(&g_stompbox) : &g_chain, g_stompboxPlays);
+		if (!g_audio.Start(error))
 		{
 			ShowError(error);
 			return false;
@@ -1137,6 +1194,7 @@ namespace
 			if (++g_ticks >= kAutosaveTicks)
 			{
 				g_ticks = 0;
+				if (g_stompboxPlays) LogStreamTiming();
 				if (g_chain.Dirty()) SaveCurrentChain();
 			}
 			return 0;
@@ -1446,6 +1504,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 	g_font = CreateFontW(-MulDiv(13, static_cast<int>(GetDpiForSystem()), 96), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
 		OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
 
+	LoadStompboxForDevelopment();
 	// In standby the stream opens when the player turns Tone designer on.
 	if (!g_standby && !StartAudio(g_main))
 	{
@@ -1493,6 +1552,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 		InterlockedExchange(&g_control->hostPid, 0);
 	}
 	g_audio.Close();
+	g_stompbox.Unload();
 	g_chain.ReleaseAll();
 	ReleasePluginFormats();
 	if (g_font) DeleteObject(g_font);
