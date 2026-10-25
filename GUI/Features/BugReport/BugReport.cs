@@ -123,6 +123,7 @@ namespace RSMods
 			var s = new StringBuilder();
 			s.AppendLine("Version: " + ProductInfo.DISPLAY_NAME);
 			s.AppendLine("Windows: " + Environment.OSVersion.VersionString + (Environment.Is64BitOperatingSystem ? " 64-bit" : " 32-bit"));
+			s.AppendLine("Game exe: " + DescribeGameExe(gameDirectory));
 			string mode;
 			try
 			{
@@ -143,6 +144,35 @@ namespace RSMods
 			if (AsioProxySetup.ReadLastBindError(out string failedDriver, out string reason))
 				s.AppendLine("Last launch bind error: " + (failedDriver.Length > 0 ? failedDriver + ": " : "") + reason);
 			return Scrub(s.ToString());
+		}
+
+		// The mod picks its addresses by the exe's PE header CheckSum (DLL/VersioningStruct.cpp ourVersionChecksums) and
+		// falls back to the Sept 2022 addresses on anything else, which crashes early with empty logs. Keep this table
+		// in step with that one.
+		private static readonly Dictionary<uint, string> KnownGameBuilds = new Dictionary<uint, string>
+		{
+			{ 0x00B13D7C, "Remastered September 2022" },
+			{ 0x0176EC34, "Learn & Play December 2024" },
+		};
+
+		private static string DescribeGameExe(string gameDirectory)
+		{
+			string exe = Path.Combine(gameDirectory, "Rocksmith2014.exe");
+			try
+			{
+				if (!File.Exists(exe)) return "missing";
+				using (var reader = new BinaryReader(new FileStream(exe, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete)))
+				{
+					long size = reader.BaseStream.Length;
+					reader.BaseStream.Seek(0x3C, SeekOrigin.Begin);   // e_lfanew
+					int peHeader = reader.ReadInt32();
+					reader.BaseStream.Seek(peHeader + 0x58, SeekOrigin.Begin);   // "PE\0\0" + file header (0x18) + OptionalHeader.CheckSum (0x40)
+					uint checksum = reader.ReadUInt32();
+					string edition = KnownGameBuilds.TryGetValue(checksum, out string name) ? name : "UNKNOWN build, the mod does not support it";
+					return edition + " (PE checksum 0x" + checksum.ToString("X8") + ", " + size + " bytes)";
+				}
+			}
+			catch (Exception error) { return "unreadable (" + error.Message + ")"; }
 		}
 
 		// Whole file when it is small enough; otherwise the first HeadKeep and last TailKeep bytes. Shared read and

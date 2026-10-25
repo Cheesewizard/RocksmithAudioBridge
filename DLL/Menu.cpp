@@ -71,8 +71,9 @@ namespace Menu {
 		}
 
 		// Rocksmith hides the OS cursor in-song, so draw a software cursor while a panel is open (only then,
-		// so gameplay is untouched otherwise). This is what makes the overlay clickable over the game.
-		ImGui::GetIO().MouseDrawCursor = Menu::menuEnabled || Menu::audioBridgeMenuEnabled || NoteByNote::Ui::IsTablaturePreviewVisible();
+		// so gameplay is untouched otherwise). This is what makes the overlay clickable over the game. The
+		// Look ahead tab window is open all song, so it shows the cursor only while the mouse is in use.
+		ImGui::GetIO().MouseDrawCursor = Menu::menuEnabled || Menu::audioBridgeMenuEnabled || NoteByNote::Ui::TablaturePreviewWantsCursor();
 
 		ImGui_ImplDX9_NewFrame();
 		ImGui_ImplWin32_NewFrame();

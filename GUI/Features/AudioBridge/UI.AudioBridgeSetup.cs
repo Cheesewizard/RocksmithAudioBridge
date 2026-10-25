@@ -228,7 +228,7 @@ namespace RSMods
 				int subHeight = TextRenderer.MeasureText("Ag", StudioTheme.Body).Height;
 				int top = (Height - titleHeight - subHeight) / 2;
 				TextRenderer.DrawText(g, "Rocksmith Audio Bridge", StudioTheme.Title, new Point(left, top), OverlayLook.Text, TextFormatFlags.NoPrefix);
-				TextRenderer.DrawText(g, "Setup. Change these with Rocksmith closed. Everything else is in the in-game overlay (press \\).",
+				TextRenderer.DrawText(g, "Setup. Change these with Rocksmith closed. Everything else is in the in-game overlay (press \\, or the key you set).",
 					StudioTheme.Body, new Rectangle(left, top + titleHeight, Math.Max(0, Width - left - LogicalToDeviceUnits(20)), subHeight),
 					OverlayLook.Muted, TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
 			}

@@ -424,6 +424,118 @@ namespace Overlay
 		return changed;
 	}
 
+	bool Segmented(const char* id, int* index, const char* const* options, int count, float width, const bool* enabled, const char* hint)
+	{
+		ImGui::PushID(id);
+		const float height = ImGui::GetFrameHeight();
+		const ImVec2 start = ImGui::GetCursorScreenPos();
+		const float segment = width / static_cast<float>(count);
+		ImDrawList* list = ImGui::GetWindowDrawList();
+		list->AddRectFilled(start, ImVec2(start.x + width, start.y + height), Fade(Color::Track), 5.0f);
+
+		const float slide = Animate("slide", static_cast<float>(*index), 18.0f);
+		const ImVec2 hiMin(start.x + slide * segment + 2.0f, start.y + 2.0f);
+		list->AddRectFilled(hiMin, ImVec2(hiMin.x + segment - 4.0f, start.y + height - 2.0f), Fade(Color::Accent), 4.0f);
+
+		bool changed = false;
+		for (int i = 0; i < count; ++i) {
+			ImGui::PushID(i);
+			const bool on = !enabled || enabled[i];
+			ImGui::SetCursorScreenPos(ImVec2(start.x + segment * i, start.y));
+			ImGui::BeginDisabled(!on);
+			if (ImGui::InvisibleButton("##seg", ImVec2(segment, height)) && *index != i) { *index = i; changed = true; }
+			ImGui::EndDisabled();
+			const bool hovered = on && ImGui::IsItemHovered();
+			Hint(hint);
+			const ImVec2 text = ImGui::CalcTextSize(options[i]);
+			const ImU32 color = i == *index ? Color::Text : !on ? Color::Faint : hovered ? Color::Text : Color::Muted;
+			list->AddText(ImVec2(start.x + segment * i + (segment - text.x) * 0.5f, start.y + (height - text.y) * 0.5f), Fade(color), options[i]);
+			ImGui::PopID();
+		}
+		ImGui::SetCursorScreenPos(ImVec2(start.x, start.y + height));
+		ImGui::Dummy(ImVec2(width, 0));
+		ImGui::PopID();
+		return changed;
+	}
+
+	int JoinedStepper(const char* id, float width, const char* text, const char* badge, ImU32 badgeColor,
+		bool canDown, bool canUp, bool dim, const char* downHint, const char* upHint)
+	{
+		ImGui::PushID(id);
+		const float height = ImGui::GetFrameHeight();
+		const float cell = std::min(height * 1.6f, width * 0.25f);
+		const ImVec2 start = ImGui::GetCursorScreenPos();
+		const ImVec2 end(start.x + width, start.y + height);
+		ImDrawList* list = ImGui::GetWindowDrawList();
+		list->AddRectFilled(start, end, Fade(Color::Track), 5.0f);
+
+		int stepped = 0;
+		for (int side = 0; side < 2; ++side) {
+			const bool down = side == 0;
+			const bool on = down ? canDown : canUp;
+			const float x0 = down ? start.x : end.x - cell;
+			ImGui::SetCursorScreenPos(ImVec2(x0, start.y));
+			ImGui::BeginDisabled(!on);
+			if (ImGui::InvisibleButton(down ? "##down" : "##up", ImVec2(cell, height))) stepped = down ? -1 : 1;
+			ImGui::EndDisabled();
+			const bool hovered = on && ImGui::IsItemHovered(), held = on && ImGui::IsItemActive();
+			Hint(down ? downHint : upHint);
+			if (held || hovered)
+				list->AddRectFilled(ImVec2(x0, start.y), ImVec2(x0 + cell, end.y), Fade(held ? Color::Accent : Color::Hover), 5.0f,
+					down ? ImDrawFlags_RoundCornersLeft : ImDrawFlags_RoundCornersRight);
+			const ImVec2 center(x0 + cell * 0.5f, start.y + height * 0.5f);
+			const float arm = height * 0.2f;
+			const ImU32 ink = Fade(on ? Color::Text : Color::Faint);
+			list->AddLine(ImVec2(center.x - arm, center.y), ImVec2(center.x + arm, center.y), ink, 2.0f);
+			if (!down) list->AddLine(ImVec2(center.x, center.y - arm), ImVec2(center.x, center.y + arm), ink, 2.0f);
+		}
+		list->AddLine(ImVec2(start.x + cell, start.y + 1.0f), ImVec2(start.x + cell, end.y - 1.0f), Fade(Color::CardEdge));
+		list->AddLine(ImVec2(end.x - cell, start.y + 1.0f), ImVec2(end.x - cell, end.y - 1.0f), Fade(Color::CardEdge));
+
+		// Middle: the text and the badge, centred together and clipped to the cell.
+		const float middle0 = start.x + cell, middle1 = end.x - cell;
+		const ImVec2 textSize = ImGui::CalcTextSize(text);
+		float badgeW = 0.0f, badgeH = 0.0f;
+		if (badge && badge[0]) {
+			ImGui::PushFont(g_fonts.caption);
+			const ImVec2 size = ImGui::CalcTextSize(badge);
+			ImGui::PopFont();
+			badgeW = size.x + 14.0f;
+			badgeH = size.y + 4.0f;
+		}
+		const float gap = badgeW > 0.0f ? 8.0f : 0.0f;
+		float x = middle0 + std::max(4.0f, (middle1 - middle0 - textSize.x - gap - badgeW) * 0.5f);
+		list->PushClipRect(ImVec2(middle0, start.y), ImVec2(middle1, end.y), true);
+		list->AddText(ImVec2(x, start.y + (height - textSize.y) * 0.5f), Fade(dim ? Color::Muted : Color::Text), text);
+		if (badgeW > 0.0f) {
+			x += textSize.x + gap;
+			const float y = start.y + (height - badgeH) * 0.5f;
+			list->AddRectFilled(ImVec2(x, y), ImVec2(x + badgeW, y + badgeH), Fade(dim ? WithAlpha(badgeColor, 0.35f) : badgeColor), badgeH * 0.5f);
+			ImGui::PushFont(g_fonts.caption);
+			list->AddText(ImVec2(x + 7.0f, y + 2.0f), Fade(IM_COL32(11, 17, 30, 255)), badge);
+			ImGui::PopFont();
+		}
+		list->PopClipRect();
+
+		ImGui::SetCursorScreenPos(ImVec2(start.x, end.y));
+		ImGui::Dummy(ImVec2(width, 0));
+		ImGui::PopID();
+		return stepped;
+	}
+
+	bool WideButton(const char* label, float width, bool primary, const char* hint)
+	{
+		if (primary) {
+			ImGui::PushStyleColor(ImGuiCol_Button, ImGui::ColorConvertU32ToFloat4(Color::Accent));
+			ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImGui::ColorConvertU32ToFloat4(Color::AccentHi));
+			ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImGui::ColorConvertU32ToFloat4(IM_COL32(37, 99, 235, 255)));
+		}
+		const bool pressed = ImGui::Button(label, ImVec2(width, ImGui::GetFrameHeight()));
+		if (primary) ImGui::PopStyleColor(3);
+		Hint(hint);
+		return pressed;
+	}
+
 	bool DropdownRow(const char* label, int* index, const std::vector<std::string>& items, const char* hint)
 	{
 		ImGui::PushID(label);

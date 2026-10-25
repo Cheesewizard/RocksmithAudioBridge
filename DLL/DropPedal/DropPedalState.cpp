@@ -28,7 +28,8 @@ namespace
 	// The tuning the player's guitar is physically in, as semitones from E standard.
 	// Everything the mod shows is relative to this, so a player who lives in Eb sees
 	// tunings named from Eb rather than being told to do the arithmetic themselves.
-	// Session state like the shift itself: a player in Eb sets it once per launch.
+	// Player 1's is saved in RSMods.ini ([Drop Pedal] BaseTuning) and restored at
+	// launch by DropPedal::LoadSettings; Player 2's is session state.
 	std::atomic<int> baseTuningSemitones[DropPedal::PLAYER_COUNT] = {};
 
 	const char* GetTuningNameAtIndex(int index)
@@ -119,6 +120,37 @@ bool DropPedalState::TryCyclePitchMode(DropPedal::PitchMode& nextMode)
 	return true;
 }
 
+bool DropPedalState::CanSelectPitchMode(DropPedal::PitchMode mode)
+{
+	const auto currentMode = GetPitchMode();
+	if (mode == currentMode) return true;
+	if (!isGameplayInProgress.load(std::memory_order_relaxed)) return true;
+	return currentMode != DropPedal::PitchMode::SpeakerMode
+		&& mode != DropPedal::PitchMode::SpeakerMode;
+}
+
+bool DropPedalState::SetPitchMode(DropPedal::PitchMode mode)
+{
+	if (!DropPedalState::CanSelectPitchMode(mode))
+	{
+		modeLockedNoticeTick.store(GetTickCount64(), std::memory_order_relaxed);
+		return false;
+	}
+	if (mode == GetPitchMode()) return true;
+
+	pitchMode.store(mode, std::memory_order_relaxed);
+	isSpeakerTargetSynchronized.store(false, std::memory_order_relaxed);
+	modeNoticeTick.store(GetTickCount64(), std::memory_order_relaxed);
+	return true;
+}
+
+bool DropPedalState::CanAdjustTarget()
+{
+	return GetPitchMode() != DropPedal::PitchMode::Off
+		&& !AreSpeakerControlsLocked()
+		&& !(IsSpeakerModeEnabled() && IsSpeakerTargetSynchronized());
+}
+
 bool DropPedalState::DisableSpeakerMode()
 {
 	auto expectedMode = DropPedal::PitchMode::SpeakerMode;
@@ -160,12 +192,7 @@ bool DropPedalState::IsSpeakerTargetSynchronized()
 /// </summary>
 bool DropPedalState::AdjustTarget(DropPedal::Player player, int semitoneDelta)
 {
-	if (GetPitchMode() == DropPedal::PitchMode::Off
-		|| AreSpeakerControlsLocked()
-		|| (IsSpeakerModeEnabled() && IsSpeakerTargetSynchronized()))
-	{
-		return false;
-	}
+	if (!CanAdjustTarget()) return false;
 
 	const int adjusted = DropPedalState::GetTargetSemitones(player) + semitoneDelta;
 	return SetTargetSemitones(player, adjusted);
@@ -203,6 +230,35 @@ bool DropPedalState::CycleBaseTuning(DropPedal::Player player)
 
 	baseTuningSemitones[playerIndex].store(next, std::memory_order_relaxed);
 	return true;
+}
+
+bool DropPedalState::CanChangeBaseTuning()
+{
+	return !AreSpeakerControlsLocked();
+}
+
+bool DropPedalState::SetBaseTuningSemitones(DropPedal::Player player, int semitonesFromE)
+{
+	if (!CanChangeBaseTuning()
+		|| semitonesFromE > 0
+		|| semitonesFromE <= -SEMITONES_PER_OCTAVE)
+	{
+		return false;
+	}
+
+	baseTuningSemitones[DropPedal::GetPlayerIndex(player)].store(semitonesFromE, std::memory_order_relaxed);
+	return true;
+}
+
+bool DropPedalState::TryParseTuningName(const std::string& name, int& semitonesFromE)
+{
+	for (int stepsBelowE = 0; stepsBelowE < SEMITONES_PER_OCTAVE; stepsBelowE++)
+	{
+		if (_stricmp(name.c_str(), GetTuningNameAtIndex(stepsBelowE)) != 0) continue;
+		semitonesFromE = -stepsBelowE;
+		return true;
+	}
+	return false;
 }
 
 int DropPedalState::GetTargetSemitones(DropPedal::Player player)

@@ -27,6 +27,8 @@ namespace VstHostLink
 		bool hostHung = false;        // the process is there but has stopped answering (not while loading)
 		bool hostRecovering = false;
 		bool hostDisconnected = false; // the host executable is present but has no usable shared protocol connection
+		bool scanningPlugins = false;
+		std::string pluginScanError;
 		bool busy = false;            // plugins loading, or commands not yet handled
 		std::vector<SlotView> slots;
 		int shownSlot = -1;

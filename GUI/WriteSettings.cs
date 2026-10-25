@@ -77,7 +77,8 @@ namespace RSMods
                     { ReadSettings.DropPedalPitchUpKeyIdentifier, CreateDefaultOnOldINI(ReadSettings.DropPedalPitchUpKeyIdentifier, "VK_OEM_PERIOD") },
                     { ReadSettings.DropPedalToggleKeyIdentifier, CreateDefaultOnOldINI(ReadSettings.DropPedalToggleKeyIdentifier, "VK_F7") },
 					{ ReadSettings.DropPedalBaseTuningKeyIdentifier, CreateDefaultOnOldINI(ReadSettings.DropPedalBaseTuningKeyIdentifier, "VK_F9") },
-					{ ReadSettings.RecordingHotkeyIdentifier, CreateDefaultOnOldINI(ReadSettings.RecordingHotkeyIdentifier, "VK_F6") }
+					{ ReadSettings.RecordingHotkeyIdentifier, CreateDefaultOnOldINI(ReadSettings.RecordingHotkeyIdentifier, "VK_F6") },
+					{ ReadSettings.OverlayKeyIdentifier, CreateDefaultOnOldINI(ReadSettings.OverlayKeyIdentifier, "VK_OEM_5") }
                 }
             );
             saveSettingsOrDefaults.Add(
@@ -103,6 +104,7 @@ namespace RSMods
                 {
                     { ReadSettings.DropPedalEnabledIdentifier, CreateDefaultOnOldINI(ReadSettings.DropPedalEnabledIdentifier, "on") },
                     { ReadSettings.DropPedalShowOverlayIdentifier, CreateDefaultOnOldINI(ReadSettings.DropPedalShowOverlayIdentifier, "on") },
+                    { ReadSettings.DropPedalBaseTuningIdentifier, CreateDefaultOnOldINI(ReadSettings.DropPedalBaseTuningIdentifier, "E") },
                     { ReadSettings.DropPedalCustomOverlayColorsIdentifier, CreateDefaultOnOldINI(ReadSettings.DropPedalCustomOverlayColorsIdentifier, "off") },
                     { ReadSettings.DropPedalOverlayDownColorIdentifier, CreateDefaultOnOldINI(ReadSettings.DropPedalOverlayDownColorIdentifier, "6BE06B") },
                     { ReadSettings.DropPedalOverlayUpColorIdentifier, CreateDefaultOnOldINI(ReadSettings.DropPedalOverlayUpColorIdentifier, "FFC24D") },

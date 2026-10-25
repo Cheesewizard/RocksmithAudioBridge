@@ -1,0 +1,54 @@
+{
+  "validation": "passed: SHA-256, model refusals, IR resampling/truncation, deduplication, managed copies, all effects, version refusals, analytic stereo render, tone round trip, source separation",
+  "benchmarkModel": "2d2d744516dc0197737a2c5001010429692d4cb20d72b08264781de626fcf4ca",
+  "slimmable": 0.0,
+  "timing": [
+    {
+      "frames": 64,
+      "graphs": 1,
+      "blocks": 20000,
+      "p50Us": 106.0,
+      "p99Us": 312.0,
+      "p999Us": 576.0,
+      "maxUs": 1477.0,
+      "blockPeriodUs": 1333.333333333333258,
+      "withinHalfBlockBudget": true
+    },
+    {
+      "frames": 64,
+      "graphs": 2,
+      "blocks": 20000,
+      "p50Us": 212.0,
+      "p99Us": 600.0,
+      "p999Us": 954.0,
+      "maxUs": 5994.5,
+      "blockPeriodUs": 1333.333333333333258,
+      "withinHalfBlockBudget": false
+    },
+    {
+      "frames": 128,
+      "graphs": 1,
+      "blocks": 20000,
+      "p50Us": 206.0,
+      "p99Us": 532.0,
+      "p999Us": 934.0,
+      "maxUs": 3763.100000000000364,
+      "blockPeriodUs": 2666.666666666666515,
+      "withinHalfBlockBudget": true
+    },
+    {
+      "frames": 128,
+      "graphs": 2,
+      "blocks": 20000,
+      "p50Us": 432.0,
+      "p99Us": 1068.0,
+      "p999Us": 1584.0,
+      "maxUs": 5712.200000000000728,
+      "blockPeriodUs": 2666.666666666666515,
+      "withinHalfBlockBudget": false
+    }
+  ],
+  "cpuBudgetPassed": false,
+  "timingScope": "Offline, one or two graphs (NAM, stereo 8192-sample IR, Chamber2, TapeDelay2). No tail pool, no AmpLink deadline acceptance. Histogram upper bounds at 2 microsecond resolution.",
+  "status": "passed"
+}

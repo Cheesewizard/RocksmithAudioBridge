@@ -318,6 +318,17 @@ namespace
 
 	std::recursive_mutex controllerMutex;
 	std::atomic<bool> tablaturePreviewDemand{ false };
+	// Tab reading: while the Look ahead window is open and not collapsed, Note
+	// by Note holds every note and detection is bypassed. The window asks on
+	// every frame it is drawn open, so the request lapses shortly after it is
+	// collapsed, closed or hidden.
+	bool readerHoldRequested = false;
+	std::chrono::steady_clock::time_point readerHoldRequestedAt{};
+	bool readerHoldEngaged = false;
+	// The held chord is one Note by Note would have let play through (chord
+	// holds or repeat-strum holds off), held only because the tab was open.
+	bool readerForcedHold = false;
+	bool wasReaderFlowOverride = false;
 	std::vector<ResearchProtocol::PreviewEvent> tablaturePreviewEvents;
 	std::unordered_map<uintptr_t, uint64_t> tablaturePreviewRecordIds;
 	ResearchProtocol::PreviewState tablaturePreviewState = {};
@@ -2986,6 +2997,38 @@ namespace
 			LOG_WARNING("(NBN TAB) Difficulty state disagrees with the target note's level for phrase iteration "
 				<< levelResult.observedIteration << " (target is on level " << levelResult.observedLevel
 				<< "); using the target's level there." << std::endl);
+		{
+			std::ostringstream bits;
+			for (uint32_t bit = 0; bit < 32; ++bit)
+				if (levelResult.maskBitCounts[bit] != 0)
+					bits << " 0x" << std::hex << (1u << bit) << std::dec << "=" << levelResult.maskBitCounts[bit];
+			LOG_INFO("(NBN TAB) Note mask bits shown:" << bits.str() << std::endl);
+		}
+		{
+			// Proof for the fields read past +0x34 (sustain, bend curve) and the
+			// chord-template names: a wrong offset shows as zero counts or odd values.
+			uint32_t named = 0, tied = 0, sustained = 0, bends = 0, curved = 0, preBends = 0, releases = 0;
+			float firstPeak = 0.0f, firstEnd = 0.0f;
+			for (const auto& event : events)
+			{
+				if (event.chordName[0] != 0) ++named;
+				for (uint32_t index = 0; index < event.positionCount && index < 6; ++index)
+				{
+					const auto& position = event.positions[index];
+					if ((position.techniques & ResearchProtocol::TAB_PREVIEW_TECHNIQUE_TIED) != 0) ++tied;
+					if (position.sustain > 0.0f) ++sustained;
+					if ((position.techniques & ResearchProtocol::TAB_PREVIEW_TECHNIQUE_BEND) == 0) continue;
+					++bends;
+					if (position.bendStart != 0.0f || position.bendEnd != position.bendPeak) ++curved;
+					if (position.bendStart > 0.2f) ++preBends;
+					if (position.bendEnd < position.bendPeak - 0.2f) ++releases;
+					if (bends == 1) { firstPeak = position.bendPeak; firstEnd = position.bendEnd; }
+				}
+			}
+			LOG_INFO("(NBN TAB) Chart extras: " << named << " named chords, " << tied << " tied, " << sustained
+				<< " sustained, " << bends << " bends (" << curved << " with a curve, " << preBends << " pre-bends, "
+				<< releases << " releases; first peak " << firstPeak << " end " << firstEnd << ")." << std::endl);
+		}
 		NoteByNote::Controller::GroupTablatureEvents(events, tablaturePreviewRecordIds, SAME_TIME_GROUP_EPSILON_SECONDS);
 		tablaturePreviewEvents = std::move(events);
 		tablaturePreviewOwner = owner;
@@ -3001,13 +3044,27 @@ namespace
 		tablaturePreviewState.iterationsBelowMax = levelResult.iterationsBelowMax;
 		{
 			std::vector<float> sectionStarts;
+			std::vector<std::string> sectionNames;
 			std::string sectionError;
-			if (!NoteByNote::Controller::ReadSectionStarts(container, read, sectionStarts, sectionError))
+			if (!NoteByNote::Controller::ReadSections(container, read, sectionStarts, sectionNames, sectionError))
 				LOG_WARNING("(NBN TAB) Section lines unavailable: " << sectionError << std::endl);
 			const uint32_t count = static_cast<uint32_t>((std::min)(sectionStarts.size(),
 				static_cast<size_t>(ResearchProtocol::PreviewState::MaxSections)));
 			tablaturePreviewState.sectionCount = count;
-			for (uint32_t index = 0; index < count; ++index) tablaturePreviewState.sectionStarts[index] = sectionStarts[index];
+			for (uint32_t index = 0; index < count; ++index)
+			{
+				tablaturePreviewState.sectionStarts[index] = sectionStarts[index];
+				char* name = tablaturePreviewState.sectionNames[index];
+				const size_t length = index < sectionNames.size()
+					? (std::min)(sectionNames[index].size(), sizeof(tablaturePreviewState.sectionNames[index]) - 1) : 0;
+				if (length != 0) std::memcpy(name, sectionNames[index].data(), length);
+				name[length] = '\0';
+			}
+			uint32_t namedSections = 0;
+			for (const auto& name : sectionNames) if (!name.empty()) ++namedSections;
+			LOG_INFO("(NBN TAB) Sections: " << count << ", " << namedSections << " named"
+				<< (sectionNames.empty() || sectionNames.front().empty() ? std::string() : ", first \"" + sectionNames.front() + "\"")
+				<< "." << std::endl);
 		}
 		{
 			std::vector<std::pair<float, int32_t>> measures;
@@ -3275,6 +3332,7 @@ namespace
 	void ClearSelection()
 	{
 		RestorePromotedRepeatChord(true);
+		readerForcedHold = false;
 		mlRescueRecord = 0;
 		enhancedRescueFeedback = {};
 		acceptedPickRecord = 0;
@@ -6070,13 +6128,42 @@ namespace
 				<< " note spacing)." << std::defaultfloat << std::endl);
 		}
 	}
+	bool IsReaderHoldActive()
+	{
+		return readerHoldRequested
+			&& std::chrono::steady_clock::now() - readerHoldRequestedAt < std::chrono::milliseconds(500);
+	}
+
+	// While the tab is open the held note stays held whatever is played. Picks
+	// and strums played meanwhile are dropped every tick, so closing the tab never accepts
+	// the note from something played during it; the note needs a fresh attack.
+	void HoldForReader()
+	{
+		if (!readerHoldEngaged)
+			LOG_INFO("(NBN TAB HOLD) Holding record=0x" << std::hex << selectedRecord << std::dec
+				<< " (string " << selectedString << " fret " << selectedFret
+				<< ") while the tab is open; detection is bypassed." << std::endl);
+		readerHoldEngaged = true;
+		holdProgressAnchor = std::chrono::steady_clock::now();
+		pickedAttacks.Clear();
+		chordAttacks.Clear();
+		chordAttacks.BeginHold(latestRawAudioSample);
+	}
+
 	void SyncFlowModeFromHost()
 	{
 		bool hostFlow = isFlowUntilMissEnabled;
-		if (!ResearchProbeRuntime::GetHostFlowModeEnabled(hostFlow) || hostFlow == isFlowUntilMissEnabled) return;
+		if (!ResearchProbeRuntime::GetHostFlowModeEnabled(hostFlow)) return;
+		// Flow lets a hit note pass without a hold; the open tab needs every
+		// note to stop, so flow is off for as long as the tab is open.
+		const bool reading = IsReaderHoldActive();
+		if (reading) hostFlow = false;
+		if (hostFlow == isFlowUntilMissEnabled) return;
 		isFlowUntilMissEnabled = hostFlow;
 		LOG_INFO("(NBN FLOW) FLOW MODE switched " << (hostFlow ? "On" : "Off")
-			<< " from the menu/overlay; the controller follows." << std::endl);
+			<< (reading || wasReaderFlowOverride ? " for the open tab" : " from the menu/overlay")
+			<< "; the controller follows." << std::endl);
+		wasReaderFlowOverride = reading;
 	}
 	bool HandleNoteNavigation(void* owner, int direction)
 	{
@@ -6110,7 +6197,24 @@ namespace
 		ProcessPendingStrumLedger();
 		TrackSameTimeGroup();
 		TickFlowSpeedCap(owner);
+		// Cleared here, not with the flow sync (which returns early when the
+		// host flow state cannot be read), so detection always comes back.
+		if (readerHoldEngaged && !IsReaderHoldActive())
+		{
+			readerHoldEngaged = false;
+			LOG_INFO("(NBN TAB HOLD) Tab collapsed or closed; detection is back and the held note needs a fresh attack." << std::endl);
+		}
 		if (noteNavigation != 0 && HandleNoteNavigation(owner, noteNavigation)) return;
+		if (readerForcedHold && !IsReaderHoldActive()
+			&& (gatePhase == GatePhase::Holding || gatePhase == GatePhase::WaitingForInputRelease))
+		{
+			LOG_INFO("(NBN TAB HOLD) Tab closed on chord record=0x" << std::hex << selectedRecord << std::dec
+				<< ", which Note by Note does not hold; skipping it like RIGHT ARROW." << std::endl);
+			consumedRecords.insert(selectedRecord);
+			PerformOwnedRelease(owner, "The tab closed on a chord that is not held");
+			ClearSelection();
+			return;
+		}
 		if (gatePhase == GatePhase::Idle) return;
 
 		LiveNote selected;
@@ -6224,7 +6328,15 @@ namespace
 				}
 				if (!isHoldSuppressed && updateTime >= selectedHoldTime)
 				{
-					if (selectedChordId != -1 && !areChordHoldsEnabled)
+					// Tab open: nothing plays through, so chords hold even with chord
+					// or repeat-strum holds off. Closing the tab skips such a chord.
+					const bool readerForcesHold = IsReaderHoldActive() && selectedChordId != -1
+						&& (!areChordHoldsEnabled || ((selected.mask & 0x80000000u) == 0 && !areRepeatStrumHoldsEnabled));
+					if (readerForcesHold)
+					{
+						readerForcedHold = true;
+					}
+					else if (selectedChordId != -1 && !areChordHoldsEnabled)
 					{
 						isHoldSuppressed = true;
 						LOG_INFO("(NBN LAS HOLD) Chord record 0x" << std::hex << selectedRecord
@@ -6233,7 +6345,7 @@ namespace
 							<< std::endl);
 						return;
 					}
-					if (selectedChordId != -1 && (selected.mask & 0x80000000u) == 0
+					else if (selectedChordId != -1 && (selected.mask & 0x80000000u) == 0
 						&& !areRepeatStrumHoldsEnabled)
 					{
 						isHoldSuppressed = true;
@@ -6432,6 +6544,11 @@ namespace
 					FaultWithoutRelease("The dense successor committed before a new input was armed");
 					return;
 				}
+				if (IsReaderHoldActive())
+				{
+					HoldForReader();
+					return;
+				}
 
 				if (IsPlainPickedTarget())
 				{
@@ -6606,6 +6723,11 @@ namespace
 					PerformOwnedRelease(owner,
 						"the held record committed while its native hit decision was blocked");
 					FaultWithoutRelease("The held record committed before an exact onset was accepted");
+					return;
+				}
+				if (IsReaderHoldActive())
+				{
+					HoldForReader();
 					return;
 				}
 				if (hasHoldProgressAnchor)
@@ -7593,6 +7715,12 @@ namespace
 
 		if (record == selectedRecord)
 		{
+			// Tab open: the game scores nothing on the held note (a held chord is
+			// accepted here, not in the Holding tick), so nothing moves the song on.
+			if (IsReaderHoldActive()
+				&& (gatePhase == GatePhase::Armed || gatePhase == GatePhase::Holding
+					|| gatePhase == GatePhase::WaitingForInputRelease))
+				return false;
 			if (gatePhase == GatePhase::Armed && isFlowUntilMissEnabled
 				&& armedBufferCommitRecord == selectedRecord)
 			{
@@ -8552,12 +8680,16 @@ uint8_t NoteByNoteNativeScoring::CopyTablaturePreview(
 {
 	if (state == nullptr) return 0;
 	std::lock_guard<std::recursive_mutex> lock(controllerMutex);
+	readerHoldRequested = state->readerHold != 0;
+	readerHoldRequestedAt = std::chrono::steady_clock::now();
 	if (state->levelMode == ResearchProtocol::TAB_PREVIEW_LEVEL_MAXIMUM
 		|| state->levelMode == ResearchProtocol::TAB_PREVIEW_LEVEL_CURRENT)
 		tablaturePreviewRequestedMode.store(state->levelMode);
 	tablaturePreviewDemand.store(true);
 	*state = tablaturePreviewState;
 	state->currentTargetId = tablaturePreviewCacheValid ? ResolveTablatureTargetId() : 0;
+	state->readerHolding = readerHoldEngaged && IsReaderHoldActive()
+		&& (gatePhase == GatePhase::Holding || gatePhase == GatePhase::WaitingForInputRelease) ? 1 : 0;
 	const uint32_t total = static_cast<uint32_t>(tablaturePreviewEvents.size());
 	state->eventCount = total;
 	if (events == nullptr || capacity == 0) return 1;

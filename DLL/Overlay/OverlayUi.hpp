@@ -100,6 +100,17 @@ namespace Overlay
 	bool SliderRow(const char* label, float* value, float min, float max, const char* format,
 		bool* committed = nullptr, const char* hint = nullptr);
 	bool SegmentedRow(const char* label, int* index, const char* const* options, int count, const char* hint = nullptr);
+	// SegmentedRow's control without the label column, `width` wide at the cursor. `enabled` (optional, `count`
+	// entries) greys out options that cannot be picked right now; `hint` shows over any segment.
+	bool Segmented(const char* id, int* index, const char* const* options, int count, float width,
+		const bool* enabled = nullptr, const char* hint = nullptr);
+	// One fixed-width control: a minus cell, `text` (plus an optional `badge` pill in `badgeColor`) centred in the
+	// middle, a plus cell. The width never follows the text, so the cells never move. Frame height. Returns -1 or
+	// +1 on the frame a cell is clicked, else 0. `dim` mutes the text (the value is not in effect).
+	int JoinedStepper(const char* id, float width, const char* text, const char* badge, ImU32 badgeColor,
+		bool canDown, bool canUp, bool dim, const char* downHint = nullptr, const char* upHint = nullptr);
+	// Button of a set width and frame height, so it lines up with the dropdowns and segmented controls beside it.
+	bool WideButton(const char* label, float width, bool primary = false, const char* hint = nullptr);
 	// Labelled drop-down list; `index` -1 shows an empty box. Returns true on the frame a different item is picked.
 	bool DropdownRow(const char* label, int* index, const std::vector<std::string>& items, const char* hint = nullptr);
 	bool ColorSwatch(const char* label, float rgb[3], bool* committed, const char* hint = nullptr);

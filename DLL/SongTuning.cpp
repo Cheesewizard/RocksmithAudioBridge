@@ -113,9 +113,15 @@ Tuning SongTuning::GetTuningAtTuner() {
 
 	std::string tuningText = unsanitizedTuningText;
 
+	// Callers poll this while the tuner is up (Speaker Mode and the overlay's Match song, four times a second), so
+	// an unusable tuning name is logged once per name rather than on every read.
+	// Kept as a hash in an atomic: the callers run on different threads.
+	static std::atomic<size_t> lastUnusableTuning{ 0 };
+	const size_t tuningTextHash = std::hash<std::string>{}(tuningText);
+
 	// If it's a custom tuning we don't know the tuning, so we might as well stop here.
 	if (tuningText == (std::string)"CUSTOM TUNING") {
-		LOG_WARNING("Invalid Tuning: CUSTOM TUNING" << std::endl);
+		if (lastUnusableTuning.exchange(tuningTextHash) != tuningTextHash) LOG_WARNING("Invalid Tuning: CUSTOM TUNING" << std::endl);
 		return Tuning();
 	}
 
@@ -141,7 +147,7 @@ Tuning SongTuning::GetTuningAtTuner() {
 		}
 	}
 
-	LOG_WARNING("Invalid Tuning: Tuning doesn't exist in RSMods tuning list" << std::endl);
+	if (lastUnusableTuning.exchange(tuningTextHash) != tuningTextHash) LOG_WARNING("Invalid Tuning: Tuning doesn't exist in RSMods tuning list" << std::endl);
 	return Tuning();
 }
 

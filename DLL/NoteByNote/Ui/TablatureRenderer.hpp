@@ -17,7 +17,13 @@ namespace NoteByNote
 			Slide = 8u,
 			Muted = 16u,
 			Harmonic = 32u,
-			Tap = 64u
+			Tap = 64u,
+			PinchHarmonic = 128u,
+			PalmMute = 256u,
+			Vibrato = 512u,
+			Tremolo = 1024u,
+			Accent = 2048u,
+			Tied = 4096u  // linked continuation of the previous note on the string
 		};
 
 		struct Position
@@ -27,12 +33,18 @@ namespace NoteByNote
 			std::uint32_t techniques = 0;
 			int bendSemitones = 0;
 			int slideTargetFret = -1;
+			float sustain = 0.0f;
+			// Bend shape in semitones: at the attack, highest, last (see protocol).
+			float bendStart = 0.0f;
+			float bendPeak = 0.0f;
+			float bendEnd = 0.0f;
 		};
 
 		struct Event
 		{
 			std::uint64_t id = 0;
 			float time = 0.0f;
+			std::string chordName;
 			std::vector<Position> positions;
 		};
 
@@ -54,20 +66,28 @@ namespace NoteByNote
 			float loopEnd = 0.0f;
 			// Section start times, drawn as section lines.
 			std::vector<float> sectionStarts;
+			std::vector<std::string> sectionNames;  // parallel to sectionStarts
 			// Bar lines: downbeat time and measure number (from 0).
 			std::vector<std::pair<float, int>> bars;
 			int stringCount = 6;
 			std::string tuningLabels[6];
 			std::vector<Event> events;
 			std::string error;
+			// A note is held because the tab is open.
+			bool readerHolding = false;
 		};
 
 		// Draws one self-contained, scrollable tablature window. The snapshot is read-only;
 		// scrolling and target-follow state are presentation state owned by this function.
 		// Sets *toggleLevels when the user presses the 100% / current level button and
 		// *toggleDock when they press the dock button. Docked, the window spans the
-		// top of the screen; its height stays the user's.
+		// top of the screen; its height stays the user's. *expanded is set
+		// to whether the window was drawn open this frame (false when collapsed).
+		// *highlight is the current-note and loop colour (0xRRGGBB, 0 = the overlay
+		// accent); the toolbar wheel edits it live and sets *highlightSaved once the
+		// picker closes, so the caller saves it then.
 		void Draw(const Snapshot& snapshot, float textScale, bool* open, bool* toggleLevels = nullptr,
-			bool docked = false, bool* toggleDock = nullptr);
+			bool docked = false, bool* toggleDock = nullptr, bool* expanded = nullptr,
+			std::uint32_t* highlight = nullptr, bool* highlightSaved = nullptr);
 	}
 }

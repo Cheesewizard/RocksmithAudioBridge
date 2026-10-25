@@ -14,6 +14,7 @@ namespace {
 		return checksum;
 	}
 
+	// Mirrored in GUI/Features/BugReport/BugReport.cs KnownGameBuilds; add new builds there too.
 	static const std::map<DWORD, VersionType> ourVersionChecksums
 	{
 		{0x00B13D7C, VersionType::RemasteredSeptember2022},

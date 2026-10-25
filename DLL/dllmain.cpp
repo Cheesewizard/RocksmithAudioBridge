@@ -138,13 +138,19 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM keyPressed, LPARAM lParam) {
 	}
 	// The overlay toggle is owned by RSModsPlus. Consume it before ImGui's general keyboard capture so
 	// keyboard navigation inside the focused panel cannot prevent the same key from closing the panel.
-	if (GameState::GameLoaded && keyPressed == VK_OEM_5 && (msg == WM_KEYDOWN || msg == WM_KEYUP)) {
+	// The key is [Keybinds] OverlayKey (backslash by default; the overlay's General page rebinds it).
+	const unsigned int overlayKey = Settings::GetOverlayKey();
+	if (GameState::GameLoaded && keyPressed == overlayKey && (msg == WM_KEYDOWN || msg == WM_KEYUP)) {
 		Keybindings::HandleOverlayKey(msg, lParam);
 		if (msg == WM_KEYUP) Keybindings::HandleKeyUp(keyPressed);
 		return true;
 	}
-	if (GameState::GameLoaded && msg == WM_CHAR && keyPressed == 0x5C) // backslash '\'
-		return true;
+	// Its character too, so it never types into the song-list search. The picker refuses letters and digits, so
+	// this only ever swallows a punctuation character.
+	if (GameState::GameLoaded && msg == WM_CHAR) {
+		const UINT overlayChar = MapVirtualKeyW(overlayKey, MAPVK_VK_TO_CHAR) & 0x7FFF;
+		if (overlayChar != 0 && keyPressed == overlayChar) return true;
+	}
 
 	// Keep ImGui's input state synchronized even while its panels are closed. It must see a button release or
 	// focus-loss event that occurs after a panel closes; otherwise MouseDown remains latched and the next open
@@ -273,6 +279,9 @@ HRESULT APIENTRY D3DHooks::Hook_EndScene(IDirect3DDevice9* pDevice) {
 	// Patches dinput8's shared mouse vtable so overlay clicks never reach the game. Once, on the render thread.
 	static const bool inputCaptureInstalled = OverlayInputCapture::Install();
 	(void)inputCaptureInstalled;
+	// The D3D text HUD (signal, pitch line, detection readout) draws first so the ImGui windows, the
+	// Look ahead tab above all, sit on top of it instead of under it.
+	GameOverlay::RenderOverlay(pDevice);
 	Menu::RenderImGuiMenu();
 	OverlayInputCapture::SetMouseCapture((Menu::menuEnabled || Menu::audioBridgeMenuEnabled || NoteByNote::Ui::IsTablaturePreviewVisible()) && ImGui::GetIO().WantCaptureMouse);
 	// Keyboard: only while a text field is being typed into, not whenever a panel has focus, so gameplay keys keep
@@ -288,7 +297,6 @@ HRESULT APIENTRY D3DHooks::Hook_EndScene(IDirect3DDevice9* pDevice) {
 	}
 	Menu::UpdateStringTextures(pDevice);
 	UpdateGameWindowStacking();
-	GameOverlay::RenderOverlay(pDevice);
 	D3DHooks::RegenerateTwitchNoteColors(pDevice);
 	
 	return originalReturn;

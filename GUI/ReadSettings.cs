@@ -34,7 +34,7 @@ namespace RSMods
                              ToggleLoftKey, ShowSongTimerKey, ForceReEnumerationKey, RainbowStringsKey, RainbowNotesKey,
                              RemoveLyricsKey, RRSpeedKey, TuningOffsetKey, ToggleExtendedRangeKey, LoopStartKey, LoopEndKey,
                              RewindKey, DropPedalPitchDownKey, DropPedalPitchUpKey, DropPedalToggleKey,
-                             DropPedalBaseTuningKey, RecordingHotkey,
+                             DropPedalBaseTuningKey, RecordingHotkey, OverlayKey,
 
                              // Audio Key Bindings
                              MasterVolumeKey, SongVolumeKey, Player1VolumeKey, Player2VolumeKey, MicrophoneVolumeKey, VoiceOverVolumeKey, SFXVolumeKey, DisplayMixerKey, MutePlayer1Key, MutePlayer2Key,
@@ -119,6 +119,7 @@ namespace RSMods
             DropPedalToggleKeyIdentifier        = "DropPedalToggleKey = ",
             DropPedalBaseTuningKeyIdentifier    = "DropPedalBaseTuningKey = ",
 			RecordingHotkeyIdentifier               = "RecordingHotkey = ",
+			OverlayKeyIdentifier                    = "OverlayKey = ",
 
             // Audio Keybindings
             MasterVolumeKeyIdentifier           = "MasterVolumeKey = ",
@@ -194,6 +195,7 @@ namespace RSMods
             DropPedalEnabledIdentifier                   = "EnableDropPedal = ",
             DropPedalCustomOverlayColorsIdentifier       = "CustomOverlayColors = ",
             DropPedalShowOverlayIdentifier               = "ShowOverlay = ",
+            DropPedalBaseTuningIdentifier                = "BaseTuning = ",
             DropPedalOverlayDownColorIdentifier          = "OverlayDownColor = ",
             DropPedalOverlayUpColorIdentifier            = "OverlayUpColor = ",
             DropPedalOverlayStatusColorIdentifier        = "OverlayStatusColor = ",
@@ -352,6 +354,8 @@ namespace RSMods
                 return "on";
             if (identifierToGrab == DropPedalShowOverlayIdentifier)
                 return "on";
+            if (identifierToGrab == DropPedalBaseTuningIdentifier)
+                return "E";
             if (identifierToGrab == DropPedalCustomOverlayColorsIdentifier)
                 return "off";
             if (identifierToGrab == DropPedalOverlayDownColorIdentifier)
@@ -366,6 +370,8 @@ namespace RSMods
                 return "-1";
 			if (identifierToGrab == RecordingHotkeyIdentifier)
 				return "VK_F6";
+			if (identifierToGrab == OverlayKeyIdentifier)
+				return "VK_OEM_5";
 			if (identifierToGrab == CableForPlayerTwoIdentifier)
 				return "off";
             if (identifierToGrab == MonitorOutputIdentifier)
@@ -407,6 +413,7 @@ namespace RSMods
             AudioBridgeLimiterIdentifier,
             AudioBridgeLimiterLevelIdentifier,
             RecordingHotkeyIdentifier,
+            OverlayKeyIdentifier,   // the overlay's General page rebinds it
 			MonitorOutputIdentifier,
 			AudioDiagnosticsOverlayIdentifier,
 			NOTE_BY_NOTE_DETECTION_OVERLAY_IDENTIFIER,
@@ -425,6 +432,7 @@ namespace RSMods
 			NOTE_BY_NOTE_PARTIAL_COLOR_IDENTIFIER,
 			NOTE_BY_NOTE_REJECTED_COLOR_IDENTIFIER,
 			DropPedalShowOverlayIdentifier,
+			DropPedalBaseTuningIdentifier,
 			DropPedalCustomOverlayColorsIdentifier,
 			DropPedalOverlayDownColorIdentifier,
 			DropPedalOverlayUpColorIdentifier,
@@ -530,6 +538,8 @@ namespace RSMods
                     return FillSettingVariable(DropPedalBaseTuningKeyIdentifier, SettingType.VKEY, currentLine, out DropPedalBaseTuningKey);
 				if (IdentifierIsFound(currentLine, RecordingHotkeyIdentifier, identifierToGrab))
 					return FillSettingVariable(RecordingHotkeyIdentifier, SettingType.VKEY, currentLine, out RecordingHotkey);
+				if (IdentifierIsFound(currentLine, OverlayKeyIdentifier, identifierToGrab))
+					return FillSettingVariable(OverlayKeyIdentifier, SettingType.VKEY, currentLine, out OverlayKey);
                 #endregion
                 #region Audio Keybindings
                 // Audio Keybindings
@@ -713,6 +723,8 @@ namespace RSMods
                     return FillSettingVariable(DropPedalCustomOverlayColorsIdentifier, SettingType.ON_OFF, currentLine, out DropPedalCustomOverlayColors);
                 if (IdentifierIsFound(currentLine, DropPedalShowOverlayIdentifier, identifierToGrab))
                     return FillSettingVariable(DropPedalShowOverlayIdentifier, SettingType.ON_OFF, currentLine, out var dropPedalShowOverlay);
+                if (IdentifierIsFound(currentLine, DropPedalBaseTuningIdentifier, identifierToGrab))
+                    return FillSettingVariable(DropPedalBaseTuningIdentifier, SettingType.STRING, currentLine, out var dropPedalBaseTuning);
                 if (IdentifierIsFound(currentLine, DropPedalOverlayDownColorIdentifier, identifierToGrab))
                     return FillSettingVariable(DropPedalOverlayDownColorIdentifier, SettingType.STRING, currentLine, out DropPedalOverlayDownColor);
                 if (IdentifierIsFound(currentLine, DropPedalOverlayUpColorIdentifier, identifierToGrab))

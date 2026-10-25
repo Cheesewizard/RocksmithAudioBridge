@@ -194,7 +194,7 @@ namespace Keybindings {
 			|| keyPressed == VK_RCONTROL || keyPressed == VK_LMENU || keyPressed == VK_RMENU
 			|| keyPressed == VK_LWIN || keyPressed == VK_RWIN) return;
 		capturingKey = false;
-		if (keyPressed == VK_ESCAPE || keyPressed == VK_OEM_5) return;   // cancel
+		if (keyPressed == VK_ESCAPE || keyPressed == Settings::GetOverlayKey()) return;   // cancel
 		capturedKey = static_cast<unsigned int>(keyPressed);
 	}
 
@@ -204,8 +204,8 @@ namespace Keybindings {
 		return vk != 0;
 	}
 
-	// Toggle the in-game Audio Bridge overlay with backslash. Not a letter, so it never types into the song-list
-	// search and never collides with Rocksmith's Ctrl menus. Toggles on release (a held key repeats its
+	// Toggle the in-game Audio Bridge overlay with [Keybinds] OverlayKey (backslash by default). Never a letter or
+	// digit (the picker refuses them), so it never types into the song-list search. Toggles on release (a held key repeats its
 	// key-down), and only for a release that pairs with a press this window saw, at most once per 250 ms. A
 	// lone release (the press went to another window before focus moved here) or a bouncing switch
 	// (release, press, release within a few ms) used to toggle a second time, so the overlay shut right after

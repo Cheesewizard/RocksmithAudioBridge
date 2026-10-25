@@ -37,13 +37,14 @@ https://github.com/user-attachments/assets/1b51d057-285e-4ded-a113-5c25af1f3346
 - [Stable audio on any speakers](#stable-audio-on-any-speakers)
 - [Drop Pedal](#drop-pedal)
 - [Speaker Mode](#speaker-mode)
-- [Note by Note (beta)](#note-by-note-beta)
+- [Note by Note](#note-by-note)
 - [Tone designer](#tone-designer)
 - [External amp](#external-amp)
 - [Recording](#recording)
 - [Mixer](#mixer)
 - [Guitar input cleanup](#guitar-input-cleanup)
 - [Output switching](#output-switching)
+- [Latency readout](#latency-readout)
 
 ## Install
 
@@ -61,9 +62,11 @@ RSMods first. Run it again to **Reinstall / Repair** (for example after a Steam
 file check) or **Uninstall**. Uninstall asks before removing your settings and
 UsbDk, and never touches your recordings.
 
-Requirements: the Steam version of Rocksmith 2014 Remastered on Windows, and
-the MS Visual C++ 2015-2019 redistributable. Works with a Real Tone Cable or an
-ASIO interface through [RS_ASIO](https://github.com/mdias/rs_asio).
+Requirements: the Steam version of Rocksmith 2014 Remastered on Windows (the
+September 2022 build or the Learn & Play edition), and the MS Visual C++
+2015-2019 redistributable. Works with a Real Tone Cable, another USB guitar
+cable, or an ASIO interface through [RS_ASIO](https://github.com/mdias/rs_asio),
+including interfaces whose ASIO driver is 64-bit only.
 
 **ASIO users need RS_ASIO 0.6.1 or newer**; the
 [latest release](https://github.com/mdias/rs_asio/releases/latest) is
@@ -91,7 +94,10 @@ settings and opens an email to the developer.
 ## The overlay
 
 Press `\` in game to open the Audio Bridge overlay. Each feature below says
-which page of it to use. Overlay settings are saved to `RSMods.ini`.
+which page of it to use. Overlay settings are saved to `RSMods.ini`. The
+overlay reopens on the last page you used. To open it with another key, use
+General > **Overlay key** > **Change key** (letters and digits are refused,
+since they would type into the song search).
 
 Keys can be changed in RSMods.exe, on the Keybindings tab. Upgrading from an
 earlier version keeps the keys you already had.
@@ -133,7 +139,12 @@ To play an Eb song on an E-standard guitar, press `F7` once, then `,` once.
 | Shift down / up one semitone | `,` / `.` | `Ctrl+,` / `Ctrl+.` |
 | Set the guitar's physical tuning | `F9` | `Ctrl+F9` |
 
-**Overlay page:** Drop Pedal (readout and colours).
+**Overlay page:** Drop Pedal. Everything the keys do has a control there too:
+**-** and **+** for the shift, **Off / Drop Pedal / Speaker Mode** for the mode,
+and **My guitar is in** for the tuning your strings are really in, which is
+saved for the next launch. **Match song** (in the tuner or during a song) sets
+the shift that puts your guitar in the song's tuning. The page also holds the
+readout and its colours.
 
 ## Speaker Mode
 
@@ -149,7 +160,7 @@ Speaker Mode is a global setting that only Player 1 can change; in
 multiplayer, both players tune to Player 1's tuning. For separate settings per
 player, use the Drop Pedal.
 
-## Note by Note (beta)
+## Note by Note
 
 A Riff Repeater practice mode that checks every note you play. Detection
 combines the game's own matcher, a raw pitch verifier and a bundled
@@ -169,25 +180,52 @@ sits just below it.
 | Emergency skip, if you ever get stuck on a note | `Right Arrow` |
 
 **Overlay page:** Note by Note (settings only: readout, target style and size,
-colours, and dragging the on-screen readout into place).
+colours, and dragging the on-screen readout into place). The page shows while
+Note by Note is switched on.
 
-Choose **Look ahead** as the target style for a native tablature window.
-Drag its title to move it and its edges or corner to resize it; the window
-remembers its size. Scroll horizontally to inspect upcoming notes without
-seeking or advancing Note by Note. **Back to current** resumes following the
-current target. The target Size control changes the tab text size.
-The window shows the whole song at the difficulty you are playing each phrase
-at, following Dynamic Difficulty and the Riff Repeater slider. **Compare with
-100%** switches to the full chart and **Back to my level** switches back,
-keeping your place in the song. Notes are spaced by time, so a fast run reads
-as a tight group and a rest as a gap. Slides are drawn as the usual / or \
-stroke between the frets. Bar lines with measure numbers come from
-the chart's beat grid, heavier lines mark the song's sections, the Riff
-Repeater loop is shaded (when the whole loop fits, it starts at the left edge
-and stays put on every repeat), notes you have played are dimmed, and the
-current note sits a quarter of the way in so the notes before it stay visible.
-The strings stretch to fill the window's height. **Dock to top** pins the
-window across the top of the screen.
+Choose **Look ahead** as the target style for a tablature window of the whole
+song. Drag its title to move it and its edges or corner to resize it; the
+window remembers its size, and **Dock to top** pins it across the top of the
+screen. Scroll it, or click and drag the notes sideways, to read ahead without
+seeking or advancing Note by Note;
+**Back to current** follows the current note again. The target Size control
+changes the tab text size.
+- It shows each phrase at the difficulty you are playing it at, following
+  Dynamic Difficulty and the Riff Repeater slider. **Compare with 100%**
+  switches to the full chart and **Back to my level** switches back, keeping
+  your place in the song.
+- Notes are spaced by time, so a fast run reads as a tight group and a rest as
+  a gap. Hammer-ons and pull-offs (h, p), slides (/ and \), taps (T),
+  fret-hand mutes (x), harmonics (<12>), pinch harmonics (PH) and palm mutes
+  (P.M.) are marked.
+- Bends rise above the staff with their size (1/2, full), and show a pre-bend
+  as a straight arrow and a release as an arrow back down. A note held over
+  from the one before is a tied note in brackets, like (7). Vibrato is a wavy
+  line over the note, with accents (>) and tremolo picking (slashes) above it.
+  Marks above the staff stack instead of running into each other.
+- Chord names sit over the chords when the chord changes or a new bar starts.
+- Bar lines with measure numbers come from the chart's beat grid, heavier lines
+  mark the song's sections with their names (Verse, Chorus), and the Riff
+  Repeater loop is shaded. When the whole
+  loop fits, it starts at the left edge and stays put on every repeat. Notes you
+  have played are dimmed and the current note is highlighted.
+- Make the window taller and the tab becomes a page: rows of whole bars that
+  fill the window's width, stacked to fill its height. Each row is only as
+  tall as its own bends, marks and chord names need. The current note's row
+  stays near the top, a loop starts its own row, and the mouse wheel moves a
+  row at a time. Dragging the page sideways (or up and down) moves it a row at
+  a time too.
+- While the window is open, note detection is off: Note by Note holds each
+  note whatever you play, so you can read and play over the tab at your own
+  pace. `Right Arrow` moves on to the next note. Collapse the window (the arrow
+  on its title bar) to play as normal again.
+- The colour square on the toolbar picks the highlight colour for the current
+  note and the loop from a colour wheel, if the default blue is hard to see.
+  The number on the current note switches between white and black to stay
+  readable, and **Default** goes back to blue.
+- The window never takes the keyboard, so the mod's hotkeys and `Right Arrow`
+  keep working while it is open, and the mouse cursor only shows while you use
+  the mouse.
 
 Works on guitar and bass arrangements. Bass support is experimental: it uses
 the game's own detection with a bass-trained machine-learning model.
@@ -204,7 +242,7 @@ Works with an ASIO interface and with the Real Tone Cable. With the cable, the
 bridge reads it directly over USB through UsbDk when it can, about 10 ms sooner
 than the Windows cable input, and uses the Windows input otherwise.
 
-**Overlay page:** Amp sim, Tone designer tab. If a plugin stops responding,
+**Overlay page:** Tone designer, Tone designer tab. If a plugin stops responding,
 **Restart Tone designer** reloads the last saved chain without restarting the game.
 The restart control remains available while a plugin is loading.
 
@@ -223,7 +261,7 @@ the outputs to **Rocksmith out L** and **Rocksmith out R**.
 
 <img src=".github/images/external-amp-amplitube-setup.png" alt="AmpliTube 5 audio settings using Rocksmith Audio Bridge ASIO" width="600">
 
-**Overlay page:** Amp sim, External app tab (status, return level). The safety
+**Overlay page:** Tone designer, External app tab (status, return level). The safety
 buffer is on the page's Amp link card.
 
 **Needs:** an ASIO interface with the Audio Bridge driver set as the `Driver` in
@@ -241,7 +279,8 @@ the game sound.
 The recording is exactly what you hear: the song, your guitar and, with
 [External amp](#external-amp), your amp sim's tone. It works the same whichever
 playback device the sound goes to. The dry take is your clean guitar, ready to
-re-amp later. Each game launch saves into its own dated folder under
+re-amp later. In multiplayer each player gets their own dry take (`-dry.wav`
+and `-dry-p2.wav`), in step with the game mix. Each game launch saves into its own dated folder under
 `Recordings` in your Rocksmith folder. Pick another folder on the Rocksmith Audio
 Bridge page in RSMods. For video, the overlay's Record page sets the quality:
 **High** (sharpest), **Standard** (about half the size) or **Small** (1080p, for
@@ -266,19 +305,42 @@ Levels reset when the game closes.
 ## Guitar input cleanup
 
 Fixes a quiet or noisy guitar signal before Rocksmith hears it: make-up gain, a
-noise suppressor that keeps your sustain, a compressor, a hum filter that
-removes only the mains hum, and an override for Rocksmith's own noise gate.
-Works with a Real Tone Cable or an ASIO interface.
+noise gate that keeps your sustain, a compressor, and an override for
+Rocksmith's own noise gate. Works with a Real Tone Cable or an ASIO interface.
 
-**Overlay page:** Input (with a live level meter).
+The noise gate is a pedal: **Open pedal** shows it as a stomp box over the game
+with four dials (Threshold, Decay, Reduction, Attack), a light, a level meter
+with the threshold marked on it, and a footswitch. It also cleans the signal the
+Tone designer and external amp sims get, and each Tone designer tone can keep
+its own gate settings.
+
+In Cable mode, a cable that is not a Real Tone Cable plays through the Windows
+default recording device, and the **Input device** picker chooses another one.
+
+**Overlay page:** Input (one tab per player, with a live level meter).
 
 ## Output switching
 
 Move the game's sound to another playback device while you play, with no
 restart. The change lasts until you close Rocksmith. An optional limiter caps
-the maximum volume.
+the maximum volume. ASIO interfaces are listed too, labelled **ASIO 32-bit** or
+**ASIO 64-bit**; a 64-bit-only driver runs in a separate 64-bit program and
+plays one buffer later.
 
 **Overlay page:** Output.
+
+## Latency readout
+
+The overlay header shows the delay from your guitar to your ears. In ASIO mode
+the bridge measures it: it times the game's amp (and the Tone designer or an
+external amp sim) with a second of test chirps in the menus, once per interface
+and buffer size, and can time your interface itself through a cable from the
+headphone jack into the guitar input. Each figure is marked **measured**,
+**est.** or **guess**. In Cable mode the game tones figure is a rough estimate.
+
+**Overlay page:** General (Latency card: **Recalibrate**, **Measure the
+interface...**). General > Display > **Latency readout** shows a compact one on
+the game screen.
 
 ---
 

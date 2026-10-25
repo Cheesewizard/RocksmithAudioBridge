@@ -75,6 +75,7 @@ void DropPedalInput::CycleBaseTuning()
 	if (RejectUnavailablePlayerTwo(player)) return;
 
 	if (!DropPedalState::CycleBaseTuning(player)) return;
+	DropPedal::SaveBaseTuning(player);
 
 	LOG_INFO("Drop pedal " << GetPlayerName(player) << " base tuning now "
 		<< DropPedalState::GetBaseTuningName(player) << std::endl);

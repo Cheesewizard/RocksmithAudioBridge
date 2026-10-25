@@ -7,7 +7,7 @@
 
 namespace ResearchProtocol
 {
-	constexpr uint32_t PROBE_API_VERSION = 17;
+	constexpr uint32_t PROBE_API_VERSION = 19;
 	constexpr uint32_t PROBE_API_MIN_VERSION = 14;
 
 	constexpr uint32_t NECK_PLACEMENT_STEP_PRE = 0x100;

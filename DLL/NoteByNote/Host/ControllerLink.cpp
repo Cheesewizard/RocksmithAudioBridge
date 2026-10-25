@@ -219,7 +219,13 @@ bool ResearchBridge::CopyTablaturePreview(
 	ResearchProtocol::PreviewState& state)
 {
 	std::lock_guard<std::recursive_mutex> lock(probeMutex);
+	// Clear the outputs but keep what the window asks for (level mode, tab hold):
+	// wiping those made Compare with 100% and the tab hold silently do nothing.
+	const uint8_t levelMode = state.levelMode;
+	const uint8_t readerHold = state.readerHold;
 	state = {};
+	state.levelMode = levelMode;
+	state.readerHold = readerHold;
 	if (!loadedProbe.isInitialized || loadedProbe.api.CopyTablaturePreview == nullptr) return false;
 	return loadedProbe.api.CopyTablaturePreview(events, capacity, &state) != 0;
 }

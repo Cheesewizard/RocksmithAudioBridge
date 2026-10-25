@@ -19,6 +19,8 @@
 #include <string>
 #include <vector>
 
+namespace VstHost::Builtin { class AssetLibrary; }
+
 namespace VstHost
 {
 	class PluginHost final : private juce::AudioProcessorListener, private juce::ComponentListener
@@ -27,7 +29,7 @@ namespace VstHost
 		PluginHost();
 		~PluginHost() override;
 
-		bool Load(const std::wstring& path, std::string& error);
+		bool Load(const std::wstring& path, std::string& error, const std::vector<char>* builtinState = nullptr, std::shared_ptr<Builtin::AssetLibrary> library = {});
 		void Unload();
 		bool Prepare(int frames, std::string& error);   // main thread; the stream may be running (it plays silence meanwhile)
 		void Suspend();                                  // main thread; returns once the stream thread is out of the plugin

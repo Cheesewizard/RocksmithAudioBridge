@@ -18,6 +18,7 @@
 
 #include "BridgeAudio.hpp"
 #include "Chain.hpp"
+#include "../Tools/BuiltinCheck.hpp"
 #include "HostLog.hpp"
 
 #include "../../DLL/Shared/VstHostControl.hpp"
@@ -48,7 +49,7 @@ namespace
 	constexpr int kAutosaveTicks = 60;   // 30 s
 	constexpr UINT_PTR kKeyTimer = 2;
 	constexpr UINT kKeyMs = 15;
-	constexpr UINT kOverlayKey = VK_OEM_5;   // backslash, the game overlay's key (DLL/dllmain.cpp)
+	constexpr UINT kDefaultOverlayKey = VK_OEM_5;   // backslash, the game overlay's default key (DLL/dllmain.cpp)
 	constexpr int kStripDip = 26;            // drag bar above the editor
 
 	Chain g_chain;
@@ -588,18 +589,25 @@ namespace
 		while (!g_windows.empty()) CloseWindow(g_windows.back()->plugin);
 	}
 
+	// The overlay's key, as the overlay last published it ([Keybinds] OverlayKey); backslash before it has.
+	UINT OverlayKey()
+	{
+		const LONG key = g_control ? g_control->overlayKey : 0;
+		return key > 0 && key < 256 ? static_cast<UINT>(key) : kDefaultOverlayKey;
+	}
+
 	// The overlay key while a plugin window has focus: the game never sees it, so hand focus back and pass the key on.
 	// The game then closes its overlay, and the windows follow it (UpdateWindows).
-	void OnOverlayKeyReleased()
+	void OnOverlayKeyReleased(UINT key)
 	{
 		const HWND foreground = GetForegroundWindow();
 		if (!foreground || !IsOurWindow(foreground)) return;
 		if (HWND game = FindGameWindow())
 		{
 			SetForegroundWindow(game);
-			const UINT scan = MapVirtualKeyW(kOverlayKey, MAPVK_VK_TO_VSC);
-			PostMessageW(game, WM_KEYDOWN, kOverlayKey, 1 | (scan << 16));
-			PostMessageW(game, WM_KEYUP, kOverlayKey, 1 | (scan << 16) | (1u << 30) | (1u << 31));
+			const UINT scan = MapVirtualKeyW(key, MAPVK_VK_TO_VSC);
+			PostMessageW(game, WM_KEYDOWN, key, 1 | (scan << 16));
+			PostMessageW(game, WM_KEYUP, key, 1 | (scan << 16) | (1u << 30) | (1u << 31));
 		}
 	}
 
@@ -1105,8 +1113,9 @@ namespace
 				// Only while one of our windows has the keyboard (otherwise the game sees the key itself): the key
 				// read goes through Steam's overlay hook, which Steam injects into this process, so it is not free.
 				const HWND foreground = GetForegroundWindow();
-				const bool down = foreground && IsOurWindow(foreground) && (GetAsyncKeyState(kOverlayKey) & 0x8000) != 0;
-				if (g_keyDown && !down) OnOverlayKeyReleased();
+				const UINT overlayKey = OverlayKey();
+				const bool down = foreground && IsOurWindow(foreground) && (GetAsyncKeyState(overlayKey) & 0x8000) != 0;
+				if (g_keyDown && !down) OnOverlayKeyReleased(overlayKey);
 				g_keyDown = down;
 				UpdateWindows();
 				PollCommand();
@@ -1353,6 +1362,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 	// JUCE hosts the plugins (PluginHost.cpp). This thread is its message thread; the Win32 loop below dispatches
 	// its messages too. Plugins and the format list are released before this goes out of scope.
 	juce::ScopedJuceInitialiser_GUI juce;
+	int toolExitCode = 0;
+	if (VstHost::Tools::TryRunBuiltinCheck(toolExitCode)) return toolExitCode;
 	g_mainThread = GetCurrentThreadId();
 	InstallCrashReporter();
 

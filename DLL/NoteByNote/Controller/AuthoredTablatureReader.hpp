@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cfloat>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -30,6 +31,11 @@ namespace NoteByNote::Controller
 			int32_t phraseIteration = -1;
 			float bendAmount = 0.0f;
 			uint8_t slideTo = 0xFF;
+			float sustain = 0.0f;
+			// Bend shape from the bend curve (semitones); see ReadBendShape.
+			float bendStart = 0.0f;
+			float bendPeak = 0.0f;
+			float bendEnd = 0.0f;
 		};
 
 		struct Iteration
@@ -42,6 +48,7 @@ namespace NoteByNote::Controller
 		{
 			std::vector<std::vector<Record>> levels;
 			std::vector<std::array<uint8_t, 6>> chordFrets;
+			std::vector<std::string> chordNames;
 			std::vector<uint32_t> phraseMaxDifficulties;
 			std::vector<Iteration> iterations;
 		};
@@ -67,6 +74,9 @@ namespace NoteByNote::Controller
 		int32_t observedIteration = -1;
 		int32_t observedLevel = -1;
 		bool observedDisagreed = false;  // iterationLevels named a different level
+		// How many shown records carry each note mask bit; logged so the
+		// technique bits can be checked against a song's known techniques.
+		std::array<uint32_t, 32> maskBitCounts = {};
 	};
 
 	// Reader contract: read(address, value) copies one typed value, and
@@ -105,8 +115,20 @@ namespace NoteByNote::Controller
 		// 0x79E920 when the mask has SLIDE and not SLIDE_UNPITCHED; the builder
 		// returns on 0xFF and compares it with the next note's fret.
 		static constexpr uintptr_t RECORD_SLIDE_TO = 0x34;
+		// Sustain, max bend and the inline bend curve, proven by decompile
+		// 2026-10-23 (atlas Generated/decomp-note-record-tab-fields-2026-10-23.txt):
+		// the note constructor 0x557480 fills 32 bend points of 12 bytes from
+		// +0x44 {time, step in semitones, int16, u8, u8}; 0x79D240 tests the count
+		// at +0x1C4; 0x8747F0 sets +0x3C sustain (mask 0x2000 when > 0); 0x551990
+		// sets +0x40 max bend (mask 0x1000). 0x44 + 32 * 12 + 4 = the 0x1C8 stride.
+		static constexpr uintptr_t RECORD_SUSTAIN = 0x3C;
+		static constexpr uintptr_t RECORD_BEND_POINTS = 0x44;
+		static constexpr uintptr_t BEND_POINT_STRIDE = 0x0C;
+		static constexpr uint32_t BEND_POINT_CAPACITY = 32;
+		static constexpr uintptr_t RECORD_BEND_POINT_COUNT = 0x1C4;
 		static constexpr uintptr_t CHORD_STRIDE = 0x48;
 		static constexpr uintptr_t CHORD_FRETS = 0x04;
+		static constexpr uintptr_t CHORD_NAME = 0x28;   // char[32]; proven, drawn by 0x7A14A0
 
 		// Dynamic Difficulty state, shared by DD and the Riff Repeater difficulty
 		// slider. Proven by decompile (FUN_0043C660 feeds GameComponentDD's
@@ -123,6 +145,8 @@ namespace NoteByNote::Controller
 		static constexpr uintptr_t SECTIONS_END = 0xF8;
 		static constexpr uintptr_t SECTION_STRIDE = 0x58;
 		static constexpr uintptr_t SECTION_START = 0x24;
+		static constexpr uintptr_t SECTION_NAME = 0x00;  // char[32]; proven, 0x55D050 compares it with "noguitar"
+		static constexpr size_t NAME_CAPACITY = 32;
 
 		// Beat grid (SNG BPM / XML ebeats): one record per beat. Live-checked
 		// 2026-10-19 (1454 beats, 364 measures, every section starts on a beat);
@@ -134,11 +158,22 @@ namespace NoteByNote::Controller
 		static constexpr uintptr_t BEAT_MEASURE = 0x04;   // int16
 		static constexpr uintptr_t BEAT_IN_MEASURE = 0x06; // int16, 0 = downbeat
 
+		// SNG note mask bits (same table as the hammer-on, pull-off, tap and
+		// fret-hand mute bits already in use).
+		static constexpr uint32_t NOTE_MASK_HARMONIC = 0x00000020u;
+		static constexpr uint32_t NOTE_MASK_PALM_MUTE = 0x00000040u;
+		static constexpr uint32_t NOTE_MASK_PINCH_HARMONIC = 0x00008000u;
 		static constexpr uint32_t NOTE_MASK_SLIDE = 0x00000800u;
 		static constexpr uint32_t NOTE_MASK_SLIDE_UNPITCHED = 0x00400000u;
 		static constexpr uint32_t NOTE_MASK_BEND = 0x00001000u;
 		static constexpr uint32_t NOTE_MASK_IGNORE = 0x00040000u;
 		static constexpr uint32_t NOTE_MASK_CHILD = 0x10000000u;
+		// Consistent with decompile, not proven: tremolo has its own effect path
+		// (0x8760D0), accent changes the marker colour state (0x79D240); vibrato
+		// is only seen on another struct carrying the same mask (0x877E70).
+		static constexpr uint32_t NOTE_MASK_TREMOLO = 0x00000010u;
+		static constexpr uint32_t NOTE_MASK_VIBRATO = 0x00010000u;
+		static constexpr uint32_t NOTE_MASK_ACCENT = 0x04000000u;
 
 		template <typename Reader>
 		static bool ReadAuthoredTablatureIdentity(
@@ -183,7 +218,17 @@ namespace NoteByNote::Controller
 		template <typename Reader>
 		static bool ReadSectionStarts(uintptr_t container, const Reader& read, std::vector<float>& starts, std::string& error)
 		{
+			std::vector<std::string> names;
+			return ReadSections(container, read, starts, names, error);
+		}
+
+		// Section start times and names ("verse", "chorus"), in authored order.
+		template <typename Reader>
+		static bool ReadSections(uintptr_t container, const Reader& read, std::vector<float>& starts,
+			std::vector<std::string>& names, std::string& error)
+		{
 			starts.clear();
+			names.clear();
 			uintptr_t begin = 0;
 			uintptr_t end = 0;
 			if (container == 0 || !ReadVector(container, SECTIONS_BEGIN, SECTIONS_END, SECTION_STRIDE, 1024, read,
@@ -193,7 +238,9 @@ namespace NoteByNote::Controller
 			for (size_t index = 0; index < bytes.size() / SECTION_STRIDE; ++index)
 			{
 				const float start = Field<float>(bytes, index * SECTION_STRIDE + SECTION_START);
-				if (std::isfinite(start) && start >= 0.0f) starts.push_back(start);
+				if (!std::isfinite(start) || start < 0.0f) continue;
+				starts.push_back(start);
+				names.push_back(Name(bytes, index * SECTION_STRIDE + SECTION_NAME));
 			}
 			return true;
 		}
@@ -303,12 +350,16 @@ namespace NoteByNote::Controller
 			{
 				for (const Record& record : layout.levels[level])
 				{
-					if ((record.mask & (NOTE_MASK_IGNORE | NOTE_MASK_CHILD)) != 0) continue;
+					// Linked children (the chart's linkNext continuations) are kept and
+					// drawn as tied notes; they are never a target.
+					if ((record.mask & NOTE_MASK_IGNORE) != 0) continue;
 					auto selected = selectedLevelByIteration.find(record.phraseIteration);
 					if (selected == selectedLevelByIteration.end() || selected->second != level) continue;
 
+					for (uint32_t bit = 0; bit < 32; ++bit)
+						if ((record.mask & (1u << bit)) != 0) ++outcome.maskBitCounts[bit];
 					ResearchProtocol::PreviewEvent event = {};
-					if (!BuildEvent(record, layout.chordFrets, event, error)) return false;
+					if (!BuildEvent(record, layout.chordFrets, layout.chordNames, event, error)) return false;
 					if (event.positionCount == 0) continue;
 					events.push_back(event);
 				}
@@ -360,6 +411,55 @@ namespace NoteByNote::Controller
 			T value{};
 			std::memcpy(&value, bytes.data() + offset, sizeof(T));
 			return value;
+		}
+
+		// A fixed char[32] name: up to the first NUL, printable ASCII only.
+		static std::string Name(const std::vector<uint8_t>& bytes, size_t offset)
+		{
+			std::string name;
+			for (size_t index = 0; index < NAME_CAPACITY && offset + index < bytes.size(); ++index)
+			{
+				const uint8_t c = bytes[offset + index];
+				if (c == 0) break;
+				if (c < 0x20 || c > 0x7E) return {};
+				name.push_back(static_cast<char>(c));
+			}
+			return name;
+		}
+
+		// The bend's shape from its curve. A first point at the attack that is
+		// already bent is a pre-bend; a last point below the peak is a release.
+		// An unreadable curve keeps the max bend as a plain bend up.
+		static void ReadBendShape(const std::vector<uint8_t>& bytes, size_t base, Record& record)
+		{
+			const float peak = std::isfinite(record.bendAmount) && record.bendAmount > 0.0f && record.bendAmount <= 4.0f
+				? record.bendAmount : 0.0f;
+			record.bendStart = 0.0f;
+			record.bendPeak = peak;
+			record.bendEnd = peak;
+			const int32_t count = Field<int32_t>(bytes, base + RECORD_BEND_POINT_COUNT);
+			if (count <= 0 || count > static_cast<int32_t>(BEND_POINT_CAPACITY)) return;
+			float firstTime = 0.0f, firstStep = 0.0f, lastStep = 0.0f, highest = 0.0f;
+			float previousTime = -FLT_MAX;
+			for (int32_t index = 0; index < count; ++index)
+			{
+				const size_t point = base + RECORD_BEND_POINTS + static_cast<size_t>(index) * BEND_POINT_STRIDE;
+				const float time = Field<float>(bytes, point);
+				const float step = Field<float>(bytes, point + 4);
+				if (!std::isfinite(time) || !std::isfinite(step) || step < 0.0f || step > 4.0f || time < previousTime) return;
+				previousTime = time;
+				if (index == 0) { firstTime = time; firstStep = step; }
+				lastStep = step;
+				highest = (std::max)(highest, step);
+			}
+			if (highest <= 0.0f) return;
+			// A pre-bend only when the first point is on the attack itself: the
+			// highway's own test (0x79F880, |first - note time| < 0.001). Scoring
+			// (0x7E3700) allows 0.05 s, but custom charts often put the first
+			// point of an ordinary bend 10..50 ms in, which is not a pre-bend.
+			record.bendStart = std::fabs(firstTime - record.time) < 0.001f ? firstStep : 0.0f;
+			record.bendPeak = highest;
+			record.bendEnd = lastStep;
 		}
 
 		static void Mix(uint64_t& hash, uintptr_t value)
@@ -473,6 +573,9 @@ namespace NoteByNote::Controller
 			layout.chordFrets.resize(bytes.size() / CHORD_STRIDE);
 			for (size_t index = 0; index < layout.chordFrets.size(); ++index)
 				layout.chordFrets[index] = Field<std::array<uint8_t, 6>>(bytes, index * CHORD_STRIDE + CHORD_FRETS);
+			layout.chordNames.resize(layout.chordFrets.size());
+			for (size_t index = 0; index < layout.chordNames.size(); ++index)
+				layout.chordNames[index] = Name(bytes, index * CHORD_STRIDE + CHORD_NAME);
 
 			if (!ReadBlock(read, phrasesBegin, phrasesEnd, bytes, "phrase vector", error)) return false;
 			layout.phraseMaxDifficulties.resize(bytes.size() / PHRASE_STRIDE);
@@ -512,6 +615,9 @@ namespace NoteByNote::Controller
 					record.phraseIteration = Field<int32_t>(bytes, base + RECORD_PHRASE_ITERATION);
 					record.bendAmount = Field<float>(bytes, base + RECORD_BEND_AMOUNT);
 					record.slideTo = Field<uint8_t>(bytes, base + RECORD_SLIDE_TO);
+					record.sustain = Field<float>(bytes, base + RECORD_SUSTAIN);
+					if (!std::isfinite(record.sustain) || record.sustain < 0.0f || record.sustain > 60.0f) record.sustain = 0.0f;
+					if ((record.mask & NOTE_MASK_BEND) != 0) ReadBendShape(bytes, base, record);
 					if (!std::isfinite(record.time))
 					{
 						error = "note time is not finite";
@@ -526,6 +632,7 @@ namespace NoteByNote::Controller
 		static bool BuildEvent(
 			const Record& record,
 			const std::vector<std::array<uint8_t, 6>>& chordFrets,
+			const std::vector<std::string>& chordNames,
 			ResearchProtocol::PreviewEvent& event,
 			std::string& error)
 		{
@@ -546,6 +653,14 @@ namespace NoteByNote::Controller
 				return false;
 			}
 			const auto& frets = chordFrets[static_cast<size_t>(record.chordId)];
+			// A linked chord continuation repeats its chord; the name shows once.
+			if ((record.mask & NOTE_MASK_CHILD) == 0 && static_cast<size_t>(record.chordId) < chordNames.size())
+			{
+				const std::string& name = chordNames[static_cast<size_t>(record.chordId)];
+				const size_t length = (std::min)(name.size(), sizeof(event.chordName) - 1);
+				std::copy_n(name.begin(), length, event.chordName);
+				event.chordName[length] = '\0';
+			}
 			for (uint8_t stringIndex = 0; stringIndex < 6; ++stringIndex)
 				if (frets[stringIndex] < 0x1A)
 					AddPosition(event, stringIndex, frets[stringIndex], record);
@@ -563,6 +678,14 @@ namespace NoteByNote::Controller
 			if ((mask & NoteByNote::NOTE_MASK_PULL_OFF) != 0) position.techniques |= ResearchProtocol::TAB_PREVIEW_TECHNIQUE_PULL_OFF;
 			if ((mask & NoteByNote::NOTE_MASK_TAP) != 0) position.techniques |= ResearchProtocol::TAB_PREVIEW_TECHNIQUE_TAP;
 			if (NoteByNote::ChordAttackGate::IsFretHandMuted(mask)) position.techniques |= ResearchProtocol::TAB_PREVIEW_TECHNIQUE_MUTED;
+			if ((mask & NOTE_MASK_HARMONIC) != 0) position.techniques |= ResearchProtocol::TAB_PREVIEW_TECHNIQUE_HARMONIC;
+			if ((mask & NOTE_MASK_PALM_MUTE) != 0) position.techniques |= ResearchProtocol::TAB_PREVIEW_TECHNIQUE_PALM_MUTE;
+			if ((mask & NOTE_MASK_PINCH_HARMONIC) != 0) position.techniques |= ResearchProtocol::TAB_PREVIEW_TECHNIQUE_PINCH_HARMONIC;
+			if ((mask & NOTE_MASK_VIBRATO) != 0) position.techniques |= ResearchProtocol::TAB_PREVIEW_TECHNIQUE_VIBRATO;
+			if ((mask & NOTE_MASK_TREMOLO) != 0) position.techniques |= ResearchProtocol::TAB_PREVIEW_TECHNIQUE_TREMOLO;
+			if ((mask & NOTE_MASK_ACCENT) != 0) position.techniques |= ResearchProtocol::TAB_PREVIEW_TECHNIQUE_ACCENT;
+			if ((mask & NOTE_MASK_CHILD) != 0) position.techniques |= ResearchProtocol::TAB_PREVIEW_TECHNIQUE_TIED;
+			position.sustain = record.sustain;
 			// Pitched slides carry their target fret; an unpitched slide has none
 			// (its target field is not proven) and is drawn as a falling line.
 			if ((mask & NOTE_MASK_SLIDE) != 0 && (mask & NOTE_MASK_SLIDE_UNPITCHED) == 0 && record.slideTo < 0x1A)
@@ -580,6 +703,9 @@ namespace NoteByNote::Controller
 				position.techniques |= ResearchProtocol::TAB_PREVIEW_TECHNIQUE_BEND;
 				if (std::isfinite(record.bendAmount))
 					position.bendSemitones = static_cast<int32_t>(std::lround(record.bendAmount));
+				position.bendStart = record.bendStart;
+				position.bendPeak = record.bendPeak;
+				position.bendEnd = record.bendEnd;
 			}
 		}
 	};
@@ -600,6 +726,12 @@ namespace NoteByNote::Controller
 	bool ReadMeasureStarts(uintptr_t container, const Reader& read, std::vector<std::pair<float, int32_t>>& measures, std::string& error)
 	{
 		return AuthoredTablatureReader::ReadMeasureStarts(container, read, measures, error);
+	}
+
+	template <typename Reader>
+	bool ReadSections(uintptr_t container, const Reader& read, std::vector<float>& starts, std::vector<std::string>& names, std::string& error)
+	{
+		return AuthoredTablatureReader::ReadSections(container, read, starts, names, error);
 	}
 
 	template <typename Reader>

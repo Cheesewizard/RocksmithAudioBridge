@@ -30,6 +30,8 @@
 #include "Core/Extensions.hpp"
 #include "NoteByNote/Host/ControllerBridge.hpp"
 #include "DropPedal/DropPedal.hpp"
+#include "DropPedal/DropPedalState.hpp"
+#include "NoteByNote/Host/NoteByNoteMode.hpp"
 #include "NoteByNote/Ui/NoteByNoteMenu.hpp"
 #include "DropPedal/DropPedalOverlay.hpp"
 #include "GameState.hpp"
@@ -205,15 +207,24 @@ namespace Overlay
 			return out;
 		}
 
-		std::string RecordHotkeyName()
+		std::string KeyName(unsigned int vk)
 		{
-			const int vk = static_cast<int>(Settings::GetKeyBind("RecordingHotkey"));
 			if (vk > 0) {
 				const UINT scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
 				wchar_t name[64]{};
 				if (scan && GetKeyNameTextW(static_cast<LONG>(scan << 16), name, 64) > 0) return Utf8(name);
 			}
 			return "not set";
+		}
+
+		// The overlay key's name for the "Press \ to ..." hints, drawn every frame: looked up again only on a rebind.
+		const std::string& OverlayKeyName()
+		{
+			static unsigned int cachedVk = 0;
+			static std::string cachedName;
+			const unsigned int vk = Settings::GetOverlayKey();
+			if (vk != cachedVk) { cachedVk = vk; cachedName = KeyName(vk); }
+			return cachedName;
 		}
 
 		// Record hotkey picker. Keys the game, Windows or Steam already own are refused, and so is any key another
@@ -241,6 +252,7 @@ namespace Overlay
 				{ "DropPedalPitchDownKey", "Drop Pedal pitch down" }, { "DropPedalPitchUpKey", "Drop Pedal pitch up" },
 				{ "RRSpeedKey", "Riff Repeater speed" }, { "SFXVolumeKey", "Effects volume" },
 				{ "CustomSongListTitles", "custom song list titles" }, { "MenuToggleKey", "the RSMods menu" },
+				{ "OverlayKey", "the overlay key" }, { "RecordingHotkey", "the record hotkey" },
 			};
 			if (const auto found = spelled.find(name); found != spelled.end()) return found->second;
 			std::string base = name.size() > 3 && name.compare(name.size() - 3, 3, "Key") == 0 ? name.substr(0, name.size() - 3) : name;
@@ -253,33 +265,56 @@ namespace Overlay
 			return words;
 		}
 
-		void RecordHotkeyPicker()
+		// The overlay key is pressed in menus with the song-list search open, so a letter or digit would type into it
+		// (and could not be typed into the overlay's own text fields either).
+		const char* OverlayKeyReason(unsigned int vk)
 		{
-			static std::string message;
+			if ((vk >= '0' && vk <= '9') || (vk >= 'A' && vk <= 'Z'))
+				return "Letters and digits type into the song search, so the overlay key can't be one. Pick a symbol or function key.";
+			return nullptr;
+		}
+
+		// A [Keybinds] entry's picker. The key capture is shared, so only the picker that started it takes the key.
+		// extraReason refuses keys this binding can't use on top of ReservedKeyReason.
+		void KeyBindPicker(const char* bindName, const char* label, const char* (*extraReason)(unsigned int) = nullptr)
+		{
+			static std::string owner;
+			static std::map<std::string, std::string, std::less<>> messages;
+			std::string& message = messages[bindName];
+			const bool mine = owner == bindName;
 			unsigned int vk = 0;
-			if (Keybindings::TakeCapturedKey(vk)) {
-				const std::string clash = Settings::FindKeyBindUsing(vk, "RecordingHotkey");
+			if (mine && Keybindings::TakeCapturedKey(vk)) {
+				const std::string clash = Settings::FindKeyBindUsing(vk, bindName);
+				const char* extra = extraReason ? extraReason(vk) : nullptr;
 				if (const char* reason = ReservedKeyReason(vk)) message = reason;
+				else if (extra) message = extra;
+				else if (clash == "OverlayKey") message = "That key opens the overlay. Pick another, or change the overlay key on the General page.";
 				else if (!clash.empty()) message = "That key is already used by " + KeyBindDisplayName(clash) + ". Pick another, or rebind that one in RSMods, Keybindings.";
-				else if (!Settings::SetKeyBind("RecordingHotkey", vk, true)) message = "That key can't be used as a hotkey.";
+				else if (!Settings::SetKeyBind(bindName, vk, true)) message = "That key can't be used as a hotkey.";
 				else message.clear();
 			}
-			const bool capturing = Keybindings::IsCapturingKey();
-			// Label on its own line and the button under it, so it lines up with Open folder above.
-			ImGui::TextUnformatted(capturing ? "Record hotkey: press a key (Esc cancels)" : ("Record hotkey: " + RecordHotkeyName()).c_str());
+			const bool capturing = mine && Keybindings::IsCapturingKey();
+			// Label on its own line and the button under it, so it lines up with the buttons above.
+			const std::string text = std::string(label) + (capturing ? ": press a key (Esc cancels)" : ": " + KeyName(Settings::GetKeyBind(bindName)));
+			ImGui::TextUnformatted(text.c_str());
+			ImGui::PushID(bindName);
 			if (capturing) {
 				if (Button("Cancel")) Keybindings::CancelKeyCapture();
 			}
 			else if (Button("Change key", false, "Press this, then the key you want. Keys the game, Windows, Steam or another RSMods shortcut already use are refused.")) {
 				message.clear();
+				owner = bindName;
 				Keybindings::BeginKeyCapture();
 			}
+			ImGui::PopID();
 			if (!message.empty()) {
 				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Color::Warn));
 				ImGui::TextWrapped("%s", message.c_str());
 				ImGui::PopStyleColor();
 			}
 		}
+
+		void RecordHotkeyPicker() { KeyBindPicker("RecordingHotkey", "Record hotkey"); }
 
 		std::string FormatTime(double seconds)
 		{
@@ -560,6 +595,142 @@ namespace Overlay
 			return text;
 		}
 
+		// The Drop Pedal NOW card (mockup B, 2026-10-23), on one grid so both columns line up:
+		//   [ - | E -> F#  +2 | + ]           My guitar is in
+		//                                      [ E standard          v ]
+		//   [ Match song (F#)       ]          [ Off | Drop Pedal | Speaker Mode ]
+		// The stepper and Match song have a fixed width, so nothing moves when the tuning text changes. Below
+		// 560 px the right column goes under the left. Player 1 only, like the readout; Player 2 keeps its Ctrl
+		// hotkeys. A control the pedal would refuse right now is greyed out with the reason as its hint: Speaker
+		// Mode is fixed for the whole song and follows the song's tuning.
+		void DropPedalNow(ImU32 downColor, ImU32 upColor)
+		{
+			using DropPedal::PitchMode;
+			using DropPedal::Player;
+			constexpr int kShiftLimit = 24;   // DropPedalState's target range, either way
+			const PitchMode mode = DropPedal::GetPitchMode();
+			const int shift = DropPedal::GetShiftSemitones();
+			const int base = DropPedal::GetBaseTuningSemitones(Player::One);
+			const bool speaker = mode == PitchMode::SpeakerMode;
+			const bool speakerLocked = speaker && !DropPedal::CanSelectPitchMode(PitchMode::Off);
+
+			// The song's tuning, read at most four times a second, and only in the tuner or a song: in the menus
+			// the arrangement pointer can still hold the last song.
+			static ULONGLONG chartReadTick = 0;
+			static bool chartKnown = false;
+			static int chartShift = 0;
+			const bool inSong = GameState::Menus::IsInSongModes() || GameState::Menus::IsInPreSongTuner();
+			const ULONGLONG now = GetTickCount64();
+			if (now - chartReadTick >= 250) {
+				chartReadTick = now;
+				chartKnown = inSong && DropPedal::TryGetChartMatchShiftSemitones(chartShift) && std::abs(chartShift) <= kShiftLimit;
+			}
+			if (!inSong) chartKnown = false;
+
+			const float full = RowWidth();
+			const bool stacked = full < 560.0f;
+			const float rightW = stacked ? full : std::clamp(full * 0.42f, 260.0f, 420.0f);
+			const float leftW = stacked ? full : std::min(320.0f, full - rightW - 32.0f);
+			const ImVec2 origin = ImGui::GetCursorScreenPos();
+			const float frameH = ImGui::GetFrameHeight();
+			const float rowGap = 10.0f;
+			ImGui::PushFont(GetFonts().caption);
+			const float labelH = ImGui::GetTextLineHeight() + 4.0f;   // "My guitar is in", above the dropdown
+			ImGui::PopFont();
+			const auto at = [](float x, float y) { ImGui::SetCursorScreenPos(ImVec2(x, y)); };
+
+			// Rows: the caption line (right column only), the stepper beside the dropdown, Match song beside the mode.
+			const float leftX = origin.x;
+			const float rightX = stacked ? origin.x : origin.x + full - rightW;
+			const float row1 = origin.y + labelH;
+			const float row2 = row1 + frameH + rowGap;
+			const float rightTop = stacked ? row2 + frameH + rowGap : origin.y;
+			const float rightRow1 = rightTop + labelH;
+			const float rightRow2 = rightRow1 + frameH + rowGap;
+
+			// ---- Left: stepper, then Match song.
+			const bool canStep = mode == PitchMode::Off ? DropPedal::CanSelectPitchMode(PitchMode::DropPedal) : DropPedal::CanAdjustShift();
+			const char* const lockedWhy = "Speaker Mode follows the song's tuning.";
+			const std::string baseName = DropPedalState::GetAbsoluteTuningName(base);
+			const std::string tuning = shift == 0 ? baseName : baseName + " -> " + DropPedalState::GetAbsoluteTuningName(base + shift);
+			char badge[8] = "";
+			if (shift != 0) sprintf_s(badge, "%+d", shift);
+			at(leftX, row1);
+			const int step = JoinedStepper("##shift", leftW, tuning.c_str(), badge, shift < 0 ? downColor : upColor,
+				canStep && shift > -kShiftLimit, canStep && shift < kShiftLimit, mode == PitchMode::Off,
+				canStep ? "One semitone down. Turns Drop Pedal on if it is off." : lockedWhy,
+				canStep ? "One semitone up. Turns Drop Pedal on if it is off." : lockedWhy);
+			if (step != 0 && (mode != PitchMode::Off || DropPedal::SelectPitchMode(PitchMode::DropPedal)))
+				DropPedal::AdjustShift(Player::One, step);
+
+			const bool canMatch = !speaker && chartKnown
+				&& (mode == PitchMode::DropPedal || DropPedal::CanSelectPitchMode(PitchMode::DropPedal));
+			const bool matched = canMatch && mode == PitchMode::DropPedal && chartShift == shift;
+			std::string matchLabel = matched ? "Matches the song" : "Match song";
+			if (chartKnown && !speaker) matchLabel += " (" + DropPedalState::GetAbsoluteTuningName(base + chartShift) + ")";
+			const char* matchHint = speaker ? "Speaker Mode already plays the song in your tuning."
+				// In the tuner the song's tuning is only known by the name the tuner shows (the arrangement is not
+				// loaded yet), so a custom or unlisted tuning waits for the song to start.
+				: !chartKnown && GameState::Menus::IsInPreSongTuner() ? "This song's tuning has no name the tuner can look up (a custom tuning). Match song works once the song starts."
+				: !chartKnown ? "Sets the shift so your guitar plays in the song's tuning. Works in the tuner (named tunings) and during a song."
+				: matched ? "The shift already matches the song."
+				: "Sets the shift so your guitar plays in the song's tuning. A drop tuning still needs its low string dropped.";
+			at(leftX, row2);
+			ImGui::BeginDisabled(!canMatch || matched);
+			if (WideButton((matchLabel + "##match").c_str(), leftW, canMatch && !matched, matchHint)
+				&& (mode == PitchMode::DropPedal || DropPedal::SelectPitchMode(PitchMode::DropPedal)))
+				DropPedal::SetShift(Player::One, chartShift);
+			ImGui::EndDisabled();
+
+			// ---- Right: the guitar's own tuning, then the mode.
+			at(rightX, rightTop);
+			ImGui::PushFont(GetFonts().caption);
+			ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Color::Muted));
+			ImGui::TextUnformatted("My guitar is in");
+			ImGui::PopStyleColor();
+			ImGui::PopFont();
+			at(rightX, rightRow1);
+			ImGui::BeginDisabled(!DropPedal::CanChangeBaseTuning());
+			ImGui::SetNextItemWidth(rightW);
+			if (ImGui::BeginCombo("##baseTuning", DropPedal::GetBaseTuningName(Player::One).c_str())) {
+				for (int i = 0; i < 12; ++i) {
+					const std::string name = DropPedalState::GetAbsoluteTuningName(-i) + " standard";
+					const bool selected = base == -i;
+					if (ImGui::Selectable(name.c_str(), selected) && !selected) DropPedal::SetBaseTuning(Player::One, -i);
+					if (selected) ImGui::SetItemDefaultFocus();
+				}
+				ImGui::EndCombo();
+			}
+			Hint(DropPedal::CanChangeBaseTuning()
+				? "The tuning your strings are really in. The tuning names here and in the readout count from it. Saved for the next launch."
+				: "Fixed while Speaker Mode plays a song.");
+			ImGui::EndDisabled();
+			at(rightX, rightRow2);
+			static const char* const modes[] = { "Off", "Drop Pedal", "Speaker Mode" };
+			int modeIndex = static_cast<int>(mode);
+			const bool selectable[] = {
+				DropPedal::CanSelectPitchMode(PitchMode::Off),
+				DropPedal::CanSelectPitchMode(PitchMode::DropPedal),
+				DropPedal::CanSelectPitchMode(PitchMode::SpeakerMode),
+			};
+			if (Segmented("##mode", &modeIndex, modes, 3, rightW, selectable,
+				"Drop Pedal shifts your guitar. Speaker Mode shifts the song instead, to match your guitar: pick it before a song, and it stays on until the song ends."))
+				DropPedal::SelectPitchMode(static_cast<PitchMode>(modeIndex));
+			float bottom = rightRow2 + frameH;
+			if (speakerLocked) {
+				at(rightX, bottom + 4.0f);
+				ImGui::PushFont(GetFonts().caption);
+				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Color::Warn));
+				ImGui::TextUnformatted("Speaker Mode stays on until the song ends.");
+				ImGui::PopStyleColor();
+				ImGui::PopFont();
+				bottom = ImGui::GetItemRectMax().y;
+			}
+
+			at(origin.x, std::max(bottom, row2 + frameH) + 10.0f);
+			ImGui::Dummy(ImVec2(0, 0));
+		}
+
 		void DropPedalPage()
 		{
 			PageHeader("Drop Pedal", "Shift your guitar's tuning without retuning the strings.");
@@ -580,23 +751,11 @@ namespace Overlay
 				Caption("Drop Pedal is switched off in RSMods.ini (EnableDropPedal = off). Set it back to on and restart Rocksmith to use it.");
 			}
 			else {
-				const DropPedal::PitchMode mode = DropPedal::GetPitchMode();
-				ImGui::PushFont(GetFonts().title);
-				ImGui::TextUnformatted(DropPedal::GetTuningName(DropPedal::Player::One).c_str());
-				ImGui::PopFont();
-				const int shift = DropPedal::GetShiftSemitones();
-				const std::string modeName = DropPedal::GetPitchModeName();
-				StatusPill(modeName.c_str(), mode == DropPedal::PitchMode::Off ? Color::Muted : Color::AccentHi);
-				if (mode != DropPedal::PitchMode::Off) {
-					ImGui::SameLine(0.0f, 10.0f);
-					char text[48];
-					sprintf_s(text, "%+d semitone%s", shift, (shift == 1 || shift == -1) ? "" : "s");
-					StatusPill(text, shift < 0 ? ToImColor(rgb[0]) : shift > 0 ? ToImColor(rgb[1]) : Color::Muted);
-				}
+				DropPedalNow(ToImColor(rgb[0]), ToImColor(rgb[1]));
+				Caption(("Shortcuts: " + KeyName("DropPedalToggleKey", "F7") + " mode, "
+					+ KeyName("DropPedalPitchDownKey", ",") + " and " + KeyName("DropPedalPitchUpKey", ".") + " shift down and up, "
+					+ KeyName("DropPedalBaseTuningKey", "F9") + " base tuning. Change them in RSMods, Keybindings.").c_str());
 			}
-			Caption(("Shortcuts: " + KeyName("DropPedalToggleKey", "F7") + " cycles Drop Pedal, Speaker Mode and Off. "
-				+ KeyName("DropPedalPitchDownKey", ",") + " and " + KeyName("DropPedalPitchUpKey", ".") + " shift down and up. "
-				+ KeyName("DropPedalBaseTuningKey", "F9") + " sets the base tuning. Change them in RSMods, Keybindings.").c_str());
 			EndCard();
 
 			// The pedal itself always comes with the mod and is switched in game (F7); this only hides its readout,
@@ -2353,7 +2512,16 @@ namespace Overlay
 				const std::string found = std::to_string(plugins.size()) + (plugins.size() == 1 ? " plugin" : " plugins") + " found, "
 					+ std::to_string(vst.slots.size()) + " in chain";
 				const std::string foundHint = "Found in " + std::to_string(folders) + (folders == 1 ? " folder" : " folders") + ". View > Add plugin folder for more; Rescan after installing.";
-				summaryChip("##foundChip", found, Ink::Good, foundHint.c_str());
+				if (vst.scanningPlugins)
+				{
+					static const char* const scanSteps[] = { ".", "..", "..." };
+					const int step = static_cast<int>(ImGui::GetTime() * 3.0) % 3;
+					summaryChip("##scanningChip", std::string("Scanning plugins") + scanSteps[step], Ink::Blue,
+						"Reading plugin folders in the background. The overlay stays available.");
+				}
+				else if (!vst.pluginScanError.empty())
+					summaryChip("##scanErrorChip", "Plugin scan failed", Ink::Bad, vst.pluginScanError.c_str());
+				else summaryChip("##foundChip", found, Ink::Good, foundHint.c_str());
 				// The plugins kept loaded outside the chain work behind the scenes (no count shown); only a background
 				// load shows, since tone file actions wait for it.
 				if (!vst.preloadingName.empty()) {
@@ -3212,7 +3380,7 @@ namespace Overlay
 			const float tabsH = ImGui::GetFrameHeight() + 4.0f;   // AmpTabs' height
 			ImGui::BeginGroup();
 			ImGui::PushFont(GetFonts().title ? GetFonts().title : ImGui::GetFont());
-			ImGui::TextUnformatted("Amp sim");
+			ImGui::TextUnformatted("Tone designer");
 			ImGui::PopFont();
 			ImGui::PushFont(GetFonts().caption ? GetFonts().caption : ImGui::GetFont());
 			ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Color::Muted));
@@ -4881,6 +5049,11 @@ namespace Overlay
 				ExternalAmp::SetSilenceWhileTuning(silenceTuning);
 			EndCard();
 
+			BeginCard("Overlay key");
+			KeyBindPicker("OverlayKey", "Opens and closes this overlay", OverlayKeyReason);
+			Caption("Esc always cancels a key change, so the overlay can't be left without a key.");
+			EndCard();
+
 			BeginCard("Display");
 			bool diagnostics = Audio::CableInput::IsOverlayEnabled();
 			if (ToggleRow("Audio diagnostics HUD", "Signal level, packet rate and route state in the top right corner.", &diagnostics))
@@ -5046,7 +5219,7 @@ namespace Overlay
 			float right = origin.x + width - 14.0f - closeSize;
 			ImGui::SetCursorScreenPos(ImVec2(right, origin.y + (kHeaderHeight - closeSize) * 0.5f));
 			if (IconButton("##close", Glyph::Close, closeSize)) *open = false;
-			Hint("Close. Press \\ to open it again.");
+			Hint(("Close. Press " + OverlayKeyName() + " to open it again.").c_str());
 			if (live.status.recording) {
 				const std::string text = "REC " + FormatTime(live.status.recordedFrames / 48000.0);
 				ImGui::PushFont(GetFonts().caption);
@@ -5125,6 +5298,61 @@ namespace Overlay
 			else Hint("Latency estimates: software timing plus the output driver's reported delay. Input is how long the guitar waits for each packet from the cable (about 1 ms read directly over USB, 10 ms through Windows), plus any measured wait when packets arrive in batches; output is the Tone designer, its buffers and the output device (exclusive mode lowers this part); total is the two together. Tone designer tracks audio blocks; game tones are a rougher estimate, matching your picks to output attacks; until a few picks have been timed with the game amp playing, the game tones figure is a guess from the game block size. The cable's own converter and the USB bus are excluded. This is not a calibrated guitar-to-ear measurement.");
 		}
 
+		// Names by Page value: the bug report's page name, and the overlay's remembered page in the registry
+		// (stored by name, so reordering the enum never reopens on the wrong page).
+		const char* const kPageNames[] = { "Note by Note", "Mixer", "Input", "Output", "Record", "General", "Debug", "Drop Pedal", "Tone designer" };
+		constexpr int kPageCount = sizeof(kPageNames) / sizeof(kPageNames[0]);
+
+		bool IsPageAvailable(Page page)
+		{
+			switch (page) {
+			case Page::Debug: return kDebugPage;
+			// The Tone designer page needs the Audio Bridge ASIO driver in the game (ASIO mode); in Cable mode
+			// there is nothing for an amp sim to connect to, so the page is not offered.
+			case Page::AmpSim: return ExternalAmp::GetSnapshot().proxyLoaded;
+			// Note by Note's settings only matter while it is switched on (Riff Repeater, Advanced Settings). The
+			// page stays while its switch is missing from that menu, because it carries the repair message.
+			case Page::NoteByNote: return NoteByNoteProbe::IsAutomaticEnabledFast() || NoteByNoteMenu::IsMenuRowMissing();
+			default: return true;
+			}
+		}
+
+		// The page the overlay opens on: the last one picked, kept in HKCU\Software\RSMods\Overlay (LastPage).
+		// Until a page has been picked it is Tone designer. When the wanted page is not offered right now (Cable
+		// mode, Note by Note off) Drop Pedal stands in without replacing the remembered choice.
+		Page LoadLastPage()
+		{
+			wchar_t name[64]{};
+			DWORD size = sizeof(name);
+			const LSTATUS result = RegGetValueW(HKEY_CURRENT_USER, L"Software\\RSMods\\Overlay", L"LastPage",
+				RRF_RT_REG_SZ, nullptr, name, &size);
+			if (result == ERROR_SUCCESS) {
+				for (int i = 0; i < kPageCount; ++i) {
+					const std::string stored(kPageNames[i]);
+					if (std::wstring(stored.begin(), stored.end()) == name) return static_cast<Page>(i);
+				}
+			}
+			else if (result != ERROR_FILE_NOT_FOUND && result != ERROR_PATH_NOT_FOUND) {
+				LOG_WARNING("(OVERLAY) Could not read the last overlay page, error " << result << std::endl);
+			}
+			return Page::AmpSim;
+		}
+
+		void SaveLastPage(Page page)
+		{
+			const std::string stored(kPageNames[static_cast<int>(page)]);
+			const std::wstring name(stored.begin(), stored.end());
+			HKEY key = nullptr;
+			LSTATUS result = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\RSMods\\Overlay", 0, nullptr, 0,
+				KEY_SET_VALUE, nullptr, &key, nullptr);
+			if (result == ERROR_SUCCESS) {
+				result = RegSetValueExW(key, L"LastPage", 0, REG_SZ, reinterpret_cast<const BYTE*>(name.c_str()),
+					static_cast<DWORD>((name.size() + 1) * sizeof(wchar_t)));
+				RegCloseKey(key);
+			}
+			if (result != ERROR_SUCCESS) LOG_WARNING("(OVERLAY) Could not save the last overlay page, error " << result << std::endl);
+		}
+
 		void Sidebar(Page& page)
 		{
 			const ImVec2 origin = ImGui::GetWindowPos();
@@ -5133,25 +5361,30 @@ namespace Overlay
 				ImVec2(origin.x + ImGui::GetWindowWidth() - 1.0f, origin.y + ImGui::GetWindowHeight()), Color::CardEdge);
 
 			struct Entry { const char* group; unsigned glyph; const char* label; Page page; };
+			// Tone designer, the biggest feature, leads on its own above the groups.
 			static const Entry entries[] = {
+				{ nullptr, Glyph::Library, "Tone designer", Page::AmpSim },
 				{ "Practice", Glyph::MusicNote, "Note by Note", Page::NoteByNote },
 				{ nullptr, Glyph::Pedal, "Drop Pedal", Page::DropPedal },
 				{ "Audio", Glyph::Mixer, "Mixer", Page::Mixer },
 				{ nullptr, Glyph::Input, "Input", Page::Input },
-				{ nullptr, Glyph::Library, "Amp sim", Page::AmpSim },
 				{ nullptr, Glyph::Speaker, "Output", Page::Output },
 				{ nullptr, Glyph::Record, "Record", Page::Record },
 				{ "System", Glyph::Settings, "General", Page::General },
 				{ nullptr, Glyph::Bug, "Debug", Page::Debug },
 			};
-			const bool externalAmpAvailable = ExternalAmp::GetSnapshot().proxyLoaded;
 			ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 2));
+			const char* pendingGroup = nullptr;
 			for (const Entry& entry : entries) {
-				if (entry.page == Page::Debug && !kDebugPage) continue;
-				// External amp needs the Audio Bridge ASIO driver in the game (ASIO mode); in Cable mode
-				// there is nothing for an amp sim to connect to, so the page is not offered.
-				if (entry.page == Page::AmpSim && !externalAmpAvailable) continue;
-				if (entry.group) { ImGui::Dummy(ImVec2(0, 8)); ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 8.0f); SectionLabel(entry.group); ImGui::Dummy(ImVec2(0, 2)); }
+				if (entry.group) pendingGroup = entry.group;
+				if (!IsPageAvailable(entry.page)) continue;
+				// A group label shows above its first visible entry (Note by Note can be hidden, leaving Drop Pedal
+				// to carry the Practice label).
+				if (pendingGroup) {
+					const char* group = pendingGroup;
+					pendingGroup = nullptr;
+					ImGui::Dummy(ImVec2(0, 8)); ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 8.0f); SectionLabel(group); ImGui::Dummy(ImVec2(0, 2));
+				}
 				if (NavItem(entry.glyph, entry.label, page == entry.page)) page = entry.page;
 			}
 			ImGui::PopStyleVar();
@@ -5160,7 +5393,7 @@ namespace Overlay
 			ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 8.0f);
 			ImGui::PushFont(GetFonts().caption);
 			ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Color::Faint));
-			ImGui::TextUnformatted("Press \\ to hide");
+			ImGui::TextUnformatted(("Press " + OverlayKeyName() + " to hide").c_str());
 			ImGui::PopStyleColor();
 			ImGui::PopFont();
 		}
@@ -5198,7 +5431,8 @@ namespace Overlay
 	{
 		static bool themed = false;
 		if (!themed) { ApplyTheme(); themed = true; }
-		static Page page = Page::NoteByNote;
+		static Page preferred = LoadLastPage();
+		Page page = IsPageAvailable(preferred) ? preferred : Page::DropPedal;
 #ifdef OVERLAY_PREVIEW
 		// Offscreen preview build only (not built into the DLL): renders each page in turn.
 		extern int g_overlayPreviewPage;
@@ -5248,15 +5482,15 @@ namespace Overlay
 			ImGui::SetCursorPos(ImVec2(0, kHeaderHeight));
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10, 6));
 			ImGui::BeginChild("##sidebar", ImVec2(kSidebarWidth, 0), false, ImGuiWindowFlags_AlwaysUseWindowPadding | ImGuiWindowFlags_NoScrollbar);
+			const Page shown = page;
 			Sidebar(page);
+			if (page != shown) { preferred = page; SaveLastPage(page); }
 			ImGui::EndChild();
 			ImGui::PopStyleVar();
 
 			ImGui::SameLine(0.0f, 0.0f);
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(26, 20));
 			ImGui::BeginChild("##page", ImVec2(0, 0), false, ImGuiWindowFlags_AlwaysUseWindowPadding);
-			// Left on the Amp sim page when the driver is not loaded (it is hidden from the sidebar then).
-			if (page == Page::AmpSim && !ExternalAmp::GetSnapshot().proxyLoaded) page = Page::NoteByNote;
 			g_pageFillsHeight = false;
 			switch (page) {
 			case Page::NoteByNote: NoteByNotePage(); break;
@@ -5269,8 +5503,7 @@ namespace Overlay
 			case Page::DropPedal: DropPedalPage(); break;
 			case Page::AmpSim: AmpSimPage(); break;
 			}
-			static const char* const pageNames[] = { "Note by Note", "Mixer", "Input", "Output", "Record", "General", "Debug", "Drop Pedal", "Amp sim" };
-			g_pageName = pageNames[static_cast<int>(page)];
+			g_pageName = kPageNames[static_cast<int>(page)];
 			// Content plus bottom padding, for next frame's height; a page that fills the window gets the most allowed.
 			fillPage = g_pageFillsHeight;
 			if (!fillPage) pageContentHeight = ImGui::GetCursorPosY() + 20.0f;

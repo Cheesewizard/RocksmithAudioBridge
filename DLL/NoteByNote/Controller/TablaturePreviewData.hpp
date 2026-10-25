@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
@@ -52,6 +53,8 @@ namespace NoteByNote::Controller
 			}
 			else
 			{
+				if (grouped.back().chordName[0] == '\0' && event.chordName[0] != '\0')
+					std::memcpy(grouped.back().chordName, event.chordName, sizeof(event.chordName));
 				for (uint32_t right = 0; right < event.positionCount; ++right)
 				{
 					const auto& next = event.positions[right];
@@ -69,8 +72,17 @@ namespace NoteByNote::Controller
 		events = std::move(grouped);
 	}
 
-	// Events must be sorted by time. Returns the id of the event closest to
-	// `time`, or 0 when none lies within `tolerance` seconds.
+	// A tied continuation is never played as a new note, so it is never a target.
+	inline bool IsTablatureTargetable(const ResearchProtocol::PreviewEvent& event)
+	{
+		const uint32_t count = event.positionCount < 6 ? event.positionCount : 6;
+		for (uint32_t index = 0; index < count; ++index)
+			if ((event.positions[index].techniques & ResearchProtocol::TAB_PREVIEW_TECHNIQUE_TIED) == 0) return true;
+		return count == 0;
+	}
+
+	// Events must be sorted by time. Returns the id of the playable (not only
+	// tied) event closest to `time`, or 0 when none lies within `tolerance`.
 	inline uint64_t FindTablatureEventNearTime(
 		const std::vector<ResearchProtocol::PreviewEvent>& events,
 		float time,
@@ -79,11 +91,15 @@ namespace NoteByNote::Controller
 		const auto next = std::lower_bound(events.begin(), events.end(), time,
 			[](const ResearchProtocol::PreviewEvent& event, float value) { return event.time < value; });
 		const ResearchProtocol::PreviewEvent* best = nullptr;
-		if (next != events.end()) best = &*next;
-		if (next != events.begin())
+		for (auto after = next; after != events.end() && after->time - time <= tolerance; ++after)
+			if (IsTablatureTargetable(*after)) { best = &*after; break; }
+		for (auto before = next; before != events.begin();)
 		{
-			const auto& previous = *(next - 1);
-			if (best == nullptr || time - previous.time <= best->time - time) best = &previous;
+			--before;
+			if (time - before->time > tolerance) break;
+			if (!IsTablatureTargetable(*before)) continue;
+			if (best == nullptr || time - before->time <= best->time - time) best = &*before;
+			break;
 		}
 		if (best == nullptr || std::fabs(best->time - time) > tolerance) return 0;
 		return best->id;

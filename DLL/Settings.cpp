@@ -14,6 +14,8 @@ namespace
 	std::atomic<Settings::NoteByNoteTargetStyle> noteByNoteTargetStyle{ Settings::NoteByNoteTargetStyle::Detailed };
 	const char* const kNoteByNoteTargetStyles[] = { "Detailed", "Simple", "Tab", "TabTimeline" };
 	std::atomic<bool> noteByNoteTabDocked{ false };
+	// Look ahead tab highlight (the current-note pill and the loop band), 0xRRGGBB; 0 = the overlay accent.
+	std::atomic<uint32_t> noteByNoteTabHighlight{ 0 };
 	// HUD block placements in 1/10000ths of the window (-1 = built-in layout); index = NoteByNoteHudBlock.
 	// Packed x << 16 | y so a reader never sees a new x with an old y.
 	std::atomic<uint32_t> noteByNotePlacements[2] = { 0xFFFFFFFFu, 0xFFFFFFFFu };
@@ -255,6 +257,19 @@ bool Settings::SetNoteByNoteTabDocked(bool docked)
 	return WriteNoteByNoteKey("NoteByNoteTabDocked", docked ? "on" : "off");
 }
 
+uint32_t Settings::GetNoteByNoteTabHighlight()
+{
+	return noteByNoteTabHighlight.load();
+}
+
+bool Settings::SetNoteByNoteTabHighlight(uint32_t rgb, bool persist)
+{
+	// Pure black is stored as 000001 so 0 can keep meaning "the overlay accent".
+	const uint32_t value = rgb == 0 ? 0 : (rgb & 0xFFFFFFu) == 0 ? 1u : (rgb & 0xFFFFFFu);
+	noteByNoteTabHighlight.store(value);
+	return !persist || WriteNoteByNoteKey("NoteByNoteTabHighlight", value == 0 ? "Default" : HexColor(value));
+}
+
 /// <summary>
 /// Load Default Settings.
 /// Used if the user has the DLL but no INI.
@@ -281,6 +296,7 @@ void Settings::Initialize()
 		{"DropPedalToggleKey", "VK_F7"},
 		{"DropPedalBaseTuningKey", "VK_F9"},
 		{"RecordingHotkey", "VK_F6"},
+		{"OverlayKey", "VK_OEM_5"},
 
 		{"MasterVolumeKey", "5"},
 		{"SongVolumeKey", "6"},
@@ -352,6 +368,7 @@ void Settings::Initialize()
 		{"RemoveFingerprints", "off"},
 		{"EnableDropPedal", "on"},   // ships with the mod; toggled in game with F7. "off" is a revert switch only.
 		{"DropPedalShowOverlay", "on"},
+		{"DropPedalBaseTuning", "E"},
 		{"DropPedalCustomOverlayColors", "off"},
 		{"DropPedalOverlayDownColor", "6BE06B"},
 		{"DropPedalOverlayUpColor", "FFC24D"},
@@ -468,6 +485,7 @@ void Settings::ReadKeyBinds() {
 		{ "DropPedalToggleKey", reader.GetValue("Keybinds", "DropPedalToggleKey", "VK_F7")},
 		{ "DropPedalBaseTuningKey", reader.GetValue("Keybinds", "DropPedalBaseTuningKey", "VK_F9")},
 		{ "RecordingHotkey", reader.GetValue("Keybinds", "RecordingHotkey", "VK_F6")},
+		{ "OverlayKey", reader.GetValue("Keybinds", "OverlayKey", "VK_OEM_5")},
 
 		{ "MasterVolumeKey", reader.GetValue("Audio Keybindings", "MasterVolumeKey", "5") },
 		{ "SongVolumeKey", reader.GetValue("Audio Keybindings", "SongVolumeKey", "6") },
@@ -613,6 +631,7 @@ void Settings::ReadModSettings() {
 	modSettings["RemoveFingerprints"] = reader.GetValue("Toggle Switches", "RemoveFingerprints", "off");
 	modSettings["EnableDropPedal"] = reader.GetValue("Drop Pedal", "EnableDropPedal", "on");
 	modSettings["DropPedalShowOverlay"] = reader.GetValue("Drop Pedal", "ShowOverlay", "on");
+	modSettings["DropPedalBaseTuning"] = reader.GetValue("Drop Pedal", "BaseTuning", "E");
 	modSettings["DropPedalCustomOverlayColors"] = reader.GetValue("Drop Pedal", "CustomOverlayColors", "off");
 	modSettings["DropPedalOverlayDownColor"] = reader.GetValue("Drop Pedal", "OverlayDownColor", "6BE06B");
 	modSettings["DropPedalOverlayUpColor"] = reader.GetValue("Drop Pedal", "OverlayUpColor", "FFC24D");
@@ -665,6 +684,16 @@ void Settings::ReadModSettings() {
 		if (!known) LOG_ERROR("Invalid NoteByNoteTargetStyle: expected Detailed, Simple, Tab or TabTimeline; keeping Detailed." << std::endl);
 	}
 	noteByNoteTabDocked.store(std::string(reader.GetValue("Note by Note", "NoteByNoteTabDocked", "off")) == "on");
+	{
+		const std::string value = reader.GetValue("Note by Note", "NoteByNoteTabHighlight", "Default");
+		if (value == "Default") noteByNoteTabHighlight.store(0);
+		else if (value.size() == 6 && value.find_first_not_of("0123456789abcdefABCDEF") == std::string::npos)
+		{
+			const uint32_t rgb = static_cast<uint32_t>(std::stoul(value, nullptr, 16));
+			noteByNoteTabHighlight.store(rgb == 0 ? 1u : rgb);
+		}
+		else LOG_ERROR("Invalid NoteByNoteTabHighlight: expected Default or a hex colour like 3B8BEB; using the default." << std::endl);
+	}
 	for (int index = 0; index < 2; ++index)
 	{
 		// "Default" (or absent) = built-in layout; otherwise "x,y" as fractions of the game window.
@@ -810,7 +839,7 @@ namespace
 		"ToggleLoftKey", "CustomSongListTitles", "ShowSongTimerKey", "ForceReEnumerationKey", "MenuToggleKey",
 		"RainbowStringsKey", "RainbowNotesKey", "RemoveLyricsKey", "RRSpeedKey", "TuningOffsetKey",
 		"ToggleExtendedRangeKey", "LoopStartKey", "LoopEndKey", "RewindKey", "DropPedalPitchDownKey",
-		"DropPedalPitchUpKey", "DropPedalToggleKey", "DropPedalBaseTuningKey", "RecordingHotkey",
+		"DropPedalPitchUpKey", "DropPedalToggleKey", "DropPedalBaseTuningKey", "RecordingHotkey", "OverlayKey",
 		"MasterVolumeKey", "SongVolumeKey", "Player1VolumeKey", "Player2VolumeKey", "MicrophoneVolumeKey",
 		"VoiceOverVolumeKey", "SFXVolumeKey", "DisplayMixerKey", "MutePlayer1Key", "MutePlayer2Key",
 	};
@@ -838,6 +867,11 @@ std::string Settings::FindKeyBindUsing(unsigned int vk, const char* except) {
 	for (const char* name : kAllKeyBindNames)
 		if (std::string_view(name) != except && GetKeyBind(name) == vk) return name;
 	return "";
+}
+
+unsigned int Settings::GetOverlayKey() {
+	const unsigned int vk = GetKeyBind("OverlayKey");
+	return vk != 0 ? vk : VK_OEM_5;
 }
 
 int Settings::GetVKCodeForString(const std::string& vkString) {

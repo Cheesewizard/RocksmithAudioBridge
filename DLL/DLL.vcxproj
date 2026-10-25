@@ -35,6 +35,7 @@
     <ClCompile Include="ToneDesigner\VstHostLink.cpp" />
     <ClCompile Include="ToneDesigner\ToneGates.cpp" />
     <ClCompile Include="ToneDesigner\ToneSwitchPopup.cpp" />
+    <ClCompile Include="ToneDesigner\GameTones.cpp" />
     <ClCompile Include="ExternalAmp\CableAmpLink.cpp" />
     <ClCompile Include="AsioProxy\AmpLinkHost.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="Core\RsModsHelper.cpp" />
@@ -313,9 +314,11 @@
     <ClInclude Include="AudioBridge\Engine\OutputTap.hpp" />
     <ClInclude Include="ExternalAmp\ExternalAmp.hpp" />
     <ClInclude Include="ToneDesigner\VstHostLink.hpp" />
+    <ClInclude Include="ToneDesigner\PluginCatalog.hpp" />
     <ClInclude Include="ToneDesigner\ToneGates.hpp" />
     <ClInclude Include="ToneDesigner\HostProcessIdentity.hpp" />
     <ClInclude Include="ToneDesigner\ToneSwitchPopup.hpp" />
+    <ClInclude Include="ToneDesigner\GameTones.hpp" />
     <ClInclude Include="ExternalAmp\CableAmpLink.hpp" />
     <ClInclude Include="Core\RsModsHelper.hpp" />
     <ClInclude Include="ToneDesigner\SongLibrary.hpp" />

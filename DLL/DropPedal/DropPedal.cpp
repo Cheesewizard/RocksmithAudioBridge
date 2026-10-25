@@ -162,7 +162,78 @@ namespace
 void DropPedal::LoadSettings()
 {
 	DropPedalState::Configure(Settings::ReturnSettingValue("EnableDropPedal"));
+	int baseTuning = 0;
+	if (DropPedalState::TryParseTuningName(Settings::ReturnSettingValue("DropPedalBaseTuning"), baseTuning))
+	{
+		DropPedalState::SetBaseTuningSemitones(Player::One, baseTuning);
+	}
 	Overlay::LoadSettings();
+}
+
+bool DropPedal::CanSelectPitchMode(PitchMode mode)
+{
+	return DropPedalState::IsConfiguredEnabled() && DropPedalState::CanSelectPitchMode(mode);
+}
+
+bool DropPedal::SelectPitchMode(PitchMode mode)
+{
+	if (!DropPedalState::IsConfiguredEnabled()) return false;
+	if (mode == GetPitchMode()) return true;
+	if (!DropPedalState::SetPitchMode(mode))
+	{
+		LOG_INFO("Speaker Mode cannot be selected or disabled during gameplay" << std::endl);
+		return false;
+	}
+
+	UpdateInputShifterPitch(Player::One);
+	UpdateInputShifterPitch(Player::Two);
+	LOG_INFO("Pitch mode set to " << GetPitchModeName() << " from the overlay, route "
+		<< GetPitchRouteName() << std::endl);
+	return true;
+}
+
+bool DropPedal::CanAdjustShift()
+{
+	return DropPedalState::IsConfiguredEnabled() && DropPedalState::CanAdjustTarget();
+}
+
+bool DropPedal::AdjustShift(Player player, int semitoneDelta)
+{
+	return SetShift(player, GetTargetSemitones(player) + semitoneDelta);
+}
+
+bool DropPedal::SetShift(Player player, int semitones)
+{
+	if (!CanAdjustShift()) return false;
+	if (!DropPedalState::SetTargetSemitones(player, semitones)) return false;
+
+	UpdateInputShifterPitch(player);
+	LOG_INFO("Drop pedal Player " << (player == Player::One ? 1 : 2) << " target now "
+		<< DropPedalState::GetTuningName(player) << " (overlay)" << std::endl);
+	return true;
+}
+
+bool DropPedal::CanChangeBaseTuning()
+{
+	return DropPedalState::IsConfiguredEnabled() && DropPedalState::CanChangeBaseTuning();
+}
+
+bool DropPedal::SetBaseTuning(Player player, int semitonesFromE)
+{
+	if (!DropPedalState::IsConfiguredEnabled()) return false;
+	if (!DropPedalState::SetBaseTuningSemitones(player, semitonesFromE)) return false;
+
+	SaveBaseTuning(player);
+	LOG_INFO("Drop pedal Player " << (player == Player::One ? 1 : 2) << " base tuning now "
+		<< DropPedalState::GetBaseTuningName(player) << " (overlay)" << std::endl);
+	return true;
+}
+
+void DropPedal::SaveBaseTuning(Player player)
+{
+	if (player != Player::One) return;
+	Settings::SetDropPedalSetting("DropPedalBaseTuning", "BaseTuning",
+		DropPedalState::GetAbsoluteTuningName(DropPedalState::GetBaseTuningSemitones(Player::One)), true);
 }
 
 bool DropPedal::IsConfiguredEnabled()

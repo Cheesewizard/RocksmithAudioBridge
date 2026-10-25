@@ -233,7 +233,7 @@ namespace AmpLink
 			const std::wstring text = L"Rocksmith Audio Bridge ASIO, external amp link.\n\n"
 				L"This driver plays your amp sim through Rocksmith's audio interface while Rocksmith keeps your clean "
 				L"signal for note detection.\n\n1. Start Rocksmith with the Audio Bridge.\n2. Pick this driver here.\n"
-				L"3. In the game overlay (press \\), open External amp and turn it on.\n\n"
+				L"3. In the game overlay (press \\, or the key you set), open External amp and turn it on.\n\n"
 				L"Sample rate and buffer size follow Rocksmith (48 kHz, " + std::to_wstring(OfferedFrames()) + L" samples).";
 			MessageBoxW(nullptr, text.c_str(), L"Rocksmith Audio Bridge ASIO", MB_OK | MB_ICONINFORMATION);
 			return kOk;

@@ -71,4 +71,18 @@ namespace DropPedal
 	int GetBaseTuningSemitones(Player player);
 	std::string GetBaseTuningName(Player player);
 	int GetShiftDirection(Player player);
+
+	// Overlay controls (Drop Pedal page). They name the player outright, where the hotkeys pick
+	// Player 2 with Ctrl, and return false without changing anything when the pedal refuses the
+	// change right now (the same song locks as the hotkeys).
+	bool CanSelectPitchMode(PitchMode mode);
+	bool SelectPitchMode(PitchMode mode);
+	bool CanAdjustShift();
+	bool AdjustShift(Player player, int semitoneDelta);
+	bool SetShift(Player player, int semitones);
+	bool CanChangeBaseTuning();
+	// semitonesFromE: 0 (E) to -11 (F). Player 1's is saved to RSMods.ini.
+	bool SetBaseTuning(Player player, int semitonesFromE);
+	// Writes Player 1's base tuning to RSMods.ini; F9 calls it after each step.
+	void SaveBaseTuning(Player player);
 }

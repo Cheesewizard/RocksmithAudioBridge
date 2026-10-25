@@ -9,6 +9,8 @@
 #include "Core/PitchNames.hpp"
 #include "Overlay/OverlayUi.hpp"
 
+#include <cfloat>
+
 namespace NoteByNote::Ui
 {
 	namespace
@@ -17,11 +19,16 @@ namespace NoteByNote::Ui
 		std::vector<ResearchProtocol::PreviewEvent> previewEvents;
 		// Defaults to the player's own level; the compare button flips to 100%.
 		uint8_t requestedLevelMode = ResearchProtocol::TAB_PREVIEW_LEVEL_CURRENT;
+		// Whether the window was drawn open (not collapsed) last frame. Sent on every
+		// copy: while set, Note by Note holds every note. Never latched, and the
+		// controller also lets it lapse when the window stops drawing.
+		bool tabExpanded = false;
 
 		void RefreshPreview()
 		{
 			ResearchProtocol::PreviewState state{};
 			state.levelMode = requestedLevelMode;
+			state.readerHold = tabExpanded ? 1 : 0;
 			if (!ResearchBridge::CopyTablaturePreview(nullptr, 0, state))
 			{
 				snapshot = {};
@@ -45,6 +52,7 @@ namespace NoteByNote::Ui
 			{
 				previewEvents.resize(state.eventCount);
 				state.levelMode = requestedLevelMode;
+				state.readerHold = tabExpanded ? 1 : 0;
 				if (!ResearchBridge::CopyTablaturePreview(previewEvents.data(), static_cast<uint32_t>(previewEvents.size()), state)
 					|| !state.available || state.eventCount > previewEvents.size())
 				{
@@ -67,16 +75,28 @@ namespace NoteByNote::Ui
 					Tablature::Event event;
 					event.id = source.id;
 					event.time = source.time;
+					event.chordName.assign(source.chordName, strnlen(source.chordName, sizeof(source.chordName)));
 					for (uint32_t position = 0; position < source.positionCount; ++position)
 					{
 						const auto& note = source.positions[position];
-						event.positions.push_back({ note.stringIndex, note.fret, note.techniques, note.bendSemitones, note.slideTargetFret });
+						Tablature::Position entry;
+						entry.stringIndex = note.stringIndex;
+						entry.fret = note.fret;
+						entry.techniques = note.techniques;
+						entry.bendSemitones = note.bendSemitones;
+						entry.slideTargetFret = note.slideTargetFret;
+						entry.sustain = std::isfinite(note.sustain) ? note.sustain : 0.0f;
+						entry.bendStart = std::isfinite(note.bendStart) ? note.bendStart : 0.0f;
+						entry.bendPeak = std::isfinite(note.bendPeak) ? note.bendPeak : 0.0f;
+						entry.bendEnd = std::isfinite(note.bendEnd) ? note.bendEnd : 0.0f;
+						event.positions.push_back(entry);
 					}
 					snapshot.events.push_back(std::move(event));
 				}
 				snapshot.generation = state.generation;
 			}
 			snapshot.currentTargetId = state.currentTargetId;
+			snapshot.readerHolding = state.readerHolding != 0;
 			snapshot.arrangementKey = state.arrangementKey;
 			snapshot.showsCurrentLevels = state.levelMode == ResearchProtocol::TAB_PREVIEW_LEVEL_CURRENT;
 			snapshot.currentLevelsRead = state.currentLevelsRead != 0;
@@ -87,6 +107,9 @@ namespace NoteByNote::Ui
 			snapshot.loopEnd = state.loopEnd;
 			snapshot.sectionStarts.assign(state.sectionStarts,
 				state.sectionStarts + (std::min)(state.sectionCount, ResearchProtocol::PreviewState::MaxSections));
+			snapshot.sectionNames.resize(snapshot.sectionStarts.size());
+			for (std::size_t index = 0; index < snapshot.sectionNames.size(); ++index)
+				snapshot.sectionNames[index].assign(state.sectionNames[index], strnlen(state.sectionNames[index], sizeof(state.sectionNames[index])));
 			{
 				const uint32_t bars = (std::min)(state.barCount, ResearchProtocol::PreviewState::MaxBars);
 				snapshot.bars.resize(bars);
@@ -115,11 +138,31 @@ namespace NoteByNote::Ui
 			&& !GameState::Menus::IsInRiffRepeaterMenus();
 	}
 
+	// The tab window stays up for the whole song, so unlike the menus it must
+	// not keep a software cursor over the highway. The cursor shows while the
+	// mouse is over an ImGui window (last frame's hover) or has moved in the
+	// last two seconds, so the player can still find and click the window.
+	bool TablaturePreviewWantsCursor()
+	{
+		static ImVec2 lastPosition(-FLT_MAX, -FLT_MAX);
+		static ULONGLONG lastMovedAt = 0;
+		if (!IsTablaturePreviewVisible()) return false;
+		const ImGuiIO& io = ImGui::GetIO();
+		const ULONGLONG now = GetTickCount64();
+		if (io.MousePos.x != lastPosition.x || io.MousePos.y != lastPosition.y)
+		{
+			lastPosition = io.MousePos;
+			lastMovedAt = now;
+		}
+		return io.WantCaptureMouse || now - lastMovedAt < 2000;
+	}
+
 	void DrawTablaturePreview()
 	{
 		if (!IsTablaturePreviewVisible())
 		{
 			snapshot = {};
+			tabExpanded = false;
 			bool closed = false;
 			Tablature::Draw(snapshot, 1.0f, &closed);
 			return;
@@ -131,13 +174,19 @@ namespace NoteByNote::Ui
 		bool toggleLevels = false;
 		bool toggleDock = false;
 		const bool docked = Settings::GetNoteByNoteTabDocked();
-		Tablature::Draw(snapshot, Settings::GetNoteByNoteTargetSize() / 100.0f, &open, &toggleLevels, docked, &toggleDock);
+		std::uint32_t highlight = Settings::GetNoteByNoteTabHighlight();
+		const std::uint32_t shownHighlight = highlight;
+		bool highlightSaved = false;
+		Tablature::Draw(snapshot, Settings::GetNoteByNoteTargetSize() / 100.0f, &open, &toggleLevels, docked, &toggleDock, &tabExpanded,
+			&highlight, &highlightSaved);
 		if (toggleDock) Settings::SetNoteByNoteTabDocked(!docked);
+		if (highlight != shownHighlight || highlightSaved) Settings::SetNoteByNoteTabHighlight(highlight, highlightSaved);
 		if (font != nullptr) ImGui::PopFont();
 		if (toggleLevels)
 			requestedLevelMode = snapshot.showsCurrentLevels
 				? ResearchProtocol::TAB_PREVIEW_LEVEL_MAXIMUM
 				: ResearchProtocol::TAB_PREVIEW_LEVEL_CURRENT;
+		if (!open) tabExpanded = false;
 		if (!open) Settings::SetNoteByNoteTargetStyle(Settings::NoteByNoteTargetStyle::Tab);
 	}
 }

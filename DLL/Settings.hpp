@@ -42,6 +42,9 @@ namespace Settings {
 	// Look ahead tab window: docked across the top of the screen instead of floating.
 	bool GetNoteByNoteTabDocked();
 	bool SetNoteByNoteTabDocked(bool docked);
+	// Look ahead tab highlight colour (current note and loop) as 0xRRGGBB; 0 = the overlay accent.
+	uint32_t GetNoteByNoteTabHighlight();
+	bool SetNoteByNoteTabHighlight(uint32_t rgb, bool persist);
 
 	// Drop Pedal settings edited from the in-game overlay: updates the live value (a runtime override read through ReturnSettingValue, never the shared map; what the
 	// DLL reads) and, when persist is true, the [Drop Pedal] iniKey in RSMods.ini. The caller reloads the feature.
@@ -64,6 +67,9 @@ namespace Settings {
 	bool SetKeyBind(const char* name, unsigned int vk, bool persist);
 	// The keybind (other than except) already on vk, or "" if none; for the overlay picker's clash check.
 	std::string FindKeyBindUsing(unsigned int vk, const char* except);
+	// [Keybinds] OverlayKey: the key that opens and closes the overlay. Backslash when unset or unknown, so the
+	// overlay can never end up with no key.
+	unsigned int GetOverlayKey();
 	int GetModSetting(const std::string& name);
 	std::string ReturnSettingValue(const std::string& name);
 	std::string ReturnNotewayColor(const std::string& name);

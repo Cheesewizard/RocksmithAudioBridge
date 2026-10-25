@@ -1,6 +1,8 @@
 #include "stdafx.h"
 #include "VstHostLink.hpp"
 #include "ToneSwitchPopup.hpp"
+#include "GameTones.hpp"
+#include "PluginCatalog.hpp"
 #include "Shared/VstHostControl.hpp"
 #include "Shared/ShellOpenAsync.hpp"
 #include "ExternalAmp/ExternalAmp.hpp"
@@ -45,10 +47,11 @@ namespace VstHostLink
 		Command g_sentOp = Command::None;   // the command in flight: a LoadSpare or PrepareTone is a background load
 
 		std::vector<Plugin> g_plugins;
-		bool g_scanned = false;
+		uint32_t g_pluginRevision = 0;
+		std::string g_pluginScanError;
 		std::vector<std::wstring> g_failed;   // plugins that did not load this session (the host's failedPath)
 		std::wstring g_lastFailed;
-		std::atomic<bool> g_rescanWanted{ false };   // set by the folder dialog's thread; the render thread rescans
+		std::atomic<bool> g_rescanWanted{ false };   // folder dialog -> render thread: request a background scan
 		std::vector<std::string> g_tones;   // the render thread's copy of SlowState::tones
 		unsigned g_tonesVersion = ~0u;
 
@@ -503,8 +506,10 @@ namespace VstHostLink
 			g_recentRead = true;
 		}
 
-		void Scan()
+		std::vector<Plugin> ScanPlugins()
 		{
+			const auto startedAt = GetTickCount64();
+			LOG_INFO("(VST HOST) plugin scan started on the background worker" << std::endl);
 			std::vector<Plugin> plugins;
 			// This is a 32-bit process, where %CommonProgramFiles% points at the x86 folder; plugins live in the
 			// 64-bit one, which CommonProgramW6432 names.
@@ -531,10 +536,12 @@ namespace VstHostLink
 				}
 			}
 			std::sort(plugins.begin(), plugins.end(), [](const Plugin& a, const Plugin& b) { return _stricmp(a.name.c_str(), b.name.c_str()) < 0; });
-			LOG_INFO("(VST HOST) found " << plugins.size() << " 64-bit VST3 plugin(s) in " << roots.size() << " folder(s)" << std::endl);
-			g_plugins = std::move(plugins);
-			g_scanned = true;
+			LOG_INFO("(VST HOST) found " << plugins.size() << " 64-bit VST3 plugin(s) in " << roots.size()
+				<< " folder(s), background scan took " << GetTickCount64() - startedAt << " ms" << std::endl);
+			return plugins;
 		}
+
+		PluginCatalog g_pluginCatalog(ScanPlugins);
 
 		// Tones, and tones in folders one level down as "Folder/Name" (the host's ToneFile maps the same way).
 		std::vector<std::string> ReadToneNames()
@@ -684,6 +691,9 @@ namespace VstHostLink
 					fresh.version = g_slow.version + 1;
 					g_slow = std::move(fresh);
 				}
+				std::string scanError;
+				if (g_pluginCatalog.RunPending(scanError) && !scanError.empty())
+					LOG_ERROR("(VST HOST) plugin scan failed: " << scanError << std::endl);
 				WaitForSingleObject(g_slowKick, 500);
 			}
 		}
@@ -1104,11 +1114,15 @@ namespace VstHostLink
 
 	void OnFrame(bool overlayVisible)
 	{
+		GameTones::OnFrame();
+		if (g_rescanWanted.exchange(false)) Rescan();
+		g_pluginCatalog.TryTake(g_plugins, g_pluginScanError, g_pluginRevision);
 		PollRecovery();
 		g_overlayVisible = overlayVisible;
 		VstHostControl::Shared* shared = Shared();
 		if (!shared) return;
 		shared->overlayVisible = overlayVisible ? 1 : 0;
+		shared->overlayKey = static_cast<LONG>(Settings::GetOverlayKey());
 		FollowSongLoad(shared);
 		const ULONGLONG now = GetTickCount64();
 		if (now - g_lastBeat >= static_cast<ULONGLONG>(VstHostControl::kBeatMs) / 2)
@@ -1163,6 +1177,8 @@ namespace VstHostLink
 		VstHostControl::Shared* shared = Shared();
 		if (GetTickCount64() - g_snapshotAt >= kSnapshotMs) Refresh(shared);
 		Snapshot s = g_snapshot;
+		s.scanningPlugins = g_pluginCatalog.IsPending();
+		s.pluginScanError = g_pluginScanError;
 		if (shared && s.hostRunning)
 		{
 			// Meters every frame; the rest a few times a second (registry and file reads are not free).
@@ -1199,11 +1215,20 @@ namespace VstHostLink
 
 	const std::vector<Plugin>& Plugins()
 	{
-		if (!g_scanned || g_rescanWanted.exchange(false)) Scan();
+		if (!g_pluginCatalog.WasRequested())
+		{
+			g_pluginCatalog.Request();
+			KickSlow();
+		}
 		return g_plugins;
 	}
 
-	void Rescan() { g_failed.clear(); Scan(); }
+	void Rescan()
+	{
+		g_failed.clear();
+		g_pluginCatalog.Request();
+		KickSlow();
+	}
 
 	std::vector<std::wstring> ScanFolders() { return ReadSlow([](SlowState& slow) { return slow.scanFolders; }); }
 

@@ -10,12 +10,12 @@
 
 namespace VstHostControl
 {
-	// v8: the chain's own delay (chainLatencySamples). v7: standby (off with the plugins kept loaded). v6: spare plugins kept loaded (preloading, sparePaths, preloadAllowed). v5: one window per plugin (openWindows, HideSlot). v4: slot paths, chain bypass and the Tone designer page's
+	// v9: the overlay key (overlayKey). v8: the chain's own delay (chainLatencySamples). v7: standby (off with the plugins kept loaded). v6: spare plugins kept loaded (preloading, sparePaths, preloadAllowed). v5: one window per plugin (openWindows, HideSlot). v4: slot paths, chain bypass and the Tone designer page's
 	// commands. v3: plugin chains, tones, levels. A new mapping name per version, so an old host and a new overlay
 	// never meet.
-	constexpr wchar_t kMappingName[] = L"Local\\RocksmithAudioBridge.VstHost.v8";
+	constexpr wchar_t kMappingName[] = L"Local\\RocksmithAudioBridge.VstHost.v9";
 	constexpr uint32_t kMagic = 0x56424152;   // "RABV"
-	constexpr uint32_t kVersion = 8;
+	constexpr uint32_t kVersion = 9;
 	constexpr int kBeatMs = 250;              // both sides bump their beat at least this often
 	constexpr int kAliveMs = 1500;            // a side is gone when its beat stops this long
 	constexpr int kPathChars = 520;
@@ -124,6 +124,9 @@ namespace VstHostControl
 		// to what was measured, so a new chain or a plugin changing its own delay (oversampling) needs no new
 		// measurement. Kept current every beat.
 		volatile LONG chainLatencySamples;
+		// Written by the overlay (v9): the virtual key that opens and closes the overlay ([Keybinds] OverlayKey). The
+		// host hands it back to the game when a plugin window has the keyboard. 0 until the overlay writes it.
+		volatile LONG overlayKey;
 	};
 
 	// Creates or opens the block. Returns nullptr on failure; `mapping` must stay open while it is used.

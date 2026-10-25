@@ -25,6 +25,9 @@ Dear ImGui (v1.85)        MIT License, (c) Omar Cornut. DLL/Lib/ImGUI
 Roboto font               Apache License 2.0, (c) Google. Embedded in
                           DLL/Lib/ImGUI/RobotoFont.cpp.
 JSON for Modern C++       MIT License, (c) Niels Lohmann. DLL/Lib/Json/json.hpp
+VexFlow                   MIT License, (c) Mohit Muthanna Cheppudira. Layout
+                          ideas adapted in the Note by Note tab window;
+                          DLL/NoteByNote/Ui/ThirdParty/VexFlow-LICENSE.txt
 JUCE 9                    GNU AGPLv3, (c) Raw Material Software Limited.
                           VstHost/Lib/JUCE/LICENSE.txt. Used only by the VST host
                           (RocksmithAudioBridgeVstHost.exe), which is therefore
