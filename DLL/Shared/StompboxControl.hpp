@@ -19,18 +19,27 @@
 
 namespace StompboxControl
 {
+	// v3: song tones (the game's song and tone keys, the song's assignments, its prepared tones).
 	// v2: the stream's measured load (loadSeq, blockFrames, loadPermille, peakPermille).
-	constexpr wchar_t MAPPING_NAME[] = L"Local\\RocksmithAudioBridge.Stompbox.v2";
+	constexpr wchar_t MAPPING_NAME[] = L"Local\\RocksmithAudioBridge.Stompbox.v3";
 	constexpr uint32_t MAGIC = 0x58425453;   // "STBX"
-	constexpr uint32_t VERSION = 2;
+	constexpr uint32_t VERSION = 3;
 	constexpr int COMMAND_CHARS = 4096;
 	constexpr int CATALOG_CHARS = 262144;     // every pedal with its parameters; File parameters list their files
 	constexpr int PROGRAM_CHARS = 65536;
 	constexpr int PRESET_CHARS = 32768;
 	constexpr int ERROR_CHARS = 256;
+	constexpr int KEY_CHARS = 128;
+	constexpr int SONG_TONE_CHARS = 16384;
 	constexpr char CHAIN_NAME[] = "Main";     // the one chain the board edits (SetGlobalChain in StompboxService)
 
 	enum class EngineState : LONG { Off = 0, Loading = 1, Ready = 2, Failed = 3 };
+	// The current song's tones: none assigned, being loaded into engines of their own, or ready to switch.
+	enum class SongState : LONG { None = 0, Preparing = 1, Ready = 2, Failed = 3 };
+
+	// The page's own command (not Stompbox's): SongTone "<tone key>" "<saved tone>" assigns a saved tone to one of the
+	// current song's game tones; an empty saved tone clears it.
+	constexpr char SONG_TONE_COMMAND[] = "SongTone";
 
 	// Catalogue lines, tab separated (text fields never contain tabs or line breaks):
 	//   P <name> <background #rrggbb> <foreground #rrggbb> <description>
@@ -71,6 +80,18 @@ namespace StompboxControl
 		volatile LONG medianPermille;  // the typical block
 		volatile LONG loadPermille;    // the 99th percentile block
 		volatile LONG peakPermille;    // the slowest block
+
+		// Written by the overlay (v3), under gameSeq (odd while it writes): the song playing (VstHostLink's song key,
+		// empty outside songs) and the game's current tone key (GameTones::CurrentToneKey).
+		volatile LONG gameSeq;
+		char songKey[KEY_CHARS];
+		char gameToneKey[KEY_CHARS];
+
+		// Written by the host (v3).
+		volatile LONG songState;       // SongState
+		volatile LONG songToneSeq;
+		char songTones[SONG_TONE_CHARS];   // "<tone key>\t<saved tone>" lines: the current song's assignments
+		char playingTone[KEY_CHARS];   // the saved tone the song plays now; empty: the board's own tone
 	};
 
 	inline LONG Load(volatile LONG* value) { return InterlockedCompareExchange(value, 0, 0); }
@@ -106,6 +127,30 @@ namespace StompboxControl
 		MemoryBarrier();
 		if (Load(sequence) != before) return false;
 		text = std::move(copy);
+		seen = before;
+		return true;
+	}
+
+	// Overlay side: the song and tone keys under gameSeq. Long keys are cut (they are compared, never shown in full).
+	inline void WriteGame(Shared& shared, const std::string& songKey, const std::string& toneKey)
+	{
+		InterlockedIncrement(&shared.gameSeq);   // odd: being written
+		strncpy_s(shared.songKey, songKey.c_str(), _TRUNCATE);
+		strncpy_s(shared.gameToneKey, toneKey.c_str(), _TRUNCATE);
+		InterlockedIncrement(&shared.gameSeq);
+	}
+
+	// Host side. True with both keys when a complete copy newer than `seen` was read.
+	inline bool ReadGame(Shared& shared, LONG& seen, std::string& songKey, std::string& toneKey)
+	{
+		const LONG before = Load(&shared.gameSeq);
+		if (before == seen || (before & 1) != 0) return false;
+		std::string song(shared.songKey, strnlen(shared.songKey, KEY_CHARS));
+		std::string tone(shared.gameToneKey, strnlen(shared.gameToneKey, KEY_CHARS));
+		MemoryBarrier();
+		if (Load(&shared.gameSeq) != before) return false;
+		songKey = std::move(song);
+		toneKey = std::move(tone);
 		seen = before;
 		return true;
 	}

@@ -49,6 +49,7 @@ namespace StompboxLink
 	};
 
 	enum class EngineState { Off, Loading, Ready, Failed };
+	enum class SongState { None, Preparing, Ready, Failed };
 
 	struct Snapshot
 	{
@@ -70,9 +71,17 @@ namespace StompboxLink
 		float medianLoad = 0.0f;            // the tone's share of real time: judged against the base game
 		float slowLoad = 0.0f;              // the 99th percentile block
 		float peakLoad = 0.0f;              // the slowest block: what this PC's block size risks
+
+		// Song tones: the song chosen now, the game's current tone, and the saved tone assigned to each game tone.
+		std::string songKey;
+		std::string gameToneKey;
+		SongState songState = SongState::None;
+		std::map<std::string, std::string> songTones;   // game tone key -> saved tone
+		std::string playingTone;            // the saved tone the song plays now; empty: the board's own tone
 	};
 
-	void OnFrame();
+	// `songKey`: the song chosen or playing (VstHostLink's), empty outside songs.
+	void OnFrame(const std::string& songKey);
 	const Snapshot& GetSnapshot();
 	const PedalDefinition* FindDefinition(const std::string& kind);
 
@@ -86,6 +95,9 @@ namespace StompboxLink
 	void LoadPreset(const std::string& name);
 	void SavePreset(const std::string& name);
 	void DeletePreset(const std::string& name);
+	// Assigns a saved tone to one of the current song's game tones (its key, as GameTones reports it); an empty saved
+	// tone clears it. The host loads the song's tones before it plays and follows the game's tone changes.
+	void AssignSongTone(const std::string& gameToneKey, const std::string& savedTone);
 
 	// A free instance id for a new pedal of `kind` on this chain: "Delay", then "Delay_2", ...
 	std::string NewPedalId(const std::string& kind);

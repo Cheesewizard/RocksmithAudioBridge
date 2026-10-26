@@ -1116,7 +1116,7 @@ namespace VstHostLink
 	void OnFrame(bool overlayVisible)
 	{
 		GameTones::OnFrame();
-		StompboxLink::OnFrame();   // what plays (the Tone designer engine or the VST chain) even while the page is closed
+		StompboxLink::OnFrame(g_songKey);   // what plays (the Tone designer engine or the VST chain) even while the page is closed
 		if (g_rescanWanted.exchange(false)) Rescan();
 		g_pluginCatalog.TryTake(g_plugins, g_pluginScanError, g_pluginRevision);
 		PollRecovery();

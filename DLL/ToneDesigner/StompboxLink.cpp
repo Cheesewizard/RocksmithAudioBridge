@@ -1,11 +1,13 @@
 #include "stdafx.h"
 #include "StompboxLink.hpp"
 #include "VstHostLink.hpp"
+#include "GameTones.hpp"
 #include "Shared/StompboxControl.hpp"
 
 #include <algorithm>
 #include <cstdio>
 #include <deque>
+#include <stdexcept>
 
 namespace StompboxLink
 {
@@ -32,7 +34,9 @@ namespace StompboxLink
 		bool g_openFailed = false;
 		bool g_wantedRead = false;
 		bool g_wanted = false;
-		LONG g_catalogSeen = 0, g_programSeen = 0, g_presetSeen = 0, g_loadSeen = 0;
+		LONG g_catalogSeen = 0, g_programSeen = 0, g_presetSeen = 0, g_loadSeen = 0, g_songToneSeen = 0;
+		std::string g_sentSongKey, g_sentToneKey;
+		bool g_gameSent = false;
 		LONG g_sentSequence = 0;
 		std::deque<PendingCommand> g_commands;
 		// The newest program the host published, applied once no edit of ours is outstanding: an older program arriving
@@ -272,7 +276,7 @@ namespace StompboxLink
 		}
 	}
 
-	void OnFrame()
+	void OnFrame(const std::string& songKey)
 	{
 		if (!g_shared && !g_openFailed)
 		{
@@ -294,6 +298,7 @@ namespace StompboxLink
 		InterlockedExchange(&g_shared->wanted, g_wanted ? 1 : 0);
 
 		Snapshot& s = g_snapshot;
+		std::string text;
 		s.isConnected = StompboxControl::Load(&g_shared->hostPid) != 0 && VstHostLink::HostProcessRunning();
 		s.engineState = static_cast<EngineState>(std::clamp<LONG>(StompboxControl::Load(&g_shared->engineState), 0, 3));
 		s.isWanted = g_wanted;
@@ -303,6 +308,29 @@ namespace StompboxLink
 		if (s.isConnected) SendNext();
 		s.isBusy = !g_commands.empty() || StompboxControl::Load(&g_shared->commandDone) != StompboxControl::Load(&g_shared->commandSeq);
 		if (s.isConnected && !s.isBusy) s.error.assign(g_shared->error, strnlen(g_shared->error, StompboxControl::ERROR_CHARS));
+
+		// The game's side of song tones: which song, and which of its tones the game plays now.
+		const std::string& toneKey = songKey.empty() ? std::string() : GameTones::CurrentToneKey();
+		if (!g_gameSent || songKey != g_sentSongKey || toneKey != g_sentToneKey)
+		{
+			StompboxControl::WriteGame(*g_shared, songKey, toneKey);
+			g_sentSongKey = songKey;
+			g_sentToneKey = toneKey;
+			g_gameSent = true;
+		}
+		s.songKey = songKey;
+		s.gameToneKey = toneKey;
+		s.songState = static_cast<SongState>(std::clamp<LONG>(StompboxControl::Load(&g_shared->songState), 0, 3));
+		s.playingTone.assign(g_shared->playingTone, strnlen(g_shared->playingTone, StompboxControl::KEY_CHARS));
+		if (StompboxControl::ReadText(&g_shared->songToneSeq, g_shared->songTones, StompboxControl::SONG_TONE_CHARS, g_songToneSeen, text))
+		{
+			s.songTones.clear();
+			for (const std::string& line : Lines(text))
+			{
+				const size_t tab = line.find('\t');
+				if (tab != std::string::npos) s.songTones[line.substr(0, tab)] = line.substr(tab + 1);
+			}
+		}
 
 		const LONG loadSeq = StompboxControl::Load(&g_shared->loadSeq);
 		if (loadSeq != g_loadSeen)
@@ -316,7 +344,6 @@ namespace StompboxLink
 		}
 		if (!s.isPlaying) s.hasLoad = false;
 
-		std::string text;
 		if (StompboxControl::ReadText(&g_shared->catalogSeq, g_shared->catalog, StompboxControl::CATALOG_CHARS, g_catalogSeen, text))
 			s.definitions = ParseCatalog(text);
 		if (StompboxControl::ReadText(&g_shared->programSeq, g_shared->program, StompboxControl::PROGRAM_CHARS, g_programSeen, text))
@@ -389,6 +416,14 @@ namespace StompboxLink
 	}
 
 	void LoadPreset(const std::string& name) { Queue({}, "LoadPreset " + StompboxControl::Quote(name)); }
+
+	void AssignSongTone(const std::string& gameToneKey, const std::string& savedTone)
+	{
+		if (gameToneKey.empty()) throw std::invalid_argument("AssignSongTone needs the game tone's key.");
+		Queue({}, std::string(StompboxControl::SONG_TONE_COMMAND) + " " + StompboxControl::Quote(gameToneKey) + " " + StompboxControl::Quote(savedTone));
+		if (savedTone.empty()) g_snapshot.songTones.erase(gameToneKey);
+		else g_snapshot.songTones[gameToneKey] = savedTone;
+	}
 	void SavePreset(const std::string& name) { Queue({}, "SavePreset " + StompboxControl::Quote(name)); }
 	void DeletePreset(const std::string& name) { Queue({}, "DeletePreset " + StompboxControl::Quote(name)); }
 

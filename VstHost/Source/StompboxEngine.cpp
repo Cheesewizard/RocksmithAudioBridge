@@ -121,7 +121,19 @@ namespace VstHost
 		RequireLoaded("Prepare");
 		frames = frameCount;
 		input.assign(static_cast<size_t>(frames), 0.0f);
+		pumpOutput.assign(static_cast<size_t>(frames), 0.0f);
 		setMaxAudioBufferSize(processor, static_cast<size_t>(frames));
+	}
+
+	void StompboxEngine::Pump(int blocks)
+	{
+		RequireLoaded("Pump");
+		if (frames <= 0) throw std::logic_error("StompboxEngine::Pump before Prepare.");
+		for (int block = 0; block < blocks; ++block)
+		{
+			std::fill(input.begin(), input.end(), 0.0f);
+			process(processor, input.data(), pumpOutput.data(), static_cast<size_t>(frames));
+		}
 	}
 
 	void StompboxEngine::SendCommand(const std::string& command)

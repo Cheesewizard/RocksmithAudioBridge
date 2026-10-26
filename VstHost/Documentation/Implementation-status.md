@@ -119,6 +119,28 @@ The full reports are `Offline-A2-full.json` and `Offline-A2-lite.json`.
 - **`OverlayShell.cpp`:** the tabs are now **Tone designer | VST rig | External app**. Choosing Tone designer or
   VST rig also chooses what plays. VST rig is today's page, unchanged.
 
+### Song tones (prepared tones, following the game)
+
+- **How tones are keyed.** By the game's own **tone key** (`GameTones::CurrentToneKey`, `song+0x198`: the
+  manifest's `Tone_Base`/`Tone_A..D` key), not the slot number or the arrangement. Arrangements that share a key
+  share a tone, so the unresolved arrangement `PersistentID` is not needed.
+- **Assigning.** While a song is chosen, the page shows the game's current tone and assigns it a saved tone
+  (`SongTone "<key>" "<saved tone>"`, the page's own command). To reach the other tones, play on or press 1–4.
+  Assignments are stored per song in `%APPDATA%\RocksmithAudioBridge\Stompbox\SongTones\<song key>.txt`.
+- **Preparing (host, `StompboxService`).** When the song is chosen, and only while the Tone designer plays, every
+  assigned saved tone is loaded into an engine of its own at the stream's block size. Each is run on silence on the
+  main thread until Stompbox has loaded it and it has settled for 0.5 s. Stompbox loads presets only inside its own
+  processing. The prepared tones then become the stream's sink (`SceneSet`).
+- **Playing (`SceneSet`).**
+  - Only the active tone is processed. Scene 0 is the board's own engine, which plays for a game tone without an
+    assignment until an assigned one comes.
+  - A switch fades out over 10 ms, then in over 10 ms, so two amps never run on the guitar at once.
+  - The outgoing tone rings out on silence for 2 s, with its NAM pedals bypassed meanwhile, so tails cost only the
+    effects after the amp. The pedals are switched back on before that tone is used again.
+  - A buffer-size change loads the song's tones again at the new size.
+- **Shared block.** `StompboxControl` v3 carries the song and tone keys from the overlay, and the song's
+  assignments, its state (preparing, ready or failed) and the tone playing from the host.
+
 ### Verification
 
 Nothing has been built or run. The new C++ files passed `clang++ -fsyntax-only` with the real ImGui headers and
@@ -132,6 +154,9 @@ stand-in Windows headers. `Main.cpp` and `OverlayShell.cpp` were not compiled.
   `SetChain` could free it while the audio thread still runs the previous chain.
 - **Song-start switching:** VST rig song tones still load at song start while the Tone designer plays (harmless,
   but wasted work).
+- **Rapid switches:** a switch while a tail rings out cuts the older tail.
+- **Editing during a song:** the board edits its own engine (scene 0). A saved tone the song uses is heard as
+  edited once it is saved, because saving reloads the song's tones.
 - **Overlay tab work:** the three-tab layout in your local build may differ from this one; merge them.
 
 ## Next work
@@ -139,10 +164,9 @@ stand-in Windows headers. `Main.cpp` and `OverlayShell.cpp` were not compiled.
 1. Build `stompbox-capi.dll` with the script, then build the host and the DLL. Check the Tone designer tab
    end to end: add pedals, load a NAM model and an IR, edit, save and load tones, and watch the `stompbox:`
    block-timing lines at 64 and 128 frames.
-2. **Prepared tones for songs** (agreed 26 October):
-   - preload the active tone and every tone the current song uses before playback, each as its own prepared
-     engine instance;
-   - process only the active one, with controlled tails on a switch;
-   - never keep every available capture running.
-3. Validate the M0a tone-slot diagnostics in a live session, and resolve the arrangement identity.
+2. **Song tones, live** (implemented, not run):
+   - check that the tone key changes exactly at chart tone events, seeks, Riff Repeater, 50% speed and the 1–4 keys
+     (the `(GAME TONES)` log lines);
+   - listen to the 10 ms dip and the tails;
+   - check that the load meter stays sane while a tail runs.
 4. Song tone sets and export (design §6–§7), storing Stompbox preset text plus the files it names.

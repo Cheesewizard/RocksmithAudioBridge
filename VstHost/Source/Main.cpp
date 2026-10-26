@@ -63,7 +63,7 @@ namespace
 	StompboxEngine g_stompbox;
 	bool g_stompboxPlays = false;
 	bool SetStompboxPlays(bool plays);
-	StompboxService g_stompboxService{ g_stompbox, [](bool plays) { return SetStompboxPlays(plays); } };
+	StompboxService g_stompboxService{ g_stompbox, g_router, [](bool plays) { return SetStompboxPlays(plays); } };
 	HWND g_main = nullptr;            // message-only window (kMainClass)
 	HINSTANCE g_instance = nullptr;
 	HFONT g_font = nullptr;
@@ -1084,8 +1084,8 @@ namespace
 	void PublishMeters()
 	{
 		if (!g_control) return;
-		const float inputPeak = g_stompboxPlays ? g_stompbox.TakeInputPeak() : g_chain.TakeInputPeak();
-		const float outputPeak = g_stompboxPlays ? g_stompbox.TakeOutputPeak() : g_chain.TakeOutputPeak();
+		const float inputPeak = g_stompboxPlays ? g_stompboxService.TakeInputPeak() : g_chain.TakeInputPeak();
+		const float outputPeak = g_stompboxPlays ? g_stompboxService.TakeOutputPeak() : g_chain.TakeOutputPeak();
 		g_inputMeter = std::max(inputPeak, g_inputMeter * 0.85f);
 		g_outputMeter = std::max(outputPeak, g_outputMeter * 0.85f);
 		g_control->inputPeak = static_cast<LONG>(std::min(g_inputMeter, 4.0f) * 1000.0f);
@@ -1132,8 +1132,8 @@ namespace
 			ShowError(error);
 			return false;
 		}
-		if (g_stompboxPlays) g_stompbox.Prepare(g_audio.Frames());   // the stream is stopped: Stompbox may allocate
-		g_router.SetSource(g_stompboxPlays ? static_cast<AudioSink*>(&g_stompbox) : &g_chain, g_stompboxPlays);
+		if (g_stompboxPlays) g_stompboxService.PrepareStream(g_audio.Frames());   // the stream is stopped: Stompbox may allocate
+		g_router.SetSource(g_stompboxPlays ? g_stompboxService.Sink() : &g_chain, g_stompboxPlays);
 		if (!g_audio.Start(error))
 		{
 			ShowError(error);

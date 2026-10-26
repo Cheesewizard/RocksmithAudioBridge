@@ -37,8 +37,15 @@ namespace VstHost
 		// stream has stopped; the destructor does it too.
 		void Unload();
 
-		// The stream's block size. Not real-time safe (Stompbox allocates for it): only with the stream stopped.
+		// The stream's block size. Not real-time safe (Stompbox allocates for it): only while the stream does not run
+		// this engine.
 		void Prepare(int frames);
+		int PreparedFrames() const { return frames; }
+
+		// Main thread, only while the stream does not run this engine: processes `blocks` blocks of silence. Stompbox
+		// applies chain changes and loads presets only inside its processing (a fade, then a loading thread), and a
+		// NAM model settles on its first blocks; a tone prepared ahead of playback is run like this until it is ready.
+		void Pump(int blocks);
 
 		void SendCommand(const std::string& command);
 
@@ -97,6 +104,7 @@ namespace VstHost
 		bool isServerStarted = false;
 		int frames = 0;
 		std::vector<float> input;   // Stompbox takes a writable input buffer
+		std::vector<float> pumpOutput;
 		std::atomic<float> inputPeak{ 0.0f };
 		std::atomic<float> outputPeak{ 0.0f };
 	};

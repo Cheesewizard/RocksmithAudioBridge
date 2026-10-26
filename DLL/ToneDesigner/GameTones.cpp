@@ -23,6 +23,7 @@ namespace
 	const byte SLOT_COMPARE_SIGNATURE[] = { 0x3B, 0x7B, 0x10 };
 	const byte SLOT_STORE_SIGNATURE[] = { 0x89, 0x53, 0x10 };
 	std::atomic<bool> g_slotReadVerified{ false };
+	std::string g_currentToneKey;   // render thread (OnFrame)
 
 
 	__declspec(naked) void TonesUpdateDetour()
@@ -95,7 +96,7 @@ void GameTones::Initialize()
 	if (!g_slotReadVerified)
 		LOG_WARNING("(GAME TONES) slot-reader signatures do not match; M0a diagnostics are disabled for this game build." << std::endl);
 	else
-		LOG_INFO("(GAME TONES) M0a logging enabled: component+0x10 and song+0x198. No portable tone switching is enabled." << std::endl);
+		LOG_INFO("(GAME TONES) tone tracking enabled: component+0x10 and song+0x198 (the current tone key, which the Tone designer's song tones follow)." << std::endl);
 }
 
 namespace
@@ -116,6 +117,8 @@ namespace
 		return true;
 	}
 }
+
+const std::string& GameTones::CurrentToneKey() { return g_currentToneKey; }
 
 void GameTones::OnFrame()
 {
@@ -139,11 +142,17 @@ void GameTones::OnFrame()
 		lastSlot = -1;
 		lastClock = 0.0f;
 		lastKey[0] = '\0';
+		g_currentToneKey.clear();
 		return;
 	}
 	char key[128]{};
 	const bool hasKey = ReadToneKey(owner + CURRENT_TONE_KEY, key);
-	if (!hasKey) strcpy_s(key, "<unreadable>");
+	if (hasKey) g_currentToneKey = key;
+	else
+	{
+		g_currentToneKey.clear();
+		strcpy_s(key, "<unreadable>");
+	}
 	if (owner != lastOwner)
 	{
 		LOG_INFO("(GAME TONES) song object 0x" << std::hex << owner << ", component 0x" << component << std::dec

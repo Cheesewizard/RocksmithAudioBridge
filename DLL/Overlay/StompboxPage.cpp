@@ -323,6 +323,75 @@ namespace Overlay
 				Caption("Your block size is tight for this tone on this PC. It will play at a larger block size (128 or more), or with a lighter tone.");
 		}
 
+		// ---- Song tones -------------------------------------------------------------------------------------
+
+		// While a song is chosen: which saved tone each of its game tones plays. The game's current tone is the one
+		// to assign (play through the song, or press 1-4, to reach the others); the host loads them all before the
+		// song plays and follows the game's tone changes.
+		void DrawSongTones()
+		{
+			const Snapshot& s = GetSnapshot();
+			if (s.songKey.empty()) return;
+			ImGui::AlignTextToFramePadding();
+			if (s.gameToneKey.empty())
+			{
+				Caption("Song tones: start the song to pick a tone for each of its game tones (1-4 switch them).");
+				return;
+			}
+			ImGui::Text("Game tone '%s' plays", s.gameToneKey.c_str());
+			ImGui::SameLine();
+			const auto assigned = s.songTones.find(s.gameToneKey);
+			const std::string current = assigned == s.songTones.end() ? std::string() : assigned->second;
+			ImGui::SetNextItemWidth(220.0f);
+			if (ImGui::BeginCombo("##songTone", current.empty() ? "the board's tone" : current.c_str()))
+			{
+				if (ImGui::Selectable("the board's tone", current.empty()) && !current.empty()) AssignSongTone(s.gameToneKey, {});
+				Hint("Not assigned: this game tone keeps the tone playing before it.");
+				for (const std::string& preset : s.presets)
+					if (ImGui::Selectable(preset.c_str(), preset == current) && preset != current) AssignSongTone(s.gameToneKey, preset);
+				ImGui::EndCombo();
+			}
+			ImGui::SameLine();
+			switch (s.songState)
+			{
+			case SongState::Preparing:
+			{
+				ImDrawList* list = ImGui::GetWindowDrawList();
+				const ImVec2 at = ImGui::GetCursorScreenPos();
+				Spinner(list, ImVec2(at.x + 9.0f, at.y + ImGui::GetFrameHeight() * 0.5f), 6.0f, Color::AccentHi);
+				ImGui::Dummy(ImVec2(18.0f, ImGui::GetFrameHeight()));
+				ImGui::SameLine();
+				ImGui::TextUnformatted("Loading the song's tones...");
+				break;
+			}
+			case SongState::Ready:
+				ImGui::Text("Playing: %s", s.playingTone.empty() ? "the board" : s.playingTone.c_str());
+				break;
+			case SongState::Failed:
+				ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Color::Bad), "The song's tones did not load");
+				break;
+			default:
+				break;
+			}
+			if (s.songTones.size() > 1 || (s.songTones.size() == 1 && assigned == s.songTones.end()))
+			{
+				ImGui::SameLine();
+				if (Button("All song tones")) ImGui::OpenPopup("##allSongTones");
+				if (ImGui::BeginPopup("##allSongTones"))
+				{
+					for (const auto& [gameTone, saved] : s.songTones)
+					{
+						ImGui::PushID(gameTone.c_str());
+						ImGui::Text("%s  ->  %s", gameTone.c_str(), saved.c_str());
+						ImGui::SameLine();
+						if (ImGui::SmallButton("Clear")) AssignSongTone(gameTone, {});
+						ImGui::PopID();
+					}
+					ImGui::EndPopup();
+				}
+			}
+		}
+
 		// ---- Pedalboard -------------------------------------------------------------------------------------
 
 		void DrawPedal(const Pedal& pedal, int index, ImVec2 at)
@@ -680,6 +749,7 @@ namespace Overlay
 
 		DrawToolbar();
 		DrawLoad();
+		DrawSongTones();
 		const float width = ImGui::GetContentRegionAvail().x;
 		const ImVec2 top = ImGui::GetCursorPos();
 		DrawLibrary(BOARD_HEIGHT);
