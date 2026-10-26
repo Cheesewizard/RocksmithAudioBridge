@@ -75,7 +75,7 @@ The full reports are `Offline-A2-full.json` and `Offline-A2-lite.json`.
 - **`VstHost/Stompbox/`:** `UPSTREAM.md` and `Build-Stompbox.ps1`. The script builds `stompbox-capi.dll` from
   commit `17bc652` with three checked patches:
   - the remote server listens on 127.0.0.1 only;
-  - the circuit-modelled `Tonestack` pedal is registered;
+  - the circuit-modelled `Tonestack` pedal is registered, with a description;
   - `DumpConfig` is exported from the C API.
 - **`VstHost/Source/StompboxEngine.{hpp,cpp}`:** loads the DLL, creates the engine on
   `%APPDATA%\RocksmithAudioBridge\Stompbox` (`NAM\`, `Cabinets\`, `Reverb\`, `Presets\`), and prepares it with

@@ -47,6 +47,16 @@ if (-not $Text.Contains($Registration))
 	[System.IO.File]::WriteAllText($Plugins, $Text.Replace($Anchor, $Anchor + "`n`t" + $Registration))
 }
 
+# Local change: describe the tone stack, which upstream leaves without a description (the browser shows it).
+$Text = [System.IO.File]::ReadAllText($Plugins)
+$Created = 'Tonestack* tonestack = new Tonestack();'
+$Described = $Created + "`n`ttonestack->Description = `"Classic amp tone stack: bass, middle and treble, modelled on amp circuits`";"
+if (-not $Text.Contains('tonestack->Description'))
+{
+	if (-not $Text.Contains($Created)) { throw "DefaultPlugins.cpp no longer creates the tone stack where the description patch expects it; review the upstream change." }
+	[System.IO.File]::WriteAllText($Plugins, $Text.Replace($Created, $Described))
+}
+
 # Local change: export DumpConfig (every pedal with its parameter definitions, Stompbox's own protocol) from the C
 # API, so the Tone designer page gets the same catalogue Stompbox's remote does.
 $CapiHeader = Join-Path $Source 'stompbox-capi\StompboxCAPI.h'

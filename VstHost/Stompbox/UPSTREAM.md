@@ -31,7 +31,8 @@ The script fails if an upstream line it replaces has changed.
 - **`stompbox-stomps/DefaultPlugins.cpp`:** registers `Tonestack`, the circuit-modelled tone stacks (Bassman,
   Twin, Princeton, JCM800, JCM2000, JTM45, AC30, AC15, Mesa, Soldano and others) as a selectable pedal.
   Upstream defines it but leaves it out of the factory at the pinned commit. Its own UI fills that slot with EQ-7
-  instead. Listen to it before shipping it.
+  instead. Listen to it before shipping it. It also gets a description, which upstream leaves empty, so the
+  browser says what it is.
 - **`stompbox-capi/StompboxCAPI.{h,cpp}`:** exports `DumpConfig`, which gives every pedal with its parameter
   definitions in Stompbox's own protocol: the catalogue the Tone designer page draws its browser and editors from.
 

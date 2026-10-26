@@ -138,22 +138,14 @@ namespace Overlay
 			return nullptr;
 		}
 
-		// "Amps/Fender/Deluxe Crunch.nam" -> "Deluxe Crunch".
-		std::string ShortFileName(const std::string& file)
-		{
-			const size_t slash = file.find_last_of("/\\");
-			std::string name = slash == std::string::npos ? file : file.substr(slash + 1);
-			const size_t dot = name.find_last_of('.');
-			return dot == std::string::npos ? name : name.substr(0, dot);
-		}
-
-		// The file an amp or cabinet plays, as its tile and editor show it; empty for an effect.
+		// The file an amp or cabinet plays, as its tile and editor show it; empty for an effect. Stompbox names files
+		// without their extension ("JCM800 v1.2" for "JCM800 v1.2.nam"), so the name is shown as it is.
 		std::string PedalFileLabel(const Pedal& pedal, const PedalDefinition* definition)
 		{
 			const ParameterDefinition* file = FileParameter(definition);
 			if (!file) return {};
 			const auto value = pedal.values.find(file->name);
-			return value == pedal.values.end() || value->second.empty() ? std::string("No file") : ShortFileName(value->second);
+			return value == pedal.values.end() || value->second.empty() ? std::string("No file") : value->second;
 		}
 
 		std::vector<std::string> ChainIds()
@@ -638,7 +630,7 @@ namespace Overlay
 				if (!ImGui::BeginMenu(label, !items.empty())) continue;
 				for (const BrowserItem& item : items)
 				{
-					const std::string name = item.file.empty() ? item.kind : ShortFileName(item.file);
+					const std::string name = item.file.empty() ? item.kind : item.file;
 					if (ImGui::MenuItem(name.c_str())) AddPedal(item, -1);
 				}
 				ImGui::EndMenu();
@@ -664,8 +656,7 @@ namespace Overlay
 			ImGui::PopStyleVar();
 		}
 
-		// One pedal on the rack at `at`: click selects, the footswitch bypasses, double-click edits, drag moves it,
-		// and a browser item dropped on it replaces it. Returns whether the mouse is on it.
+		// The symbol in a pedal's middle: an amp's grille, a cabinet's speaker, an EQ's sliders, else a waveform.
 		void DrawPedalSymbol(ImDrawList* list, const std::string& kind, ImVec2 center, ImU32 color)
 		{
 			if (IsAmpKind(kind))
@@ -696,6 +687,8 @@ namespace Overlay
 			list->AddPolyline(wave, IM_ARRAYSIZE(wave), color, false, 1.5f);
 		}
 
+		// One pedal on the rack at `at`: click selects, the footswitch bypasses, double-click edits, drag moves it,
+		// and a browser item dropped on it replaces it. Returns whether the mouse is on it.
 		bool PedalTileAt(const Pedal& pedal, int index, ImVec2 at, ImDrawList* list)
 		{
 			PageState& state = State();
@@ -748,6 +741,18 @@ namespace Overlay
 			if (IsPedalLoading(pedal, definition)) ToneDesignerUi::DrawTileBusy(list, at, look.width, "Loading");
 			ImGui::PopID();
 			return isHovered;
+		}
+
+		// The last item takes a browser item dropped on it, adding it at `index` (-1: its usual place).
+		void AcceptNewPedal(int index)
+		{
+			if (!ImGui::BeginDragDropTarget()) return;
+			if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(NEW_PAYLOAD))
+			{
+				const auto& data = *static_cast<const NewPedalPayload*>(payload->Data);
+				AddPedal({ data.kind, data.file }, index);
+			}
+			ImGui::EndDragDropTarget();
 		}
 
 		// Dropping into a gap inserts there: a dragged pedal moves to that place, a browser item goes in at that
@@ -811,8 +816,8 @@ namespace Overlay
 			const char* boardHint = isNoticeShown ? state.notice.c_str() : warning ? warning : BoardHint(s);
 			const ImU32 hintColor = !isNoticeShown && warning ? Ink::Amber : Ink::Dim;
 			ImFont* caption = CaptionFont();
-			const bool showHint = height >= 230.0f;
-			const float hintH = showHint ? caption->CalcTextSizeA(caption->FontSize, FLT_MAX, boardW, boardHint).y + ImGui::GetStyle().ItemSpacing.y + 4.0f : 0.0f;
+			const bool shouldShowHint = height >= 230.0f;
+			const float hintH = shouldShowHint ? caption->CalcTextSizeA(caption->FontSize, FLT_MAX, boardW, boardHint).y + ImGui::GetStyle().ItemSpacing.y + 4.0f : 0.0f;
 			const float rackH = std::max(1.0f, ImGui::GetContentRegionAvail().y - hintH);
 			const float pedalH = ToneDesignerUi::PEDAL_HEIGHT;
 			const ImVec2 board = ImGui::GetCursorScreenPos();
@@ -860,6 +865,7 @@ namespace Overlay
 			ImGui::SetItemUsingMouseWheel();
 			const bool isAddHovered = ImGui::IsItemHovered();
 			Hint("Add a pedal at its usual place. The browser below has search; drag from it onto the board to put a pedal anywhere.");
+			AcceptNewPedal(count);
 			ToneDesignerUi::DrawAddTile(list, addAt, midY, isAddHovered);
 			x += ToneDesignerUi::ADD_TILE_WIDTH + 8.0f;
 			cable();
@@ -872,6 +878,9 @@ namespace Overlay
 			ImGui::SetCursorScreenPos(rackStart);
 			ImGui::InvisibleButton("##boardSpace", ImVec2(x + 10.0f - rackStart.x, std::max(rackH - 6.0f, 1.0f)));
 			ImGui::SetItemUsingMouseWheel();
+			// A browser item dropped anywhere else on the board goes in at its usual place. ImGui delivers a drop to
+			// the smallest target under the mouse, so the pedals, the gaps and the Add tile still take theirs.
+			AcceptNewPedal(-1);
 			// Not over a pedal: ImGui 1.85's IsItemHovered is true under the pedals too, and this menu would replace theirs.
 			if (!isOverTile && !isAddHovered && ImGui::IsItemHovered() && ImGui::IsMouseReleased(ImGuiMouseButton_Right)) ImGui::OpenPopup("##boardMenu");
 
@@ -902,7 +911,7 @@ namespace Overlay
 			ImGui::EndChild();
 			ImGui::PopStyleVar(2);
 
-			if (showHint)
+			if (shouldShowHint)
 			{
 				ImGui::PushFont(caption);
 				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(hintColor));
@@ -943,7 +952,7 @@ namespace Overlay
 			{
 				const BrowserItem& item = items[i];
 				const PedalDefinition* definition = FindDefinition(item.kind);
-				const std::string name = item.file.empty() ? item.kind : ShortFileName(item.file);
+				const std::string name = item.file.empty() ? item.kind : item.file;
 				const std::string detail = !item.file.empty() ? item.file : definition ? definition->description : std::string();
 				ImGui::PushID(i);
 				const ImVec2 at = ImGui::GetCursorScreenPos();
@@ -1012,9 +1021,9 @@ namespace Overlay
 			ImGui::SetNextItemWidth(searchW);
 			ImGui::PushStyleColor(ImGuiCol_FrameBg, ImGui::ColorConvertU32ToFloat4(Ink::Field));
 			ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8, 4));
-			const bool searchChanged = ImGui::InputTextWithHint("##browserSearch", state.tab == BrowserTab::Effects ? "Search effects" : state.tab == BrowserTab::Amps ? "Search amps" : "Search cabinets",
+			const bool isSearchChanged = ImGui::InputTextWithHint("##browserSearch", state.tab == BrowserTab::Effects ? "Search effects" : state.tab == BrowserTab::Amps ? "Search amps" : "Search cabinets",
 				state.search, sizeof(state.search));
-			if (searchChanged) state.selectedItem = -1;
+			if (isSearchChanged) state.selectedItem = -1;
 			ImGui::PopStyleVar();
 			ImGui::PopStyleColor();
 
@@ -1101,15 +1110,14 @@ namespace Overlay
 			case ParameterType::File:
 			{
 				const bool isFile = parameter.type == ParameterType::File;
-				const std::string preview = current.empty() ? std::string("None") : (isFile ? ShortFileName(current) : current);
+				const std::string preview = current.empty() ? std::string("None") : current;
 				ImGui::SetNextItemWidth(controlWidth);
 				PushPopupPadding();
 				if (ImGui::BeginCombo("##value", preview.c_str()))
 				{
 					for (const std::string& choice : parameter.choices)
 					{
-						const std::string label = isFile ? ShortFileName(choice) : choice;
-						if (ImGui::Selectable(label.c_str(), choice == current) && choice != current)
+						if (ImGui::Selectable(choice.c_str(), choice == current) && choice != current)
 						{
 							SetParameter(pedal.id, parameter.name, choice);
 							if (isFile) State().loadingPedals.push_back(pedal.id);
@@ -1361,7 +1369,6 @@ namespace Overlay
 
 		void BottomPane(float width, float height)
 		{
-			const Snapshot& s = GetSnapshot();
 			PageState& state = State();
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14, 14));
 			ImGui::BeginChild("##stompboxPane", ImVec2(width, height), false,
@@ -1374,7 +1381,9 @@ namespace Overlay
 			ImGui::EndChild();
 		}
 
-		void DrawEditorWindow()
+		// The selected pedal's controls in a window of their own, opened in the middle of the overlay window
+		// (`overlayCenter`). Not saved in imgui.ini: each pedal id would leave an entry there for good.
+		void DrawEditorWindow(ImVec2 overlayCenter)
 		{
 			PageState& state = State();
 			const Snapshot& snapshot = GetSnapshot();
@@ -1385,17 +1394,16 @@ namespace Overlay
 				return;
 			}
 
-			const Pedal& pedal = snapshot.chain[editing];
+			const Pedal pedal = snapshot.chain[editing];   // a copy: an edit can set the chain at once (StompboxLink)
 			constexpr float INITIAL_EDITOR_HEIGHT = 360.0f;
-			ImGui::SetNextWindowSize(ImVec2(EDITOR_WIDTH, INITIAL_EDITOR_HEIGHT), ImGuiCond_FirstUseEver);
+			ImGui::SetNextWindowSize(ImVec2(EDITOR_WIDTH, INITIAL_EDITOR_HEIGHT), ImGuiCond_Appearing);
 			ImGui::SetNextWindowSizeConstraints(ImVec2(360.0f, 220.0f), ImVec2(FLT_MAX, FLT_MAX));
-			ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - EDITOR_WIDTH - 28.0f,
-				std::max(28.0f, ImGui::GetIO().DisplaySize.y - INITIAL_EDITOR_HEIGHT - 28.0f)), ImGuiCond_FirstUseEver);
+			ImGui::SetNextWindowPos(overlayCenter, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 10.0f));
 			ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::ColorConvertU32ToFloat4(Ink::Library));
 			bool isOpen = state.isEditorOpen;
 			const std::string title = pedal.kind + "###stompboxEditor_" + pedal.id;
-			if (ImGui::Begin(title.c_str(), &isOpen, ImGuiWindowFlags_NoCollapse))
+			if (ImGui::Begin(title.c_str(), &isOpen, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings))
 			{
 				EditorContents(pedal, ImGui::GetContentRegionAvail().x, ImGui::GetContentRegionAvail().y);
 			}
@@ -1508,8 +1516,10 @@ namespace Overlay
 		if (!s.isBusy && !s.isPresetLoading) state.loadingPedals.clear();
 		if (!s.isPlaying) StatusPill("Switching to the Tone designer...", Color::Warn);
 		if (!s.error.empty()) StatusPill(s.error.c_str(), Color::Bad);
+		const ImGuiWindow* overlay = ImGui::GetCurrentWindow()->RootWindow;
+		const ImVec2 overlayCenter(overlay->Pos.x + overlay->Size.x * 0.5f, overlay->Pos.y + overlay->Size.y * 0.5f);
 		const float naturalHeight = Panel();
-		if (state.isEditorOpen) DrawEditorWindow();
+		if (state.isEditorOpen) DrawEditorWindow(overlayCenter);
 		return naturalHeight;
 	}
 }
