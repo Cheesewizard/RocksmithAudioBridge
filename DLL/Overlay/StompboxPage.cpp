@@ -37,13 +37,13 @@ namespace Overlay
 		using ToneDesignerUi::TintPill;
 
 		// The panel's proportions, as on the VST rig page (OverlayShell.cpp, Panel).
-		constexpr float MIN_BOARD_HEIGHT = 160.0f;
+		constexpr float MIN_BOARD_HEIGHT = 190.0f;
 		constexpr float NATURAL_MAIN_HEIGHT = 300.0f;
 		constexpr float DIVIDER_HEIGHT = 8.0f;
 		constexpr float BASE_PANE_HEIGHT = 280.0f;
 		constexpr float MIN_PANE_HEIGHT = 150.0f;
 		constexpr float METER_COLUMN_WIDTH = 44.0f;
-		constexpr float EDITOR_WIDTH = 340.0f;
+		constexpr float EDITOR_WIDTH = 420.0f;
 		// The load meter's lines. The typical block's share of real time is the tone's own cost, judged against the
 		// base game (480-frame blocks): kept under half, a tone has room on slower PCs than the one it was made on.
 		// The slowest block is what this PC's block size risks: ASIO's 128 or 64 frames are a bonus, not the target.
@@ -89,7 +89,6 @@ namespace Overlay
 			ULONGLONG noticeAt = 0;
 			std::vector<std::string> loadingPedals;   // a file was just chosen: spinner until the host confirms
 			float paneExtra = 0.0f;             // what the divider was dragged by, for the session
-			float libraryContentHeight = 0.0f;  // last frame's tone list, for the page's natural height
 			uint32_t lastLateBlocks = 0;
 			ULONGLONG lateAt = 0;
 		};
@@ -282,13 +281,26 @@ namespace Overlay
 			return items;
 		}
 
+		bool IsItemInChain(const BrowserItem& item)
+		{
+			for (const Pedal& pedal : GetSnapshot().chain)
+			{
+				if (pedal.kind != item.kind) continue;
+				if (item.file.empty()) return true;
+				const PedalDefinition* definition = FindDefinition(pedal.kind);
+				const ParameterDefinition* file = FileParameter(definition);
+				const auto value = file ? pedal.values.find(file->name) : pedal.values.end();
+				if (value != pedal.values.end() && value->second == item.file) return true;
+			}
+			return false;
+		}
+
 		std::wstring EngineFolder(const char* subfolder)
 		{
 			PWSTR appData = nullptr;
 			if (FAILED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, KF_FLAG_CREATE, nullptr, &appData))) return {};
 			std::wstring folder = std::wstring(appData) + L"\\RocksmithAudioBridge\\Stompbox\\" + std::wstring(subfolder, subfolder + strlen(subfolder));
 			CoTaskMemFree(appData);
-			SHCreateDirectoryExW(nullptr, folder.c_str(), nullptr);
 			return folder;
 		}
 
@@ -595,8 +607,6 @@ namespace Overlay
 			Hint(s.songKey.empty() ? "Choose a song in the game to give each of its tones a saved tone."
 				: "Click to see the song's tones in the pane under the board and pick a saved tone for each.");
 			ImGui::PopStyleColor();
-			state.libraryContentHeight = ImGui::GetCursorPosY() + 10.0f;
-
 			PushPopupPadding();
 			if (ImGui::BeginPopupContextWindow("##libraryMenu", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
 			{
@@ -656,6 +666,36 @@ namespace Overlay
 
 		// One pedal on the rack at `at`: click selects, the footswitch bypasses, double-click edits, drag moves it,
 		// and a browser item dropped on it replaces it. Returns whether the mouse is on it.
+		void DrawPedalSymbol(ImDrawList* list, const std::string& kind, ImVec2 center, ImU32 color)
+		{
+			if (IsAmpKind(kind))
+			{
+				list->AddRect(ImVec2(center.x - 26, center.y - 9), ImVec2(center.x + 26, center.y + 9), color, 3.0f, 0, 1.5f);
+				for (int i = -2; i <= 2; ++i) list->AddCircle(ImVec2(center.x + i * 10.0f, center.y), 2.0f, color, 10);
+				return;
+			}
+			if (kind == CABINET_KIND)
+			{
+				list->AddCircle(center, 13.0f, color, 20, 1.5f);
+				list->AddCircle(center, 7.0f, color, 16, 1.5f);
+				return;
+			}
+			if (kind == "EQ-7" || kind == "BEQ-7" || kind == "Tonestack")
+			{
+				for (int i = -3; i <= 3; ++i)
+				{
+					const float x = center.x + i * 7.0f;
+					list->AddLine(ImVec2(x, center.y - 12), ImVec2(x, center.y + 12), color, 1.5f);
+					list->AddCircleFilled(ImVec2(x, center.y + (i % 2 == 0 ? -4 : 4)), 2.0f, color);
+				}
+				return;
+			}
+			const ImVec2 wave[] = { ImVec2(center.x - 25, center.y), ImVec2(center.x - 15, center.y),
+				ImVec2(center.x - 7, center.y - 10), ImVec2(center.x, center.y + 12),
+				ImVec2(center.x + 7, center.y - 13), ImVec2(center.x + 15, center.y), ImVec2(center.x + 25, center.y) };
+			list->AddPolyline(wave, IM_ARRAYSIZE(wave), color, false, 1.5f);
+		}
+
 		bool PedalTileAt(const Pedal& pedal, int index, ImVec2 at, ImDrawList* list)
 		{
 			PageState& state = State();
@@ -698,11 +738,13 @@ namespace Overlay
 			tile.name = pedal.kind.c_str();
 			tile.sub = sub.c_str();
 			tile.look = look;
+			tile.look.knobs = 0;
 			tile.isPlaying = pedal.isEnabled;
 			tile.isSelected = state.selectedPedal == pedal.id;
 			tile.isHovered = isHovered;
 			tile.isOnSwitch = isOnSwitch;
 			ToneDesignerUi::DrawPedalTile(list, at, tile);
+			DrawPedalSymbol(list, pedal.kind, ImVec2(at.x + look.width * 0.5f, at.y + 76.0f), pedal.isEnabled ? Ink::Soft : Ink::Dim);
 			if (IsPedalLoading(pedal, definition)) ToneDesignerUi::DrawTileBusy(list, at, look.width, "Loading");
 			ImGui::PopID();
 			return isHovered;
@@ -769,8 +811,9 @@ namespace Overlay
 			const char* boardHint = isNoticeShown ? state.notice.c_str() : warning ? warning : BoardHint(s);
 			const ImU32 hintColor = !isNoticeShown && warning ? Ink::Amber : Ink::Dim;
 			ImFont* caption = CaptionFont();
-			const float hintH = caption->CalcTextSizeA(caption->FontSize, FLT_MAX, boardW, boardHint).y + ImGui::GetStyle().ItemSpacing.y + 4.0f;
-			const float rackH = std::max(150.0f, ImGui::GetContentRegionAvail().y - hintH);
+			const bool showHint = height >= 230.0f;
+			const float hintH = showHint ? caption->CalcTextSizeA(caption->FontSize, FLT_MAX, boardW, boardHint).y + ImGui::GetStyle().ItemSpacing.y + 4.0f : 0.0f;
+			const float rackH = std::max(1.0f, ImGui::GetContentRegionAvail().y - hintH);
 			const float pedalH = ToneDesignerUi::PEDAL_HEIGHT;
 			const ImVec2 board = ImGui::GetCursorScreenPos();
 			ImDrawList* outer = ImGui::GetWindowDrawList();
@@ -859,13 +902,16 @@ namespace Overlay
 			ImGui::EndChild();
 			ImGui::PopStyleVar(2);
 
-			ImGui::PushFont(caption);
-			ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(hintColor));
-			ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + boardW);
-			ImGui::TextUnformatted(boardHint);
-			ImGui::PopTextWrapPos();
-			ImGui::PopStyleColor();
-			ImGui::PopFont();
+			if (showHint)
+			{
+				ImGui::PushFont(caption);
+				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(hintColor));
+				ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + boardW);
+				ImGui::TextUnformatted(boardHint);
+				ImGui::PopTextWrapPos();
+				ImGui::PopStyleColor();
+				ImGui::PopFont();
+			}
 			ImGui::EndChild();
 			ImGui::PopStyleVar();
 		}
@@ -892,6 +938,7 @@ namespace Overlay
 			ImDrawList* list = ImGui::GetWindowDrawList();
 			const float rowW = ImGui::GetContentRegionAvail().x;
 			const float detailX = rowW * 0.42f;
+			const float statusX = std::max(detailX + 60.0f, rowW - 72.0f);
 			for (int i = 0; i < static_cast<int>(items.size()); ++i)
 			{
 				const BrowserItem& item = items[i];
@@ -933,9 +980,11 @@ namespace Overlay
 				list->PushClipRect(at, ImVec2(at.x + detailX - 8.0f, end.y), true);
 				list->AddText(ImVec2(at.x + 28.0f, at.y + 5.0f), isSelected ? IM_COL32_WHITE : Ink::Text, name.c_str());
 				list->PopClipRect();
-				list->PushClipRect(ImVec2(at.x + detailX, at.y), end, true);
+				list->PushClipRect(ImVec2(at.x + detailX, at.y), ImVec2(at.x + statusX - 6.0f, end.y), true);
 				Text(list, caption, ImVec2(at.x + detailX, at.y + (rowH - caption->FontSize) * 0.5f), Ink::Muted, detail.c_str());
 				list->PopClipRect();
+				if (IsItemInChain(item))
+					Text(list, caption, ImVec2(at.x + statusX, at.y + (rowH - caption->FontSize) * 0.5f), Ink::Good, "In chain");
 				ImGui::PopID();
 			}
 			ImGui::EndChild();
@@ -963,16 +1012,18 @@ namespace Overlay
 			ImGui::SetNextItemWidth(searchW);
 			ImGui::PushStyleColor(ImGuiCol_FrameBg, ImGui::ColorConvertU32ToFloat4(Ink::Field));
 			ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8, 4));
-			ImGui::InputTextWithHint("##browserSearch", state.tab == BrowserTab::Effects ? "Search effects" : state.tab == BrowserTab::Amps ? "Search amps" : "Search cabinets",
+			const bool searchChanged = ImGui::InputTextWithHint("##browserSearch", state.tab == BrowserTab::Effects ? "Search effects" : state.tab == BrowserTab::Amps ? "Search amps" : "Search cabinets",
 				state.search, sizeof(state.search));
+			if (searchChanged) state.selectedItem = -1;
 			ImGui::PopStyleVar();
 			ImGui::PopStyleColor();
 
 			const std::vector<BrowserItem> items = BrowserItems(state.tab, state.search);
+			if (state.selectedItem < 0 || state.selectedItem >= static_cast<int>(items.size())) state.selectedItem = -1;
 			const float footH = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.y + 4.0f;
 			ImGui::SetCursorPosX(left);
 			ImGui::Dummy(ImVec2(0, 2));
-			BrowserList(items, width, std::max(ImGui::GetFontSize() * 3.0f, ImGui::GetContentRegionAvail().y - footH));
+			BrowserList(items, width, std::max(1.0f, ImGui::GetContentRegionAvail().y - footH - 12.0f));
 
 			ImGui::Dummy(ImVec2(0, 2));
 			const bool hasItem = state.selectedItem >= 0 && state.selectedItem < static_cast<int>(items.size());
@@ -1101,9 +1152,8 @@ namespace Overlay
 			}
 		}
 
-		// The selected pedal's controls, beside the browser: built from Stompbox's parameter definitions, in the
-		// panel's colours. Advanced parameters fold away; the meters a pedal writes are left out.
-		void Editor(const Pedal& pedal, float width, float height)
+		// Controls inside the floating editor, using the engine's parameter definitions and the panel's colours.
+		void EditorContents(const Pedal& pedal, float width, float height)
 		{
 			PageState& state = State();
 			const PedalDefinition* definition = FindDefinition(pedal.kind);
@@ -1158,9 +1208,8 @@ namespace Overlay
 				else ParameterControl(pedal, parameter, labelWidth, controlWidth);
 			}
 			if (!sliders.empty()) SliderBank(pedal, sliders);
-			if (!advanced.empty())
+			if (!advanced.empty() && ImGui::CollapsingHeader("Advanced"))
 			{
-				FoldLabel("Advanced");
 				for (const ParameterDefinition* parameter : advanced) ParameterControl(pedal, *parameter, labelWidth, controlWidth);
 			}
 			ImGui::EndChild();
@@ -1319,24 +1368,41 @@ namespace Overlay
 				ImGuiWindowFlags_AlwaysUseWindowPadding | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 			ImGui::PopStyleVar();
 			const float inner = ImGui::GetContentRegionAvail().x;
-			const int editing = state.isEditorOpen ? IndexOfPedal(state.selectedPedal) : -1;
-			if (state.isEditorOpen && editing < 0) state.isEditorOpen = false;
-			const float editorW = editing >= 0 ? std::min(EDITOR_WIDTH, inner * 0.45f) : 0.0f;
-			const float leftW = editing >= 0 ? inner - editorW - 12.0f : inner;
-			const ImVec2 start = ImGui::GetCursorPos();
-
-			ImGui::BeginGroup();
 			PaneToggle();
-			if (state.isSongsMode) SongTones(leftW);
-			else Browser(leftW);
-			ImGui::EndGroup();
-			if (editing >= 0)
-			{
-				ImGui::SetCursorPos(ImVec2(start.x + leftW + 12.0f, start.y));
-				const Pedal pedal = s.chain[editing];   // a copy, as on the board
-				Editor(pedal, editorW, ImGui::GetContentRegionAvail().y);
-			}
+			if (state.isSongsMode) SongTones(inner);
+			else Browser(inner);
 			ImGui::EndChild();
+		}
+
+		void DrawEditorWindow()
+		{
+			PageState& state = State();
+			const Snapshot& snapshot = GetSnapshot();
+			const int editing = state.isEditorOpen ? IndexOfPedal(state.selectedPedal) : -1;
+			if (editing < 0)
+			{
+				state.isEditorOpen = false;
+				return;
+			}
+
+			const Pedal& pedal = snapshot.chain[editing];
+			constexpr float INITIAL_EDITOR_HEIGHT = 360.0f;
+			ImGui::SetNextWindowSize(ImVec2(EDITOR_WIDTH, INITIAL_EDITOR_HEIGHT), ImGuiCond_FirstUseEver);
+			ImGui::SetNextWindowSizeConstraints(ImVec2(360.0f, 220.0f), ImVec2(FLT_MAX, FLT_MAX));
+			ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - EDITOR_WIDTH - 28.0f,
+				std::max(28.0f, ImGui::GetIO().DisplaySize.y - INITIAL_EDITOR_HEIGHT - 28.0f)), ImGuiCond_FirstUseEver);
+			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 10.0f));
+			ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::ColorConvertU32ToFloat4(Ink::Library));
+			bool isOpen = state.isEditorOpen;
+			const std::string title = pedal.kind + "###stompboxEditor_" + pedal.id;
+			if (ImGui::Begin(title.c_str(), &isOpen, ImGuiWindowFlags_NoCollapse))
+			{
+				EditorContents(pedal, ImGui::GetContentRegionAvail().x, ImGui::GetContentRegionAvail().y);
+			}
+			ImGui::End();
+			ImGui::PopStyleColor();
+			ImGui::PopStyleVar();
+			state.isEditorOpen = isOpen && state.isEditorOpen;
 		}
 
 		// ---- Status -----------------------------------------------------------------------------------------
@@ -1379,11 +1445,13 @@ namespace Overlay
 			const float width = ImGui::GetContentRegionAvail().x;
 			const float barH = ImGui::GetFontSize() + 20.0f;
 			const float available = ImGui::GetContentRegionAvail().y;
-			const float maxPaneH = std::max(MIN_PANE_HEIGHT, std::floor(available - barH - DIVIDER_HEIGHT - 12.0f - MIN_BOARD_HEIGHT));
-			const float paneH = std::clamp(std::floor(BASE_PANE_HEIGHT + state.paneExtra), MIN_PANE_HEIGHT, maxPaneH);
-			const float naturalMainH = std::max(NATURAL_MAIN_HEIGHT, state.libraryContentHeight);
-			const float naturalHeight = ImGui::GetCursorPosY() + barH + naturalMainH + BASE_PANE_HEIGHT + DIVIDER_HEIGHT + 12.0f + 20.0f;
-			const float mainH = std::max(MIN_BOARD_HEIGHT, std::floor(available - barH - DIVIDER_HEIGHT - paneH - 12.0f));
+			const float bodyHeight = std::max(1.0f, available - barH - DIVIDER_HEIGHT - 12.0f);
+			const float boardMinimum = std::min(MIN_BOARD_HEIGHT, bodyHeight * 0.55f);
+			const float paneMinimum = std::min(MIN_PANE_HEIGHT, bodyHeight - boardMinimum);
+			const float maxPaneH = bodyHeight - boardMinimum;
+			const float paneH = std::clamp(std::floor(BASE_PANE_HEIGHT + state.paneExtra), paneMinimum, maxPaneH);
+			const float naturalHeight = ImGui::GetCursorPosY() + barH + NATURAL_MAIN_HEIGHT + BASE_PANE_HEIGHT + DIVIDER_HEIGHT + 12.0f + 20.0f;
+			const float mainH = bodyHeight - paneH;
 			const float libraryW = std::min(240.0f, width * 0.32f);
 			const ImVec2 at = ImGui::GetCursorScreenPos();
 			ImDrawList* list = ImGui::GetWindowDrawList();
@@ -1407,7 +1475,7 @@ namespace Overlay
 			const bool isDividerHot = ImGui::IsItemHovered() || ImGui::IsItemActive();
 			if (isDividerHot) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
 			if (ImGui::IsItemActive() && ImGui::GetIO().MouseDelta.y != 0.0f)
-				state.paneExtra = std::clamp(paneH - ImGui::GetIO().MouseDelta.y, MIN_PANE_HEIGHT, maxPaneH) - BASE_PANE_HEIGHT;
+				state.paneExtra = std::clamp(paneH - ImGui::GetIO().MouseDelta.y, paneMinimum, maxPaneH) - BASE_PANE_HEIGHT;
 			if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) state.paneExtra = 0.0f;
 
 			list->ChannelsSetCurrent(0);
@@ -1440,6 +1508,8 @@ namespace Overlay
 		if (!s.isBusy && !s.isPresetLoading) state.loadingPedals.clear();
 		if (!s.isPlaying) StatusPill("Switching to the Tone designer...", Color::Warn);
 		if (!s.error.empty()) StatusPill(s.error.c_str(), Color::Bad);
-		return Panel();
+		const float naturalHeight = Panel();
+		if (state.isEditorOpen) DrawEditorWindow();
+		return naturalHeight;
 	}
 }

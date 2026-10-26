@@ -109,8 +109,8 @@ The full reports are `Offline-A2-full.json` and `Offline-A2-lite.json`.
   - **Library and board:** saved tones on the left; one pedal per effect, with its colour, file name, LED and
     footswitch; drag to reorder or drop from the browser; a right-click menu.
   - **Browser:** Effects, Amps (NAM files) and Cabinets (IRs), each with search and a Folder button.
-  - **Editor:** one generic in-overlay panel built from the parameter definitions. VSliders are drawn as a bank;
-    advanced parameters are folded away; output meters are left out.
+  - **Editor:** double-click opens a movable in-overlay window built from the parameter definitions, leaving the
+    browser full width. VSliders are drawn as a bank; advanced parameters fold away; output meters are left out.
   - **Rules:** default insertion places (gate, amp, cabinet); spinners while a file loads. There is no pedal-count
     limit.
   - **Load meter:** measured live, once a second, by the host's block timing (`SourceRouter`, published through
@@ -152,9 +152,19 @@ The full reports are `Offline-A2-full.json` and `Offline-A2-lite.json`.
 
 ### Verification
 
-Nothing has been built or run. The new C++ files passed `clang++ -fsyntax-only` with the real ImGui headers and
-stand-in Windows headers. `OverlayShell.cpp` was checked the same way: its only errors are Windows API names the
-stand-ins do not define. `Main.cpp` was not compiled.
+The Release Win32 overlay and x64 host have built with MSVC. The Stompbox engine was rebuilt with all three
+patches; its catalogue query exposes 29 processors, and a simple chain produced finite audio at 64/128 frames.
+
+The combined UI retains the shared VST drawing parts and the shell's natural-height handoff. Its natural height
+uses intrinsic layout sizes, independent of the current window and tone-list length. Built-in cards use simple
+processor symbols; VST cards retain their existing appearance. Browser scrolling keeps the footer buttons visible.
+
+An isolated ImGui/D3D9 harness using the production DrawShell sizing body and real page drawing ran 360 frames
+at 1400x900 and 1024x700. Natural height was constant before resizing, and window height was unchanged over the
+last 120 frames. A simulated double-click opened a floating EQ editor without changing the browser width.
+These are fixture-based rendering checks, not live Rocksmith, audio-hardware or song-switch acceptance.
+
+The separately saved factory-bank work is not integrated into this UI commit.
 
 ### Known gaps
 
