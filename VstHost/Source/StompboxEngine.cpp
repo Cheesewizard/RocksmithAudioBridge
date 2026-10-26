@@ -41,7 +41,7 @@ namespace VstHost
 		{
 			function = reinterpret_cast<T>(GetProcAddress(module, name));
 			if (function) return true;
-			error = std::string(DLL_NAME, DLL_NAME + wcslen(DLL_NAME)) + " has no " + name + " (a different Stompbox build?).";
+			error = std::string("stompbox-capi.dll has no ") + name + " (not built by VstHost\\Stompbox\\Build-Stompbox.ps1?).";
 			return false;
 		}
 	}
@@ -55,8 +55,9 @@ namespace VstHost
 		module = LoadLibraryExW(file.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
 		if (!module)
 		{
-			error = "The Stompbox engine (stompbox-capi.dll) is not next to the Tone designer host (error " + std::to_string(GetLastError()) + ").";
-			Log("stompbox: %ls not loaded (%lu)", file.c_str(), GetLastError());
+			const DWORD code = GetLastError();
+			error = "The Stompbox engine (stompbox-capi.dll) is not next to the Tone designer host (error " + std::to_string(code) + ").";
+			Log("stompbox: %ls not loaded (%lu)", file.c_str(), code);
 			return false;
 		}
 		const bool resolved = Resolve(module, "CreateProcessor", createProcessor, error)
@@ -66,29 +67,13 @@ namespace VstHost
 			&& Resolve(module, "StartServer", startServer, error)
 			&& Resolve(module, "Process", process, error)
 			&& Resolve(module, "HandleCommand", handleCommand, error)
-			&& Resolve(module, "GetStringVectorSize", getStringVectorSize, error)
-			&& Resolve(module, "GetStringVectorValue", getStringVectorValue, error)
-			&& Resolve(module, "GetAllPlugins", getAllPlugins, error)
-			&& Resolve(module, "GetPresets", getPresets, error)
-			&& Resolve(module, "CreatePlugin", createPlugin, error)
+			&& Resolve(module, "DumpConfig", dumpConfig, error)
 			&& Resolve(module, "DumpProgram", dumpProgram, error)
-			&& Resolve(module, "GetPluginDescription", getPluginDescription, error)
-			&& Resolve(module, "GetPluginBackgroundColor", getPluginBackgroundColor, error)
-			&& Resolve(module, "GetPluginForegroundColor", getPluginForegroundColor, error)
-			&& Resolve(module, "GetPluginIsUserSelectable", getPluginIsUserSelectable, error)
-			&& Resolve(module, "GetPluginNumParameters", getPluginNumParameters, error)
-			&& Resolve(module, "GetPluginParameter", getPluginParameter, error)
-			&& Resolve(module, "GetParameterName", getParameterName, error)
-			&& Resolve(module, "GetParameterDescription", getParameterDescription, error)
-			&& Resolve(module, "GetParameterDisplayFormat", getParameterDisplayFormat, error)
-			&& Resolve(module, "GetParameterMinValue", getParameterMinValue, error)
-			&& Resolve(module, "GetParameterMaxValue", getParameterMaxValue, error)
-			&& Resolve(module, "GetParameterDefaultValue", getParameterDefaultValue, error)
-			&& Resolve(module, "GetParameterRangePower", getParameterRangePower, error)
-			&& Resolve(module, "GetParameterType", getParameterType, error)
-			&& Resolve(module, "GetParameterEnumValues", getParameterEnumValues, error)
-			&& Resolve(module, "GetParameterIsAdvanced", getParameterIsAdvanced, error)
-			&& Resolve(module, "GetParameterIsOutput", getParameterIsOutput, error);
+			&& Resolve(module, "GetCurrentPreset", getCurrentPreset, error)
+			&& Resolve(module, "IsPresetLoading", isPresetLoading, error)
+			&& Resolve(module, "GetPresets", getPresets, error)
+			&& Resolve(module, "GetStringVectorSize", getStringVectorSize, error)
+			&& Resolve(module, "GetStringVectorValue", getStringVectorValue, error);
 		if (!resolved)
 		{
 			Log("stompbox: %s", error.c_str());
@@ -109,9 +94,31 @@ namespace VstHost
 		return true;
 	}
 
+	void StompboxEngine::Unload()
+	{
+		if (processor && deleteProcessor) deleteProcessor(processor);
+		processor = nullptr;
+		if (module) FreeLibrary(module);
+		module = nullptr;
+		isServerStarted = false;
+	}
+
+	void StompboxEngine::RequireLoaded(const char* operation) const
+	{
+		if (!processor) throw std::logic_error(std::string("StompboxEngine::") + operation + " before Load.");
+	}
+
+	std::string StompboxEngine::TakeAllocatedText(const char* text) const
+	{
+		if (!text) return {};
+		std::string copy(text);
+		CoTaskMemFree(const_cast<char*>(text));
+		return copy;
+	}
+
 	void StompboxEngine::Prepare(int frameCount)
 	{
-		if (!processor) throw std::logic_error("StompboxEngine::Prepare before Load.");
+		RequireLoaded("Prepare");
 		frames = frameCount;
 		input.assign(static_cast<size_t>(frames), 0.0f);
 		setMaxAudioBufferSize(processor, static_cast<size_t>(frames));
@@ -119,99 +126,53 @@ namespace VstHost
 
 	void StompboxEngine::SendCommand(const std::string& command)
 	{
-		if (!processor) throw std::logic_error("StompboxEngine::SendCommand before Load.");
+		RequireLoaded("SendCommand");
 		handleCommand(processor, command.c_str());
 	}
 
-	std::vector<std::string> StompboxEngine::ReadStrings(void* strings) const
+	std::string StompboxEngine::DumpConfig()
 	{
-		std::vector<std::string> values;
-		if (!strings) return values;
-		const size_t count = getStringVectorSize(strings);
-		values.reserve(count);
-		for (size_t i = 0; i < count; ++i)
-		{
-			const char* value = getStringVectorValue(strings, i);
-			values.emplace_back(value ? value : "");
-		}
-		return values;
-	}
-
-	StompParameterInfo StompboxEngine::ReadParameter(void* parameter) const
-	{
-		const auto text = [](const char* value) { return std::string(value ? value : ""); };
-		StompParameterInfo info;
-		info.name = text(getParameterName(parameter));
-		info.description = text(getParameterDescription(parameter));
-		info.displayFormat = text(getParameterDisplayFormat(parameter));
-		const int type = getParameterType(parameter);
-		if (type < 0 || type > static_cast<int>(StompParameterType::Power))
-			throw std::runtime_error("Stompbox reported an unknown parameter type " + std::to_string(type) + " for " + info.name + ".");
-		info.type = static_cast<StompParameterType>(type);
-		info.minimum = getParameterMinValue(parameter);
-		info.maximum = getParameterMaxValue(parameter);
-		info.defaultValue = getParameterDefaultValue(parameter);
-		info.rangePower = getParameterRangePower(parameter);
-		info.enumValues = ReadStrings(getParameterEnumValues(parameter));
-		info.isAdvanced = getParameterIsAdvanced(parameter);
-		info.isOutput = getParameterIsOutput(parameter);
-		return info;
-	}
-
-	std::vector<StompPluginInfo> StompboxEngine::ListPlugins()
-	{
-		if (!processor) throw std::logic_error("StompboxEngine::ListPlugins before Load.");
-		const auto text = [](const char* value) { return std::string(value ? value : ""); };
-		std::vector<StompPluginInfo> plugins;
-		for (const std::string& name : ReadStrings(getAllPlugins(processor)))
-		{
-			// The factory instance named after the plugin itself (Stompbox's own DumpConfig does the same).
-			void* plugin = createPlugin(processor, name.c_str());
-			if (!plugin) throw std::runtime_error("Stompbox listed " + name + " but could not create it.");
-			if (!getPluginIsUserSelectable(plugin)) continue;
-			StompPluginInfo info;
-			info.name = name;
-			info.description = text(getPluginDescription(plugin));
-			info.backgroundColor = text(getPluginBackgroundColor(plugin));
-			info.foregroundColor = text(getPluginForegroundColor(plugin));
-			const size_t count = getPluginNumParameters(plugin);
-			for (size_t i = 0; i < count; ++i) info.parameters.push_back(ReadParameter(getPluginParameter(plugin, i)));
-			plugins.push_back(std::move(info));
-		}
-		return plugins;
-	}
-
-	void StompboxEngine::SetChain(const std::string& chainName, const std::vector<std::string>& pluginIds)
-	{
-		if (chainName.empty() || chainName.find(' ') != std::string::npos) throw std::invalid_argument("Stompbox chain names are one word.");
-		std::string command = "SetChain " + chainName;
-		for (const std::string& id : pluginIds)
-		{
-			if (id.empty() || id.find(' ') != std::string::npos) throw std::invalid_argument("Stompbox plugin ids are one word: '" + id + "'.");
-			command += " " + id;
-		}
-		SendCommand(command);
+		RequireLoaded("DumpConfig");
+		return TakeAllocatedText(dumpConfig(processor));
 	}
 
 	std::string StompboxEngine::DumpProgram()
 	{
-		if (!processor) throw std::logic_error("StompboxEngine::DumpProgram before Load.");
-		const char* program = dumpProgram(processor);
-		if (!program) return {};
-		std::string text(program);
-		CoTaskMemFree(const_cast<char*>(program));   // Stompbox allocates it with CoTaskMemAlloc
-		return text;
+		RequireLoaded("DumpProgram");
+		return TakeAllocatedText(dumpProgram(processor));
 	}
 
 	std::vector<std::string> StompboxEngine::ListPresets()
 	{
-		if (!processor) throw std::logic_error("StompboxEngine::ListPresets before Load.");
-		return ReadStrings(getPresets(processor));
+		RequireLoaded("ListPresets");
+		void* presets = getPresets(processor);
+		std::vector<std::string> names;
+		if (!presets) return names;
+		const size_t count = getStringVectorSize(presets);
+		for (size_t i = 0; i < count; ++i)
+		{
+			const char* name = getStringVectorValue(presets, i);
+			names.emplace_back(name ? name : "");
+		}
+		return names;
+	}
+
+	std::string StompboxEngine::CurrentPreset()
+	{
+		RequireLoaded("CurrentPreset");
+		const char* preset = getCurrentPreset(processor);   // Stompbox's own string: not freed
+		return preset ? preset : "";
+	}
+
+	bool StompboxEngine::IsPresetLoading()
+	{
+		RequireLoaded("IsPresetLoading");
+		return isPresetLoading(processor);
 	}
 
 	void StompboxEngine::StartRemoteServer()
 	{
-		if (!processor) throw std::logic_error("StompboxEngine::StartRemoteServer before Load.");
+		RequireLoaded("StartRemoteServer");
 		if (isServerStarted) return;
 		startServer(processor);
 		isServerStarted = true;
@@ -231,14 +192,5 @@ namespace VstHost
 		process(processor, input.data(), left, static_cast<size_t>(frameCount));
 		std::memcpy(right, left, sizeof(float) * static_cast<size_t>(frameCount));
 		RaisePeak(outputPeak, Peak(left, frameCount));
-	}
-
-	void StompboxEngine::Unload()
-	{
-		if (processor && deleteProcessor) deleteProcessor(processor);
-		processor = nullptr;
-		if (module) FreeLibrary(module);
-		module = nullptr;
-		isServerStarted = false;
 	}
 }

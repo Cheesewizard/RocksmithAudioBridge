@@ -384,6 +384,12 @@
     <ClCompile Include="Overlay\OverlayUi.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Overlay\StompboxPage.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ToneDesigner\StompboxLink.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="QualityOfLife.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -794,6 +800,12 @@
     <ClInclude Include="Overlay\OverlayUi.hpp">
       <Filter>Main Headers</Filter>
     </ClInclude>
+    <ClInclude Include="Overlay\StompboxPage.hpp">
+      <Filter>Main Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="ToneDesigner\StompboxLink.hpp">
+      <Filter>Main Headers</Filter>
+    </ClInclude>
     <ClInclude Include="Overlay\AudioBridgeLogo.h">
       <Filter>Main Headers</Filter>
     </ClInclude>
@@ -1114,6 +1126,9 @@
       <Filter>ToneDesigner</Filter>
     </ClInclude>
     <ClInclude Include="Shared\VstHostControl.hpp">
+      <Filter>Shared</Filter>
+    </ClInclude>
+    <ClInclude Include="Shared\StompboxControl.hpp">
       <Filter>Shared</Filter>
     </ClInclude>
     <ClInclude Include="Shared\ShellOpenAsync.hpp">

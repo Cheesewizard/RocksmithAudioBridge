@@ -70,21 +70,72 @@ The full reports are `Offline-A2-full.json` and `Offline-A2-lite.json`.
 
 ## Stompbox engine (Revision 4)
 
-- **`VstHost/Stompbox/`:** `UPSTREAM.md` (pin, licence, local change) and `Build-Stompbox.ps1`. The script
-  builds `stompbox-capi.dll` from commit `17bc652`, with its remote server bound to 127.0.0.1.
+### Engine (host)
+
+- **`VstHost/Stompbox/`:** `UPSTREAM.md` and `Build-Stompbox.ps1`. The script builds `stompbox-capi.dll` from
+  commit `17bc652` with three checked patches:
+  - the remote server listens on 127.0.0.1 only;
+  - the circuit-modelled `Tonestack` pedal is registered;
+  - `DumpConfig` is exported from the C API.
 - **`VstHost/Source/StompboxEngine.{hpp,cpp}`:** loads the DLL, creates the engine on
-  `%APPDATA%\RocksmithAudioBridge\Stompbox`, prepares it while the stream is stopped, and processes mono into
-  stereo.
-- **`Main.cpp`:** the stream now goes through `SourceRouter`. With `HKCU\Software\RSMods\VstHost`
-  `StompboxDev` = 1, the host plays through Stompbox (with the safety limiter) and starts its local server for
-  StompboxRemote. It logs block timing every 30 s. Without the setting, or without the DLL, the VST chain plays as
-  before.
-- **Not built or run yet.** Only `StompboxEngine.cpp` passed a syntax check, against Windows header stubs.
+  `%APPDATA%\RocksmithAudioBridge\Stompbox` (`NAM\`, `Cabinets\`, `Reverb\`, `Presets\`), and prepares it with
+  the stream stopped. It processes mono into stereo, and exposes commands, `DumpConfig`, `DumpProgram`, presets and
+  preset loading.
+- **`VstHost/Source/StompboxService.{hpp,cpp}`:** loads the engine **when the host starts**, so the pedal
+  catalogue is ready before the page opens. It runs the page's commands, republishes the program and presets, and
+  routes the stream through `SourceRouter` when the page asks. The engine processes only while it plays; otherwise
+  the VST chain plays exactly as before.
+- **`StompboxDev` = 1** (development): Stompbox keeps its own layout and starts its local server for
+  StompboxRemote.
+
+### Overlay (DLL)
+
+- **`DLL/Shared/StompboxControl.hpp`:** a shared block of its own (`...Stompbox.v1`), so `VstHostControl` is
+  untouched. It carries:
+  - `wanted`, set by the overlay;
+  - one Stompbox command line at a time;
+  - text blocks under a sequence lock: the catalogue (`DumpConfig`), the program (`DumpProgram`) and the presets.
+- **`DLL/ToneDesigner/StompboxLink.{hpp,cpp}`:**
+  - parses the catalogue and the program;
+  - queues commands, keeping only the latest value of a knob being dragged;
+  - holds back a program arriving mid-edit;
+  - remembers the player's choice (`HKCU\...\VstHost ToneDesignerEngine`).
+
+  `VstHostLink::OnFrame` drives it, so the choice applies while the page is closed.
+- **`DLL/Overlay/StompboxPage.{hpp,cpp}`:** the agreed pedalboard (design §7.0).
+  - **Library and board:** saved tones on the left; one pedal per effect, with its colour, file name, LED and
+    footswitch; drag to reorder or drop from the browser; a right-click menu.
+  - **Browser:** Effects, Amps (NAM files) and Cabinets (IRs), each with search and a Folder button.
+  - **Editor:** one generic in-overlay panel built from the parameter definitions. VSliders are drawn as a bank;
+    advanced parameters are folded away; output meters are left out.
+  - **Rules:** default insertion places (gate, amp, cabinet); at most 2 NAM pedals; spinners while a file loads.
+- **`OverlayShell.cpp`:** the tabs are now **Tone designer | VST rig | External app**. Choosing Tone designer or
+  VST rig also chooses what plays. VST rig is today's page, unchanged.
+
+### Verification
+
+Nothing has been built or run. The new C++ files passed `clang++ -fsyntax-only` with the real ImGui headers and
+stand-in Windows headers. `Main.cpp` and `OverlayShell.cpp` were not compiled.
+
+### Known gaps
+
+- **New files:** models and IRs added while the host runs appear after it restarts. Stompbox lists its folders
+  when the engine loads.
+- **Removed pedals:** they stay loaded in Stompbox's factory, and are not processed. Releasing one straight after
+  `SetChain` could free it while the audio thread still runs the previous chain.
+- **Song-start switching:** VST rig song tones still load at song start while the Tone designer plays (harmless,
+  but wasted work).
+- **Overlay tab work:** the three-tab layout in your local build may differ from this one; merge them.
 
 ## Next work
 
-1. Build `stompbox-capi.dll` and the host. Turn on `StompboxDev`, edit the rig with StompboxRemote, and judge
-   the sound and the logged p99.9/max block times at 64 and 128 frames.
-2. Validate the M0a diagnostic build in a live game session, and resolve the arrangement identity.
-3. If Stompbox passes: draw the Tone designer window in the overlay, sending Stompbox commands through the host.
-   Store song tones as Stompbox preset text plus the models and IRs they use.
+1. Build `stompbox-capi.dll` with the script, then build the host and the DLL. Check the Tone designer tab
+   end to end: add pedals, load a NAM model and an IR, edit, save and load tones, and watch the `stompbox:`
+   block-timing lines at 64 and 128 frames.
+2. **Prepared tones for songs** (agreed 26 October):
+   - preload the active tone and every tone the current song uses before playback, each as its own prepared
+     engine instance;
+   - process only the active one, with controlled tails on a switch;
+   - never keep every available capture running.
+3. Validate the M0a tone-slot diagnostics in a live session, and resolve the arrangement identity.
+4. Song tone sets and export (design §6–§7), storing Stompbox preset text plus the files it names.

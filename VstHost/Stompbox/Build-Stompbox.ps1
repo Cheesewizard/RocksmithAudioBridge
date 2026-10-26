@@ -47,6 +47,33 @@ if (-not $Text.Contains($Registration))
 	[System.IO.File]::WriteAllText($Plugins, $Text.Replace($Anchor, $Anchor + "`n`t" + $Registration))
 }
 
+# Local change: export DumpConfig (every pedal with its parameter definitions, Stompbox's own protocol) from the C
+# API, so the Tone designer page gets the same catalogue Stompbox's remote does.
+$CapiHeader = Join-Path $Source 'stompbox-capi\StompboxCAPI.h'
+$CapiSource = Join-Path $Source 'stompbox-capi\StompboxCAPI.cpp'
+$Header = [System.IO.File]::ReadAllText($CapiHeader)
+$Declaration = 'STOMPBOX_EXTERN const char* DumpConfig(void* processor);'
+$HeaderAnchor = 'STOMPBOX_EXTERN const char* DumpProgram(void* processor);'
+if (-not $Header.Contains($Declaration))
+{
+	if (-not $Header.Contains($HeaderAnchor)) { throw "StompboxCAPI.h no longer declares DumpProgram where the DumpConfig patch expects it." }
+	[System.IO.File]::WriteAllText($CapiHeader, $Header.Replace($HeaderAnchor, $HeaderAnchor + "`r`n`r`n" + $Declaration))
+	$Definition = @"
+
+const char* DumpConfig(void* processor)
+{
+    auto config = ((PluginProcessor*)processor)->DumpConfig();
+
+    size_t len = config.length() + 1;
+    char* buff = (char*)CoTaskMemAlloc(len);
+    strcpy(buff, config.c_str());
+
+    return buff;
+}
+"@
+	[System.IO.File]::AppendAllText($CapiSource, $Definition)
+}
+
 Invoke-Checked cmake @('-S', $Source, '-B', $Build, '-G', 'Visual Studio 17 2022', '-A', 'x64')
 Invoke-Checked cmake @('--build', $Build, '--config', 'Release', '--target', 'stompbox-capi')
 

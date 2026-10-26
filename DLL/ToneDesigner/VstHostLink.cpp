@@ -2,6 +2,7 @@
 #include "VstHostLink.hpp"
 #include "ToneSwitchPopup.hpp"
 #include "GameTones.hpp"
+#include "StompboxLink.hpp"
 #include "PluginCatalog.hpp"
 #include "Shared/VstHostControl.hpp"
 #include "Shared/ShellOpenAsync.hpp"
@@ -1115,6 +1116,7 @@ namespace VstHostLink
 	void OnFrame(bool overlayVisible)
 	{
 		GameTones::OnFrame();
+		StompboxLink::OnFrame();   // what plays (the Tone designer engine or the VST chain) even while the page is closed
 		if (g_rescanWanted.exchange(false)) Rescan();
 		g_pluginCatalog.TryTake(g_plugins, g_pluginScanError, g_pluginRevision);
 		PollRecovery();

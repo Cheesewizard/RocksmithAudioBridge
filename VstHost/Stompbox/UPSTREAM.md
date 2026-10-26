@@ -32,13 +32,20 @@ The script fails if an upstream line it replaces has changed.
   Twin, Princeton, JCM800, JCM2000, JTM45, AC30, AC15, Mesa, Soldano and others) as a selectable pedal.
   Upstream defines it but leaves it out of the factory at the pinned commit. Its own UI fills that slot with EQ-7
   instead. Listen to it before shipping it.
+- **`stompbox-capi/StompboxCAPI.{h,cpp}`:** exports `DumpConfig`, which gives every pedal with its parameter
+  definitions in Stompbox's own protocol: the catalogue the Tone designer page draws its browser and editors from.
 
 ## Development use (until the Tone designer page drives it)
 
 1. Build the DLL, then build and deploy the host.
 2. Set `HKCU\Software\RSMods\VstHost` `StompboxDev` (DWORD) to `1`, and restart the host.
 3. Run StompboxRemote (from the upstream releases, needs .NET 10) and connect it to `127.0.0.1`.
-4. Put NAM models and cabinet IRs in `%APPDATA%\RocksmithAudioBridge\Stompbox` (Stompbox lists that folder).
+4. Put files in `%APPDATA%\RocksmithAudioBridge\Stompbox`, which Stompbox lists:
+   - NAM models in `NAM\`;
+   - cabinet IRs in `Cabinets\`;
+   - reverb IRs in `Reverb\`.
+
+   Saved tones are written to `Presets\`.
 5. Block timing is logged every 30 s (`stompbox:` lines in the host log). Judge it by p99.9 and max against the
    block period.
 

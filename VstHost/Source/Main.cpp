@@ -21,6 +21,7 @@
 #include "HostLog.hpp"
 #include "SourceRouter.hpp"
 #include "StompboxEngine.hpp"
+#include "StompboxService.hpp"
 #include "AudioFormat.hpp"
 
 #include "../../DLL/Shared/VstHostControl.hpp"
@@ -56,10 +57,13 @@ namespace
 
 	Chain g_chain;
 	BridgeAudio g_audio;
-	// The stream's sink: the VST chain, or the Stompbox engine while StompboxDev is on (LoadStompboxForDevelopment).
+	// The stream's sink: the VST chain, or the Stompbox engine while the Tone designer page asks for it
+	// (StompboxService). The engine is loaded when the host starts and processes only while it plays.
 	SourceRouter g_router;
 	StompboxEngine g_stompbox;
 	bool g_stompboxPlays = false;
+	bool SetStompboxPlays(bool plays);
+	StompboxService g_stompboxService{ g_stompbox, [](bool plays) { return SetStompboxPlays(plays); } };
 	HWND g_main = nullptr;            // message-only window (kMainClass)
 	HINSTANCE g_instance = nullptr;
 	HFONT g_font = nullptr;
@@ -150,32 +154,24 @@ namespace
 
 	std::wstring CurrentChainFile() { return DataDirectory() + L"\\Current.rabtone"; }
 
-	// Development only, until the Tone designer page drives Stompbox itself: with HKCU\Software\RSMods\VstHost
-	// StompboxDev = 1 the host plays through the Stompbox engine instead of the VST chain and starts Stompbox's local
-	// server, so its desktop remote (StompboxRemote, connect to 127.0.0.1) can edit the rig. Stompbox's models,
-	// cabinets and presets live in %APPDATA%\RocksmithAudioBridge\Stompbox.
-	void LoadStompboxForDevelopment()
+	// The Tone designer's engine, loaded as the host starts so its pedal catalogue is ready before the page opens.
+	// Models, cabinets and presets live in %APPDATA%\RocksmithAudioBridge\Stompbox. HKCU\Software\RSMods\VstHost
+	// StompboxDev = 1 is for development: Stompbox keeps its own layout and starts its local server for its desktop
+	// remote (StompboxRemote, connect to 127.0.0.1).
+	void StartStompbox()
 	{
-		DWORD enabled = 0;
-		if (!ReadDword(L"StompboxDev", enabled) || enabled == 0) return;
 		PWSTR appData = nullptr;
 		if (FAILED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, KF_FLAG_CREATE, nullptr, &appData)))
 		{
-			Log("stompbox: no AppData folder; the VST chain plays");
+			Log("stompbox: no AppData folder; the Tone designer engine is not started");
 			return;
 		}
 		const std::wstring dataPath = std::wstring(appData) + L"\\RocksmithAudioBridge\\Stompbox";
 		CoTaskMemFree(appData);
 		SHCreateDirectoryExW(nullptr, dataPath.c_str(), nullptr);
-		std::string error;
-		if (!g_stompbox.Load(dataPath, error))
-		{
-			Log("stompbox: StompboxDev is on but the engine did not load (%s); the VST chain plays", error.c_str());
-			return;
-		}
-		g_stompbox.StartRemoteServer();
-		g_stompboxPlays = true;
-		Log("stompbox: StompboxDev is on; the stream plays through Stompbox");
+		DWORD development = 0;
+		ReadDword(L"StompboxDev", development);
+		g_stompboxService.Start(dataPath, development != 0);
 	}
 
 	// Tone names become file names: keep them to characters every file system takes.
@@ -1130,6 +1126,16 @@ namespace
 		return true;
 	}
 
+	// The Tone designer page chose its engine (true) or the VST chain (false). Reopens the stream so the engine is
+	// prepared while it is stopped; in standby the stream opens with this source when the player turns it on.
+	bool SetStompboxPlays(bool plays)
+	{
+		if (plays == g_stompboxPlays) return true;
+		g_stompboxPlays = plays;
+		Log("stompbox: the stream plays through %s", plays ? "the Tone designer engine" : "the VST chain");
+		return g_standby || StartAudio(g_main);
+	}
+
 	// Off (standby) and back on. Stopping the stream releases the amp link, so the overlay's ExternalAmp brings the
 	// game's amp back exactly as when the host closes; the plugins stay loaded. On reopens the stream (the game may
 	// have changed its buffer size meanwhile); if that fails the host stays in standby and the page shows why.
@@ -1175,6 +1181,7 @@ namespace
 				g_keyDown = down;
 				UpdateWindows();
 				PollCommand();
+				g_stompboxService.Poll();
 				PublishMeters();
 				if (g_control && g_control->quitRequested)
 				{
@@ -1504,7 +1511,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 	g_font = CreateFontW(-MulDiv(13, static_cast<int>(GetDpiForSystem()), 96), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
 		OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
 
-	LoadStompboxForDevelopment();
+	StartStompbox();
 	// In standby the stream opens when the player turns Tone designer on.
 	if (!g_standby && !StartAudio(g_main))
 	{
@@ -1552,6 +1559,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 		InterlockedExchange(&g_control->hostPid, 0);
 	}
 	g_audio.Close();
+	g_stompboxService.Stop();
 	g_stompbox.Unload();
 	g_chain.ReleaseAll();
 	ReleasePluginFormats();

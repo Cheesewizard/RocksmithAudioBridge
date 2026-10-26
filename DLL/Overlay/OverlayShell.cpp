@@ -13,6 +13,8 @@
 #include "ExternalAmp/ExternalAmp.hpp"
 #include "ExternalAmp/CableAmpLink.hpp"
 #include "ToneDesigner/VstHostLink.hpp"
+#include "ToneDesigner/StompboxLink.hpp"
+#include "StompboxPage.hpp"
 #include "ToneDesigner/ToneGates.hpp"
 #include "Shared/VstHostControl.hpp"
 #include "Shared/ShellOpenAsync.hpp"
@@ -3144,7 +3146,10 @@ namespace Overlay
 		// game's amp); under it a tab for each. The page opens on the tab whose app holds the link.
 		// Tone designer needs the height, so on its tab the title and tabs share one row and the Amp link card
 		// folds into a one-line status bar (click it to open the card); External app keeps the card open.
-		enum class AmpTab { ToneDesigner, ExternalApp };
+		// Tone designer: the built-in engine (StompboxPage.cpp). VST rig: VST3 plugins in the same host. Choosing one of
+		// the two also chooses what plays (StompboxLink::SetWanted); External app leaves that as it is.
+		enum class AmpTab { ToneDesigner, VstRig, ExternalApp };
+		constexpr int AMP_TAB_COUNT = 3;
 		AmpTab g_ampTab = AmpTab::ToneDesigner;
 		bool g_ampLinkOpen = false;   // Tone designer tab: the Amp link card shown in full (session only)
 
@@ -3222,7 +3227,7 @@ namespace Overlay
 				BeginCard();
 				InfoRow("Amp link", "Busy: Tone designer is playing", Color::Warn);
 				Caption("An external app can connect once Tone designer is closed (the power button on its tab).");
-				if (Button("Go to Tone designer")) g_ampTab = AmpTab::ToneDesigner;
+				if (Button("Go to Tone designer")) g_ampTab = StompboxLink::GetSnapshot().isWanted ? AmpTab::ToneDesigner : AmpTab::VstRig;
 				EndCard();
 				return;
 			}
@@ -3338,27 +3343,32 @@ namespace Overlay
 			ImGui::Dummy(ImVec2(0, 4));
 		}
 
-		// Two tabs as a segmented strip, `width` wide at the cursor; returns its height.
+		// The tabs as a segmented strip, `width` wide at the cursor; returns its height.
 		float AmpTabs(float width)
 		{
-			static const char* const labels[] = { "Tone designer", "External app" };
+			static const char* const labels[AMP_TAB_COUNT] = { "Tone designer", "VST rig", "External app" };
 			const float height = ImGui::GetFrameHeight() + 4.0f;
 			const ImVec2 at = ImGui::GetCursorScreenPos();
 			ImDrawList* list = ImGui::GetWindowDrawList();
 			list->AddRectFilled(at, ImVec2(at.x + width, at.y + height), Color::Card, 6.0f);
 			list->AddRect(at, ImVec2(at.x + width, at.y + height), Color::CardEdge, 6.0f);
-			for (int i = 0; i < 2; ++i) {
-				const ImVec2 tab(at.x + width * 0.5f * i, at.y);
+			const float tabW = width / AMP_TAB_COUNT;
+			for (int i = 0; i < AMP_TAB_COUNT; ++i) {
+				const ImVec2 tab(at.x + tabW * i, at.y);
 				ImGui::SetCursorScreenPos(tab);
 				ImGui::PushID(i);
-				if (ImGui::InvisibleButton("##ampTab", ImVec2(width * 0.5f, height))) g_ampTab = static_cast<AmpTab>(i);
+				if (ImGui::InvisibleButton("##ampTab", ImVec2(tabW, height))) {
+					g_ampTab = static_cast<AmpTab>(i);
+					if (g_ampTab == AmpTab::ToneDesigner) StompboxLink::SetWanted(true);
+					else if (g_ampTab == AmpTab::VstRig) StompboxLink::SetWanted(false);
+				}
 				const bool hovered = ImGui::IsItemHovered();
 				ImGui::PopID();
 				const bool on = g_ampTab == static_cast<AmpTab>(i);
-				if (on) list->AddRectFilled(ImVec2(tab.x + 3.0f, tab.y + 3.0f), ImVec2(tab.x + width * 0.5f - 3.0f, tab.y + height - 3.0f), Color::Accent, 5.0f);
-				else if (hovered) list->AddRectFilled(ImVec2(tab.x + 3.0f, tab.y + 3.0f), ImVec2(tab.x + width * 0.5f - 3.0f, tab.y + height - 3.0f), Color::Hover, 5.0f);
+				if (on) list->AddRectFilled(ImVec2(tab.x + 3.0f, tab.y + 3.0f), ImVec2(tab.x + tabW - 3.0f, tab.y + height - 3.0f), Color::Accent, 5.0f);
+				else if (hovered) list->AddRectFilled(ImVec2(tab.x + 3.0f, tab.y + 3.0f), ImVec2(tab.x + tabW - 3.0f, tab.y + height - 3.0f), Color::Hover, 5.0f);
 				const ImVec2 size = ImGui::CalcTextSize(labels[i]);
-				list->AddText(ImVec2(tab.x + (width * 0.5f - size.x) * 0.5f, tab.y + (height - size.y) * 0.5f), on ? Color::Text : Color::Muted, labels[i]);
+				list->AddText(ImVec2(tab.x + (tabW - size.x) * 0.5f, tab.y + (height - size.y) * 0.5f), on ? Color::Text : Color::Muted, labels[i]);
 			}
 			return height;
 		}
@@ -3371,12 +3381,13 @@ namespace Overlay
 			if (!chosen && amp.proxyLoaded) {
 				chosen = true;
 				if (amp.link.guestPresent && !VstHostLink::IsHostGuest(amp.link.guestName)) g_ampTab = AmpTab::ExternalApp;
+				else g_ampTab = StompboxLink::GetSnapshot().isWanted ? AmpTab::ToneDesigner : AmpTab::VstRig;
 			}
 
 			// Title and a one-line description on the left, the tabs on the right of the same row.
 			const ImVec2 at = ImGui::GetCursorScreenPos();
 			const float width = ImGui::GetContentRegionAvail().x;
-			const float tabsW = std::min(360.0f, std::max(220.0f, width * 0.32f));
+			const float tabsW = std::min(460.0f, std::max(300.0f, width * 0.4f));
 			const float tabsH = ImGui::GetFrameHeight() + 4.0f;   // AmpTabs' height
 			ImGui::BeginGroup();
 			ImGui::PushFont(GetFonts().title ? GetFonts().title : ImGui::GetFont());
@@ -3385,7 +3396,7 @@ namespace Overlay
 			ImGui::PushFont(GetFonts().caption ? GetFonts().caption : ImGui::GetFont());
 			ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Color::Muted));
 			ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + std::max(120.0f, width - tabsW - 24.0f));
-			ImGui::TextUnformatted("Play through an amp sim instead of the game's amp: VST3 plugins in Tone designer, or an app on Rocksmith Audio Bridge ASIO.");
+			ImGui::TextUnformatted("Play through an amp sim instead of the game's amp: the built-in Tone designer, your VST3 plugins in VST rig, or an app on Rocksmith Audio Bridge ASIO.");
 			ImGui::PopTextWrapPos();
 			ImGui::PopStyleColor();
 			ImGui::PopFont();
@@ -3397,9 +3408,10 @@ namespace Overlay
 			ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + rowH + 8.0f));
 			ImGui::Dummy(ImVec2(0, 0));
 
-			if (g_ampTab == AmpTab::ToneDesigner) AmpLinkBar(amp);
+			if (g_ampTab != AmpTab::ExternalApp) AmpLinkBar(amp);
 			if (g_ampTab == AmpTab::ExternalApp || g_ampLinkOpen) AmpLinkCard(amp);
-			if (g_ampTab == AmpTab::ToneDesigner) ToneDesignerTab();
+			if (g_ampTab == AmpTab::ToneDesigner) DrawStompboxPage();
+			else if (g_ampTab == AmpTab::VstRig) ToneDesignerTab();
 			else ExternalAppTab(amp);
 		}
 

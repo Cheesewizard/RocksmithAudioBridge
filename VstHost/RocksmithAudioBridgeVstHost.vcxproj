@@ -56,6 +56,7 @@
     <ClCompile Include="Source\HostLog.cpp" />
     <ClCompile Include="Source\SourceRouter.cpp" />
     <ClCompile Include="Source\StompboxEngine.cpp" />
+    <ClCompile Include="Source\StompboxService.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\BridgeAudio.hpp" />
@@ -64,6 +65,7 @@
     <ClInclude Include="Source\HostLog.hpp" />
     <ClInclude Include="Source\SourceRouter.hpp" />
     <ClInclude Include="Source\StompboxEngine.hpp" />
+    <ClInclude Include="Source\StompboxService.hpp" />
     <ClInclude Include="Source\AudioFormat.hpp" />
   </ItemGroup>
   <!-- JUCE 9 (Lib\JUCE, AGPLv3: Lib\JUCE\LICENSE.txt; this program is AGPLv3 because of it, see LICENSE.txt
