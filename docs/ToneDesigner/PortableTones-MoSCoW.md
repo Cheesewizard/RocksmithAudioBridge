@@ -33,7 +33,7 @@ against stand-in Windows headers.
 
 | Area | State |
 |---|---|
-| Stompbox engine in the host (`stompbox-capi.dll`, build script with 3 checked patches) | Written |
+| Stompbox engine in the host (`stompbox-capi.dll`, build script with 4 checked patches) | Written |
 | Engine service: loads at host start, pedal catalogue, commands, presets, routing | Written |
 | Tabs: Tone designer \| VST rig \| External app | Written |
 | Pedalboard page: tones, pedals, browser (Effects/Amps/Cabinets), drag and drop, generic in-overlay editor | Written |
@@ -56,7 +56,7 @@ Effort is relative: S = 1, M = 3, L = 5, XL = 8. These are planning sizes, not e
 | M2 | **Verify sound and timing live.** Stompbox plays clean through the bridge at 128 and 64 frames, the load meter reads sensibly, and switching away from the Tone designer gives the VST rig back intact. | A tone designer that crackles or breaks the VST rig has no point. | M (3) |
 | M3 | **Verify song switching live.** The tone key changes exactly at chart tone events, seeks, Riff Repeater and 50% speed, for lead, rhythm and bass. The dip and tails sound right. | Song tones are the reason to use this over the VST rig. Wrong-time switches make it unusable. | M (3) |
 | M4 | **Ship the engine.** The installer carries `stompbox-capi.dll` next to the host and the uninstaller removes it. The pinned version is recorded. | Players do not run a build script. | S (1) |
-| M5 | **Licence compliance.** Ship Stompbox's GPL-3 text and a written source offer or link for the pinned commit with our three patches. Include the NeuralAudio (MIT) notice and the other bundled dependencies' notices. | Shipping it without these is not legal. | S (1) |
+| M5 | **Licence compliance.** Ship Stompbox's GPL-3 text and a written source offer or link for the pinned commit with our four patches. Include the NeuralAudio (MIT) notice and the other bundled dependencies' notices. | Shipping it without these is not legal. | S (1) |
 | M6 | **Export a song's tones.** One `.rabtones` file beside the CDLC. It holds every assigned saved tone (Stompbox preset text) and every NAM and IR file they name, each stored once and hashed. Export refuses files without a recorded permission. | The release goal: tones that travel with the song. | L (5) |
 | M7 | **Import and play them.** Find a `.rabtones` beside a CDLC, validate it, extract it to the library, map its tones to the song, and play it with no account and no network. Do the offline "files deleted" test. | Without it, M6 is a file nobody can use. | M (3) |
 | M8 | **Safe failure.** A missing DLL, a bad model file or a broken bank leaves the game and the VST rig working, with a message that says what failed. | A failure that silences the guitar is unsafe in the DSDM sense. | S (1) |
