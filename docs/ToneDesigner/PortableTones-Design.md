@@ -454,6 +454,53 @@ own timeline, with its seek and loop handling. Keep this out of version 1.
 
 ## 7. Product design: tabs, tones and song tone sets (Proposal)
 
+## 7.0 Tone designer UI (Revision 4, agreed 26 October 2026)
+
+The Tone designer keeps today's page layout:
+
+- the tone list on the left;
+- the pedalboard in the middle;
+- the browser and the movable divider below.
+
+In Tone designer mode every pedal is one **Stompbox effect**.
+
+- **Board.** One horizontal chain from IN to OUT. Long chains scroll. Each pedal shows:
+  - its name and colour (Stompbox's `BackgroundColor`/`ForegroundColor`);
+  - a small icon;
+  - the file it uses, if any ("G5 Crunch UK" on a NAM pedal, "British 4×12" on a Cabinet);
+  - an on/off LED.
+
+  Drag to reorder, and click the footswitch to bypass. A pedal that is loading a model shows a spinner, and the
+  overlay stays responsive.
+- **Browser.** Three groups:
+  - **Effects:** Stompbox's user-selectable factory list.
+  - **Amps:** NAM captures in the library.
+  - **Cabinets:** IRs in the library.
+
+  Drag an item between two pedals, or use *Add to chain* or *Replace selected*. An amp or cabinet item creates a
+  NAM or Cabinet pedal with that file already loaded. Effects Stompbox adds later appear without UI work, because
+  the list comes from the engine (`StompboxEngine::ListPlugins`).
+- **Editing.** Double-click a pedal to open its editor **inside the overlay**, not as a separate window, so it
+  works in exclusive fullscreen.
+  - One generic panel is built from the parameters the engine reports: name, range, default, taper, display format
+    and type (Knob, Bool, Int, VSlider, Enum, File, Power).
+  - File parameters get a picker over the library.
+  - VSlider parameters, such as EQ-7's bands, are drawn as sliders.
+  - There is no per-effect UI code.
+- **Order.** Free. Default insertion is a hint: a cabinet goes after the amp, and a gate near the input. There are
+  no hard rules.
+- **Limits.** At most two NAM pedals per tone, with a warning (see the CPU measurements in
+  `VstHost/Documentation/Implementation-status.md`).
+- **Modes.** The Tone designer and the VST rig use the same page, with their own libraries and saved tones. VST rig
+  pedals keep their plugin windows.
+- **Engine mapping.** The board is one Stompbox chain, `SetChain Main NoiseGate NAM EQ-7 Cabinet Delay Reverb`, and
+  Stompbox runs it in board order. Several copies of one effect are separate instances (`Delay`, `Delay_2`). A saved
+  tone is the engine's program text (`StompboxEngine::DumpProgram`: its `SetChain` and `SetParam` lines) plus the
+  model and IR files it names.
+- **Still to design: the overlay ↔ host link.** Today's command channel carries edits. The plugin list, the chain
+  and parameter values are larger text, and need a new shared-memory block or a file the host writes. Decide this
+  together with the three-tab overlay work that is not yet on the branch.
+
 ### 7.1 Three tabs, one host
 
 The overlay already has a tab row, `Tone designer | External app` (`OverlayShell.cpp`). It becomes:

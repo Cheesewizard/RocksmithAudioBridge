@@ -22,10 +22,16 @@ powershell -ExecutionPolicy Bypass -File VstHost\Stompbox\Build-Stompbox.ps1
 
 Requires Git, CMake 3.22+ and Visual Studio 2022 with the C++ workload.
 
-## Local change
+## Local changes
 
-- `stompbox-core/StompboxServer.cpp`: the remote server listens on `127.0.0.1` instead of every interface, so
-  only programs on this PC can control the engine. The script fails if the upstream line it replaces has changed.
+The script fails if an upstream line it replaces has changed.
+
+- **`stompbox-core/StompboxServer.cpp`:** the remote server listens on `127.0.0.1` instead of every interface, so
+  only programs on this PC can control the engine.
+- **`stompbox-stomps/DefaultPlugins.cpp`:** registers `Tonestack`, the circuit-modelled tone stacks (Bassman,
+  Twin, Princeton, JCM800, JCM2000, JTM45, AC30, AC15, Mesa, Soldano and others) as a selectable pedal.
+  Upstream defines it but leaves it out of the factory at the pinned commit. Its own UI fills that slot with EQ-7
+  instead. Listen to it before shipping it.
 
 ## Development use (until the Tone designer page drives it)
 

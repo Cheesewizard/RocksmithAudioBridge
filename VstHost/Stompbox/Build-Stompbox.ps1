@@ -35,6 +35,18 @@ if (-not $Text.Contains($Local))
 	[System.IO.File]::WriteAllText($Server, $Text.Replace($Upstream, $Local))
 }
 
+# Local change: register the circuit-modelled tone stack (Bassman, JCM800, AC30, ...) as a selectable pedal.
+# Upstream defines CreateTonestackPlugin but does not add it to the factory at the pinned commit.
+$Plugins = Join-Path $Source 'stompbox-stomps\DefaultPlugins.cpp'
+$Text = [System.IO.File]::ReadAllText($Plugins)
+$Anchor = 'factory.AddPlugin("EQ-7", &CreateEQ7Plugin);'
+$Registration = 'factory.AddPlugin("Tonestack", &CreateTonestackPlugin);'
+if (-not $Text.Contains($Registration))
+{
+	if (-not $Text.Contains($Anchor) -or -not $Text.Contains('StompBox* CreateTonestackPlugin(')) { throw "DefaultPlugins.cpp no longer matches the Tonestack registration patch; review the upstream change." }
+	[System.IO.File]::WriteAllText($Plugins, $Text.Replace($Anchor, $Anchor + "`n`t" + $Registration))
+}
+
 Invoke-Checked cmake @('-S', $Source, '-B', $Build, '-G', 'Visual Studio 17 2022', '-A', 'x64')
 Invoke-Checked cmake @('--build', $Build, '--config', 'Release', '--target', 'stompbox-capi')
 
