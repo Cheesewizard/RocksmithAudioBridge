@@ -174,26 +174,110 @@ namespace Overlay
 			return -1;
 		}
 
-		// Where a pedal added without a drop position goes: a gate near the input, an amp before the first cabinet,
-		// a cabinet after the last amp, anything else at the end. Only a default: the player can drag it anywhere.
-		int DefaultInsertIndex(const std::string& kind)
+		const ToneCatalog::FileInfo* CatalogInfo(const BrowserItem& item)
+		{
+			if (item.file.empty()) return nullptr;
+			return ToneCatalog::Find(item.kind == CABINET_KIND ? "Cabinets" : "NAM", item.file);
+		}
+
+		// A NAM pedal playing a pedal capture (drive, boost): it goes in front of the amp and needs no cabinet. A file
+		// the starter tones do not describe is taken for an amp, as most captures are.
+		bool IsPedalCapture(const BrowserItem& item)
+		{
+			const ToneCatalog::FileInfo* info = CatalogInfo(item);
+			return IsAmpKind(item.kind) && info && info->isPedal;
+		}
+
+		BrowserItem ItemOf(const Pedal& pedal)
+		{
+			const ParameterDefinition* file = FileParameter(FindDefinition(pedal.kind));
+			const auto value = file ? pedal.values.find(file->name) : pedal.values.end();
+			return { pedal.kind, value == pedal.values.end() ? std::string() : value->second };
+		}
+
+		bool IsAmpPedal(const Pedal& pedal) { return IsAmpKind(pedal.kind) && !IsPedalCapture(ItemOf(pedal)); }
+
+		// Where a pedal added without a drop position goes: a gate near the input, a pedal capture in front of the
+		// first amp, an amp before the first cabinet, a cabinet after the last amp, anything else at the end. Only a
+		// default: the player can drag it anywhere.
+		int DefaultInsertIndex(const BrowserItem& item)
 		{
 			const auto& chain = GetSnapshot().chain;
 			const int count = static_cast<int>(chain.size());
-			const auto lastOf = [&](auto predicate) { for (int i = count - 1; i >= 0; --i) if (predicate(chain[i].kind)) return i; return -1; };
-			const auto firstOf = [&](auto predicate) { for (int i = 0; i < count; ++i) if (predicate(chain[i].kind)) return i; return -1; };
-			if (IsGateKind(kind)) return lastOf(IsGateKind) + 1;
-			if (IsAmpKind(kind))
+			const auto lastOf = [&](auto predicate) { for (int i = count - 1; i >= 0; --i) if (predicate(chain[i])) return i; return -1; };
+			const auto firstOf = [&](auto predicate) { for (int i = 0; i < count; ++i) if (predicate(chain[i])) return i; return -1; };
+			const auto isGate = [](const Pedal& pedal) { return IsGateKind(pedal.kind); };
+			const auto isCabinet = [](const Pedal& pedal) { return pedal.kind == CABINET_KIND; };
+			if (IsGateKind(item.kind)) return lastOf(isGate) + 1;
+			if (IsPedalCapture(item))
 			{
-				const int cabinet = firstOf([](const std::string& k) { return k == CABINET_KIND; });
+				const int amp = firstOf(IsAmpPedal);
+				return amp >= 0 ? amp : std::max(lastOf(isGate) + 1, firstOf(isCabinet) >= 0 ? firstOf(isCabinet) : count);
+			}
+			if (IsAmpKind(item.kind))
+			{
+				const int cabinet = firstOf(isCabinet);
 				return cabinet >= 0 ? cabinet : count;
 			}
-			if (kind == CABINET_KIND)
+			if (item.kind == CABINET_KIND)
 			{
-				const int amp = lastOf(IsAmpKind);
+				const int amp = lastOf(IsAmpPedal);
 				return amp >= 0 ? amp + 1 : count;
 			}
 			return count;
+		}
+
+		// Stompbox's own defaults suit a demo, not a guitar: a ConvoReverb starts with no dry signal at all, a Reverb
+		// 50% wet, a Delay at 50% mix and feedback, a Flanger at full depth. Added at those, a pedal pushes the guitar
+		// far back at once. A pedal added from the browser starts here instead; presets keep their own values.
+		struct StartingSetting
+		{
+			const char* kind;
+			const char* parameter;
+			const char* value;
+		};
+
+		constexpr StartingSetting STARTING_SETTINGS[] = {
+			{ "ConvoReverb", "Dry", "1" }, { "ConvoReverb", "Wet", "0.2" },
+			{ "Reverb", "Size", "0.4" }, { "Reverb", "Decay", "3" }, { "Reverb", "Blend", "15" },
+			{ "Delay", "Delay", "380" }, { "Delay", "Mix", "0.25" }, { "Delay", "FBack", "0.3" },
+			{ "Chorus", "Rate", "0.8" }, { "Chorus", "Depth", "0.05" },
+			{ "Flanger", "Depth", "0.5" }, { "Flanger", "FBack", "0.3" },
+			{ "Phaser", "Depth", "0.3" }, { "Phaser", "FBack", "0.3" },
+			{ "Vibrato", "Depth", "0.2" },
+			{ "Tremolo", "Depth", "0.4" },
+			{ "Boost", "Gain", "4" },
+			{ "Screamer", "Drive", "0.3" }, { "Screamer", "Tone", "700" }, { "Screamer", "Level", "0" },
+			{ "Compressor", "Thresh", "-24" }, { "Compressor", "Ratio", "3" }, { "Compressor", "Attack", "10" }, { "Compressor", "Release", "120" }, { "Compressor", "Blend", "0.8" },
+		};
+
+		// The cabinet put after an amp added to a board that has none: an amp on its own is its line out, which
+		// sounds thin and fizzy (it is the same with a real amp's direct out).
+		constexpr char GUITAR_CABINET[] = "4x12 V30 SM57";
+		constexpr char BASS_CABINET[] = "Synthetic 8x10 Bass";
+
+		void ApplyStartingSettings(const std::string& id, const std::string& kind)
+		{
+			for (const StartingSetting& setting : STARTING_SETTINGS)
+			{
+				if (kind == setting.kind) SetParameter(id, setting.parameter, setting.value);
+			}
+		}
+
+		void SetPedalFile(const std::string& id, const PedalDefinition* definition, const std::string& file)
+		{
+			if (file.empty()) return;
+			if (const ParameterDefinition* parameter = FileParameter(definition))
+			{
+				SetParameter(id, parameter->name, file);
+				State().loadingPedals.push_back(id);
+			}
+		}
+
+		bool HasCabinetChoice(const std::string& name)
+		{
+			const ParameterDefinition* file = FileParameter(FindDefinition(CABINET_KIND));
+			return file && std::find(file->choices.begin(), file->choices.end(), name) != file->choices.end();
 		}
 
 		// Adds a pedal at `index` (-1: the default place), with the file an amp or cabinet item carries.
@@ -205,19 +289,30 @@ namespace Overlay
 				Notice("The engine has no " + item.kind + " pedal.");
 				return;
 			}
+			const auto& chain = GetSnapshot().chain;
+			const bool needsCabinet = IsAmpKind(item.kind) && !IsPedalCapture(item)
+				&& std::none_of(chain.begin(), chain.end(), [](const Pedal& pedal) { return pedal.kind == CABINET_KIND; });
 			std::vector<std::string> ids = ChainIds();
-			const int at = index < 0 ? DefaultInsertIndex(item.kind) : std::clamp(index, 0, static_cast<int>(ids.size()));
+			const int at = index < 0 ? DefaultInsertIndex(item) : std::clamp(index, 0, static_cast<int>(ids.size()));
 			const std::string id = NewPedalId(item.kind);
 			ids.insert(ids.begin() + at, id);
-			SetChain(ids);
-			if (!item.file.empty())
+			std::string cabinetId, cabinetFile;
+			if (needsCabinet)
 			{
-				if (const ParameterDefinition* file = FileParameter(definition))
+				const ToneCatalog::FileInfo* info = CatalogInfo(item);
+				cabinetFile = info && info->isBass ? BASS_CABINET : GUITAR_CABINET;
+				if (HasCabinetChoice(cabinetFile))
 				{
-					SetParameter(id, file->name, item.file);
-					State().loadingPedals.push_back(id);
+					cabinetId = NewPedalId(CABINET_KIND);
+					ids.insert(ids.begin() + at + 1, cabinetId);
+					Notice("Added a " + cabinetFile + " cabinet after the amp: an amp on its own sounds thin and fizzy. Swap it in Cabinets.");
 				}
+				else Notice("Add a cabinet after the amp (Cabinets): an amp on its own sounds thin and fizzy.");
 			}
+			SetChain(ids);
+			ApplyStartingSettings(id, item.kind);
+			SetPedalFile(id, definition, item.file);
+			if (!cabinetId.empty()) SetPedalFile(cabinetId, FindDefinition(CABINET_KIND), cabinetFile);
 			State().selectedPedal = id;
 		}
 
@@ -258,12 +353,6 @@ namespace Overlay
 			State().isEditorOpen = true;
 			State().shouldCenterEditor = true;
 			State().isSongsMode = false;
-		}
-
-		const ToneCatalog::FileInfo* CatalogInfo(const BrowserItem& item)
-		{
-			if (item.file.empty()) return nullptr;
-			return ToneCatalog::Find(item.kind == CABINET_KIND ? "Cabinets" : "NAM", item.file);
 		}
 
 		bool PassesFilter(BrowserTab tab, int filter, const ToneCatalog::FileInfo* info)
