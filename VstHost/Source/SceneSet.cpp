@@ -53,7 +53,7 @@ namespace VstHost
 			std::fill(right, right + frameCount, 0.0f);
 			return;
 		}
-		RaisePeak(inputPeak, Peak(guitar, frameCount));
+		RaisePeak(inputPeak, Peak(guitar, frameCount) * StompboxEngine::InputGain());   // what the chains receive, as the board's meter shows
 
 		const int wanted = target.load(std::memory_order_acquire);
 		int current = active.load(std::memory_order_relaxed);

@@ -89,6 +89,7 @@ namespace VstHost
 		std::wstring dataPath;
 		bool isPlaying = false;
 		bool wasPresetLoading = false;
+		LONG inputTrimCentidB = 0;
 		bool isDevelopmentRemote = false;
 		int streamFrames = 0;
 

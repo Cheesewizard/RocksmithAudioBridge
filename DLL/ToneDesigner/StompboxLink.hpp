@@ -48,6 +48,10 @@ namespace StompboxLink
 		std::map<std::string, std::string> values;   // parameter name -> value as Stompbox writes it
 	};
 
+	// The input trim's range, in dB: how far the input calibration may lift or lower the guitar.
+	constexpr float MIN_INPUT_TRIM_DB = -12.0f;
+	constexpr float MAX_INPUT_TRIM_DB = 30.0f;
+
 	enum class EngineState { Off, Loading, Ready, Failed };
 	enum class SongState { None, Preparing, Ready, Failed };
 
@@ -56,6 +60,7 @@ namespace StompboxLink
 		bool isConnected = false;           // the host has the shared block open
 		EngineState engineState = EngineState::Off;
 		bool isWanted = false;              // the page asked for the Tone designer engine
+		float inputTrimDb = 0.0f;           // the player's input trim before every chain (SetInputTrim)
 		bool isPlaying = false;             // the stream goes through it now
 		bool isPresetLoading = false;       // Stompbox is loading a preset or a model
 		bool isBusy = false;                // commands not yet run by the host
@@ -88,6 +93,9 @@ namespace StompboxLink
 	// Remembered (HKCU\Software\RSMods\VstHost ToneDesignerEngine), so the stream goes through the engine from the
 	// host's start when the player last chose it.
 	void SetWanted(bool wanted);
+	// The input trim before every chain, the board's and each song tone's, clamped to MIN/MAX_INPUT_TRIM_DB.
+	// Remembered (HKCU\Software\RSMods\VstHost ToneDesignerInputTrim).
+	void SetInputTrim(float decibels);
 
 	void SetChain(const std::vector<std::string>& pedalIds);
 	void SetParameter(const std::string& pedalId, const std::string& parameter, const std::string& value);

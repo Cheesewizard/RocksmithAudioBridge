@@ -26,6 +26,22 @@ The second sentence is the reason the feature exists (portable tones for CDLC), 
 If you would rather ship a local-only 1.0 first, move **M6** and **M7** to Should and the release still makes
 sense. The effort check below shows that both choices stay under the 60% line.
 
+## How the features fit
+
+The Guitar Tone page has one choice: **where the sound comes from.**
+
+| Mode | What it is | Shareable |
+|---|---|---|
+| Game amp | Rocksmith's own amps and tones, unchanged | They are the game's |
+| Tone designer | NAM captures, cabinet IRs and Stompbox effects in the mod | Yes: saved, exported, embedded in CDLC |
+| VST rig | The player's VST3 plugins | No: this PC only |
+| External app | An amp sim app on Rocksmith Audio Bridge ASIO | No |
+
+Everything else is a **source of Tone designer tones**, not a mode: the starter tones
+(RocksmithAudioBridge-Tones), tones the player saves, tones a CDLC carries (`.rabtones`, which play unless the player
+overrides them), and the song's tone assignments. Converting Rocksmith's own tones onto the Tone designer would be one
+more source; it is out of this timebox (Won't).
+
 ## What is on the branch now
 
 Everything below is written but **has not been compiled or run**. The new C++ files only passed a syntax check
@@ -70,6 +86,7 @@ Effort is relative: S = 1, M = 3, L = 5, XL = 8. These are planning sizes, not e
 | S1 | **Starter pack.** 20–40 NAM captures and some cabinet IRs whose provenance and redistribution rights are checked (the GPL-3 NAM_models collection, CC-licensed captures, CC0 IRs, our own captures). | Players can add their own files. Without content, though, first use is empty. | M (3) |
 | S2 | **Rescan the library** while the host runs, so new models and IRs appear without a restart. | A restart works around it. | S (1) |
 | S3 | **Consistent levels.** Calibrate the input against each NAM model's recorded input level, so a capture drives the same on every machine, and give scenes matching loudness. | Without it, shared tones are louder or quieter than intended, but still play. | M (3) |
+|  | *Started:* the player's input trim (the bar's Input button: measured from their hardest playing, to the -12 dBFS peak the starter tones are set for) applies before every chain. Per-model input levels are still to do. | | |
 | S4 | **Backups include the Tone designer** (Stompbox presets, song tones and the library) in `--tone-backup` and `--tone-restore`. | Data loss is recoverable by hand, but it is the existing promise of the Tone designer page. | S (1) |
 | S5 | **Rights capture in the UI.** On first export of a file, ask for attribution and permission, and remember them. | Export can refuse instead (M6). This makes it usable. | S (1) |
 
@@ -90,6 +107,8 @@ Effort is relative: S = 1, M = 3, L = 5, XL = 8. These are planning sizes, not e
 
 ### Won't have this time
 
+- **Converting Rocksmith's own song tones** onto the Tone designer (mapping the game's amps, cabinets and pedals to
+  captures, IRs and effects). Possible later as one more source of tones; not needed for portable tones.
 - **Embedding the bank inside the PSARC.** The sidecar file comes first; embedding needs proof that the game accepts
   the extra entry.
 - **Converting VST rigs or external apps into portable tones,** whether by automatic capture or system

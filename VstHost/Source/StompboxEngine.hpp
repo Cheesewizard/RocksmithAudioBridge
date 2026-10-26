@@ -62,6 +62,13 @@ namespace VstHost
 		// 127.0.0.1 by the build script's patch, so nothing outside this PC can reach it.
 		void StartRemoteServer();
 
+		// The player's input trim, linear, shared by every engine (the board's and each prepared song tone's): set
+		// from the Tone designer's input calibration so the guitar drives the captures at the level they were
+		// recorded at. Any thread.
+		static void SetInputGain(float gain) { inputGain.store(gain, std::memory_order_relaxed); }
+		static float InputGain() { return inputGain.load(std::memory_order_relaxed); }
+
+		// What the chain receives: after the input trim.
 		float TakeInputPeak() { return inputPeak.exchange(0.0f); }
 		float TakeOutputPeak() { return outputPeak.exchange(0.0f); }
 
@@ -107,5 +114,6 @@ namespace VstHost
 		std::vector<float> pumpOutput;
 		std::atomic<float> inputPeak{ 0.0f };
 		std::atomic<float> outputPeak{ 0.0f };
+		static inline std::atomic<float> inputGain{ 1.0f };
 	};
 }

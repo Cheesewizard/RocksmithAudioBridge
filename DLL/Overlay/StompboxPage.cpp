@@ -52,6 +52,12 @@ namespace Overlay
 		constexpr float SHARE_HEAVY_LOAD = 0.7f;
 		constexpr float PEAK_WARN_LOAD = 0.85f;
 		constexpr ULONGLONG NOTICE_MILLISECONDS = 6000;
+		// Input calibration: the player's hardest playing is trimmed to peak here, the level the starter tones are
+		// set for (RocksmithAudioBridge-Tones checks every tone with a DI test signal peaking at -12 dBFS). Captures
+		// distort as much as they are driven, so a quiet cable makes every amp sound weaker than it should.
+		constexpr float INPUT_TARGET_PEAK_DB = -12.0f;
+		constexpr ULONGLONG INPUT_MEASURE_MILLISECONDS = 5000;
+		constexpr float INPUT_SILENCE_DB = -55.0f;   // a measurement under this heard no guitar
 		constexpr ULONGLONG LATE_MILLISECONDS = 10000;
 		constexpr char AMP_KIND[] = "NAM";
 		constexpr char CABINET_KIND[] = "Cabinet";
@@ -100,6 +106,9 @@ namespace Overlay
 			float paneExtra = 0.0f;             // what the divider was dragged by, for the session
 			uint32_t lastLateBlocks = 0;
 			ULONGLONG lateAt = 0;
+			bool isInputWanted = false;         // the bar's Input button was pressed: open its popup in the bar's ID stack
+			ULONGLONG measureStartedAt = 0;     // 0: not measuring the input
+			float measuredPeak = 0.0f;          // linear, before the trim
 		};
 
 		PageState& State()
@@ -499,6 +508,104 @@ namespace Overlay
 			DrawPill(ImGui::GetWindowDrawList(), caption, at, height, look, hue);
 		}
 
+		// ---- Input level ------------------------------------------------------------------------------------
+
+		float DecibelsOf(float linear) { return 20.0f * std::log10(std::max(linear, 1e-6f)); }
+
+		// The guitar as it arrives, before the trim: the board's IN meter is after it.
+		float RawInputPeak()
+		{
+			return VstHostLink::GetSnapshot().inputPeak / std::pow(10.0f, GetSnapshot().inputTrimDb / 20.0f);
+		}
+
+		std::string InputText(float trimDb)
+		{
+			char text[32];
+			sprintf_s(text, "Input %+.1f dB", trimDb);
+			return text;
+		}
+
+		// A level bar from -60 to 0 dBFS with the target marked, `width` wide at the cursor.
+		void InputLevelBar(float peak, float width)
+		{
+			ImDrawList* list = ImGui::GetWindowDrawList();
+			const float height = 10.0f;
+			const ImVec2 at = ImGui::GetCursorScreenPos();
+			const auto toX = [&](float decibels) { return at.x + width * std::clamp((decibels + 60.0f) / 60.0f, 0.0f, 1.0f); };
+			const float level = DecibelsOf(peak);
+			list->AddRectFilled(at, ImVec2(at.x + width, at.y + height), Ink::Field, 3.0f);
+			const ImU32 color = level > -3.0f ? Ink::Bad : level > INPUT_TARGET_PEAK_DB + 4.0f ? Ink::Amber : Ink::Meter;
+			list->AddRectFilled(at, ImVec2(toX(level), at.y + height), color, 3.0f);
+			const float target = toX(INPUT_TARGET_PEAK_DB);
+			list->AddLine(ImVec2(target, at.y - 3.0f), ImVec2(target, at.y + height + 3.0f), IM_COL32_WHITE, 2.0f);
+			ImGui::Dummy(ImVec2(width, height));
+		}
+
+		// The Input popup: what the guitar sends, a measurement that sets the trim, and the trim by hand.
+		void InputPopup()
+		{
+			PageState& state = State();
+			const Snapshot& s = GetSnapshot();
+			if (state.isInputWanted)
+			{
+				state.isInputWanted = false;
+				ImGui::OpenPopup("##inputLevel");
+			}
+			PushPopupPadding();
+			if (ImGui::BeginPopup("##inputLevel"))
+			{
+				const float width = 320.0f;
+				ImGui::TextUnformatted("Input level");
+				MutedCaption("Amp captures distort as much as your guitar drives them. Measure sets the trim so your hardest playing reaches the white line, the level the starter tones are made for.", width);
+				ImGui::Dummy(ImVec2(0, 4));
+
+				const float raw = RawInputPeak();
+				ImGui::TextDisabled("Your guitar");
+				InputLevelBar(raw, width);
+				ImGui::TextDisabled("Into the amps");
+				InputLevelBar(raw * std::pow(10.0f, s.inputTrimDb / 20.0f), width);
+				ImGui::Dummy(ImVec2(0, 4));
+
+				const ULONGLONG now = GetTickCount64();
+				if (state.measureStartedAt != 0)
+				{
+					state.measuredPeak = std::max(state.measuredPeak, raw);
+					const ULONGLONG elapsed = now - state.measureStartedAt;
+					if (elapsed >= INPUT_MEASURE_MILLISECONDS)
+					{
+						state.measureStartedAt = 0;
+						const float measured = DecibelsOf(state.measuredPeak);
+						if (measured < INPUT_SILENCE_DB) Notice("No guitar was heard while measuring. Check the cable and play again.");
+						else
+						{
+							SetInputTrim(INPUT_TARGET_PEAK_DB - measured);
+							Notice("Input set to " + InputText(GetSnapshot().inputTrimDb).substr(6) + " from your playing.");
+						}
+					}
+					else
+					{
+						char text[64];
+						sprintf_s(text, "Play your hardest chords... %d", static_cast<int>((INPUT_MEASURE_MILLISECONDS - elapsed + 999) / 1000));
+						ImGui::TextUnformatted(text);
+					}
+				}
+				else if (Button("Measure", true, "Then play your hardest, loudest chords for 5 seconds."))
+				{
+					state.measureStartedAt = now;
+					state.measuredPeak = 0.0f;
+				}
+
+				float trim = s.inputTrimDb;
+				ImGui::SetNextItemWidth(width);
+				if (ImGui::SliderFloat("##inputTrim", &trim, MIN_INPUT_TRIM_DB, MAX_INPUT_TRIM_DB, "Trim %+.1f dB")) SetInputTrim(trim);
+				if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) SetInputTrim(0.0f);
+				Hint("Double-click to set it back to 0 dB.");
+				ImGui::EndPopup();
+			}
+			else state.measureStartedAt = 0;   // closed: a measurement in progress is dropped
+			ImGui::PopStyleVar();
+		}
+
 		// ---- Bar --------------------------------------------------------------------------------------------
 
 		void StepTone(int direction)
@@ -589,9 +696,21 @@ namespace Overlay
 				LoadPill(ImVec2(origin.x + pillX, origin.y + y), button, isLate);
 				if (s.isPresetLoading || s.isBusy) Spinner(list, ImVec2(origin.x + pillX - 16.0f, origin.y + height * 0.5f), 6.0f, Ink::AddText);
 
-				// Middle: < tone name > Save, centred between the menus and the pill.
+				// Left of it: the input trim, which opens the input calibration.
+				const std::string inputText = InputText(s.inputTrimDb);
+				const float inputW = TextWidth(caption, inputText.c_str()) + 22.0f;
+				const ImVec2 inputAt(origin.x + pillX - 32.0f - inputW, origin.y + y);
+				ImGui::SetCursorScreenPos(inputAt);
+				if (ImGui::InvisibleButton("##input", ImVec2(inputW, button))) State().isInputWanted = true;
+				const bool isInputHovered = ImGui::IsItemHovered();
+				Hint("How hard your guitar drives the amps. Click to measure it from your playing.");
+				list->AddRectFilled(inputAt, ImVec2(inputAt.x + inputW, inputAt.y + button), isInputHovered ? Ink::Edge : Ink::Field, 6.0f);
+				list->AddRect(inputAt, ImVec2(inputAt.x + inputW, inputAt.y + button), Ink::FieldEdge, 6.0f);
+				Text(list, caption, ImVec2(inputAt.x + 11.0f, inputAt.y + (button - caption->FontSize) * 0.5f), Ink::Soft, inputText.c_str());
+
+				// Middle: < tone name > Save, centred between the menus and the input button.
 				const float saveW = TextWidth(ImGui::GetFont(), "Save") + 22.0f;
-				const float left = menusEnd + 12.0f, right = pillX - 32.0f;
+				const float left = menusEnd + 12.0f, right = inputAt.x - origin.x - 12.0f;
 				const float nameW = std::clamp(right - left - 2.0f * (button + 6.0f) - saveW - 6.0f, 80.0f, 240.0f);
 				const float groupW = nameW + 2.0f * (button + 6.0f) + saveW + 6.0f;
 				float gx = left + std::max(0.0f, (right - left - groupW) * 0.5f);
@@ -637,6 +756,7 @@ namespace Overlay
 					ImGui::EndPopup();
 				}
 				SaveAsPopup();
+				InputPopup();
 				ImGui::EndMenuBar();
 			}
 			ImGui::PopStyleVar();

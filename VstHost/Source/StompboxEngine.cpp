@@ -199,7 +199,8 @@ namespace VstHost
 			std::fill(right, right + frameCount, 0.0f);
 			return;
 		}
-		std::memcpy(input.data(), guitar, sizeof(float) * static_cast<size_t>(frameCount));
+		const float gain = InputGain();
+		for (int i = 0; i < frameCount; ++i) input[i] = guitar[i] * gain;
 		RaisePeak(inputPeak, Peak(input.data(), frameCount));
 		process(processor, input.data(), left, static_cast<size_t>(frameCount));
 		std::memcpy(right, left, sizeof(float) * static_cast<size_t>(frameCount));

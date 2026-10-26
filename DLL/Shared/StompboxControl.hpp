@@ -19,11 +19,12 @@
 
 namespace StompboxControl
 {
+	// v4: the player's input trim (inputTrimCentidB).
 	// v3: song tones (the game's song and tone keys, the song's assignments, its prepared tones).
 	// v2: the stream's measured load (loadSeq, blockFrames, loadPermille, peakPermille).
-	constexpr wchar_t MAPPING_NAME[] = L"Local\\RocksmithAudioBridge.Stompbox.v3";
+	constexpr wchar_t MAPPING_NAME[] = L"Local\\RocksmithAudioBridge.Stompbox.v4";
 	constexpr uint32_t MAGIC = 0x58425453;   // "STBX"
-	constexpr uint32_t VERSION = 3;
+	constexpr uint32_t VERSION = 4;
 	constexpr int COMMAND_CHARS = 4096;
 	constexpr int CATALOG_CHARS = 262144;     // every pedal with its parameters; File parameters list their files
 	constexpr int PROGRAM_CHARS = 65536;
@@ -92,6 +93,10 @@ namespace StompboxControl
 		volatile LONG songToneSeq;
 		char songTones[SONG_TONE_CHARS];   // "<tone key>\t<saved tone>" lines: the current song's assignments
 		char playingTone[KEY_CHARS];   // the saved tone the song plays now; empty: the board's own tone
+
+		// Written by the overlay (v4): the input trim before every Tone designer chain, in hundredths of a dB, set by
+		// the page's input calibration so the guitar drives the captures at the level they were recorded at.
+		volatile LONG inputTrimCentidB;
 	};
 
 	inline LONG Load(volatile LONG* value) { return InterlockedCompareExchange(value, 0, 0); }

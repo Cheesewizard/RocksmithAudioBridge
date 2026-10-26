@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <deque>
+#include <cmath>
 #include <stdexcept>
 
 namespace StompboxLink
@@ -15,6 +16,7 @@ namespace StompboxLink
 	{
 		constexpr wchar_t SETTINGS_KEY[] = L"Software\\RSMods\\VstHost";
 		constexpr wchar_t WANTED_VALUE[] = L"ToneDesignerEngine";
+		constexpr wchar_t INPUT_TRIM_VALUE[] = L"ToneDesignerInputTrim";   // hundredths of a dB, as a signed DWORD
 
 		struct Token
 		{
@@ -34,6 +36,7 @@ namespace StompboxLink
 		bool g_openFailed = false;
 		bool g_wantedRead = false;
 		bool g_wanted = false;
+		LONG g_inputTrimCentidB = 0;
 		LONG g_catalogSeen = 0, g_programSeen = 0, g_presetSeen = 0, g_loadSeen = 0, g_songToneSeen = 0;
 		std::string g_sentSongKey, g_sentToneKey;
 		bool g_gameSent = false;
@@ -241,6 +244,13 @@ namespace StompboxLink
 			snapshot.chain = std::move(chain);
 		}
 
+		LONG ReadInputTrim()
+		{
+			DWORD value = 0, size = sizeof(value);
+			if (RegGetValueW(HKEY_CURRENT_USER, SETTINGS_KEY, INPUT_TRIM_VALUE, RRF_RT_REG_DWORD, nullptr, &value, &size) != ERROR_SUCCESS) return 0;
+			return static_cast<LONG>(value);
+		}
+
 		bool ReadWanted()
 		{
 			DWORD value = 0, size = sizeof(value);
@@ -294,14 +304,17 @@ namespace StompboxLink
 		{
 			g_wantedRead = true;
 			g_wanted = ReadWanted();
+			g_inputTrimCentidB = ReadInputTrim();
 		}
 		InterlockedExchange(&g_shared->wanted, g_wanted ? 1 : 0);
+		InterlockedExchange(&g_shared->inputTrimCentidB, g_inputTrimCentidB);
 
 		Snapshot& s = g_snapshot;
 		std::string text;
 		s.isConnected = StompboxControl::Load(&g_shared->hostPid) != 0 && VstHostLink::HostProcessRunning();
 		s.engineState = static_cast<EngineState>(std::clamp<LONG>(StompboxControl::Load(&g_shared->engineState), 0, 3));
 		s.isWanted = g_wanted;
+		s.inputTrimDb = g_inputTrimCentidB / 100.0f;
 		s.isPlaying = s.isConnected && StompboxControl::Load(&g_shared->playing) != 0;
 		s.isPresetLoading = s.isConnected && StompboxControl::Load(&g_shared->presetLoading) != 0;
 		if (!s.isConnected) g_commands.clear();   // a host that starts again publishes everything afresh
@@ -373,6 +386,16 @@ namespace StompboxLink
 		for (const PedalDefinition& definition : g_snapshot.definitions)
 			if (definition.name == kind) return &definition;
 		return nullptr;
+	}
+
+	void SetInputTrim(float decibels)
+	{
+		if (!std::isfinite(decibels)) throw std::invalid_argument("SetInputTrim needs a finite level.");
+		g_inputTrimCentidB = static_cast<LONG>(std::lround(std::clamp(decibels, MIN_INPUT_TRIM_DB, MAX_INPUT_TRIM_DB) * 100.0f));
+		g_snapshot.inputTrimDb = g_inputTrimCentidB / 100.0f;
+		const DWORD value = static_cast<DWORD>(g_inputTrimCentidB);
+		RegSetKeyValueW(HKEY_CURRENT_USER, SETTINGS_KEY, INPUT_TRIM_VALUE, REG_DWORD, &value, sizeof(value));
+		if (g_shared) InterlockedExchange(&g_shared->inputTrimCentidB, g_inputTrimCentidB);
 	}
 
 	void SetWanted(bool wanted)

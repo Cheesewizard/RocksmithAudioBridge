@@ -140,6 +140,14 @@ namespace VstHost
 			else ClearScenes();
 		}
 
+		const LONG trim = StompboxControl::Load(&shared->inputTrimCentidB);
+		if (trim != inputTrimCentidB)
+		{
+			inputTrimCentidB = trim;
+			StompboxEngine::SetInputGain(std::pow(10.0f, static_cast<float>(trim) / 2000.0f));
+			Log("stompbox: input trim %+.1f dB", trim / 100.0);
+		}
+
 		// One command at a time: the page writes the next only after commandDone has caught up.
 		const LONG sequence = StompboxControl::Load(&shared->commandSeq);
 		if (sequence != StompboxControl::Load(&shared->commandDone))
