@@ -1030,8 +1030,8 @@ namespace Overlay
 				const ImVec2 at = ImGui::GetCursorScreenPos();
 				if (ImGui::InvisibleButton("##item", ImVec2(rowW, rowH))) state.selectedItem = i;
 				const bool isHovered = ImGui::IsItemHovered();
-				if (isHovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) AddPedal(item, -1);
-				Hint("Double-click to add it at its usual place, or drag it onto the board: between two pedals to put it there, onto a pedal to replace it.");
+				// No double-click to add: a few double-clicks while browsing would stack amps at the end of the board.
+				Hint("Drag it onto the board: between two pedals to put it there, onto a pedal to replace it. Or right-click it to add it at its usual place.");
 				if (ImGui::BeginDragDropSource())
 				{
 					NewPedalPayload payload{};
@@ -1047,7 +1047,7 @@ namespace Overlay
 					state.selectedItem = i;
 					ImGui::TextDisabled("%s", name.c_str());
 					ImGui::Separator();
-					if (ImGui::MenuItem("Add to the board", "or double-click it")) AddPedal(item, -1);
+					if (ImGui::MenuItem("Add to the board")) AddPedal(item, -1);
 					if (ImGui::MenuItem("Replace selected pedal", nullptr, false, IndexOfPedal(state.selectedPedal) >= 0)) ReplacePedal(state.selectedPedal, item);
 					ImGui::EndPopup();
 				}

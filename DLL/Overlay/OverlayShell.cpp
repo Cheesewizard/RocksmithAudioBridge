@@ -3221,7 +3221,7 @@ namespace Overlay
 			const float tabsH = ImGui::GetFrameHeight() + 4.0f;   // AmpTabs' height
 			ImGui::BeginGroup();
 			ImGui::PushFont(GetFonts().title ? GetFonts().title : ImGui::GetFont());
-			ImGui::TextUnformatted("Tone designer");
+			ImGui::TextUnformatted("Guitar Tone");
 			ImGui::PopFont();
 			ImGui::PushFont(GetFonts().caption ? GetFonts().caption : ImGui::GetFont());
 			ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Color::Muted));
@@ -5148,7 +5148,7 @@ namespace Overlay
 
 		// Names by Page value: the bug report's page name, and the overlay's remembered page in the registry
 		// (stored by name, so reordering the enum never reopens on the wrong page).
-		const char* const kPageNames[] = { "Note by Note", "Mixer", "Input", "Output", "Record", "General", "Debug", "Drop Pedal", "Tone designer" };
+		const char* const kPageNames[] = { "Note by Note", "Mixer", "Input", "Output", "Record", "General", "Debug", "Drop Pedal", "Guitar Tone" };
 		constexpr int kPageCount = sizeof(kPageNames) / sizeof(kPageNames[0]);
 
 		bool IsPageAvailable(Page page)
@@ -5209,9 +5209,9 @@ namespace Overlay
 				ImVec2(origin.x + ImGui::GetWindowWidth() - 1.0f, origin.y + ImGui::GetWindowHeight()), Color::CardEdge);
 
 			struct Entry { const char* group; unsigned glyph; const char* label; Page page; };
-			// Tone designer, the biggest feature, leads on its own above the groups.
+			// Guitar Tone (Tone designer, VST rig, External app), the biggest feature, leads on its own above the groups.
 			static const Entry entries[] = {
-				{ nullptr, Glyph::Library, "Tone designer", Page::AmpSim },
+				{ nullptr, Glyph::Library, "Guitar Tone", Page::AmpSim },
 				{ "Practice", Glyph::MusicNote, "Note by Note", Page::NoteByNote },
 				{ nullptr, Glyph::Pedal, "Drop Pedal", Page::DropPedal },
 				{ "Audio", Glyph::Mixer, "Mixer", Page::Mixer },
