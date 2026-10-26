@@ -993,6 +993,16 @@ namespace RS2014_Mod_Installer.Properties {
         }
 
         /// <summary>
+        ///   Looks up a localized resource of type System.Byte[].
+        /// </summary>
+        internal static byte[] StarterTones {
+            get {
+                object obj = ResourceManager.GetObject("StarterTones", resourceCulture);
+                return ((byte[])(obj));
+            }
+        }
+
+        /// <summary>
         ///   Looks up a localized string similar to the Stompbox engine's licence (GPL-3.0).
         /// </summary>
         internal static string StompboxLicense {

@@ -58,6 +58,14 @@ if ($usbDkHash -ne '91F6F695E1E13C656024E6D3B55620BF08D8835EF05EE0496935BA6BB624
 }
 Write-Output ("PASS: UsbDk package -> {0} ({1})" -f $usbDkPackage, $usbDkHash)
 
+$starterTones = Get-Content -LiteralPath (Join-Path $repositoryRoot 'Installer\StarterTones.json') -Raw | ConvertFrom-Json
+$starterTonesZip = Join-Path $repositoryRoot 'Installer\Resources\Tones\StarterTones.zip'
+if ((Get-ResourcePath 'StarterTones') -ne [IO.Path]::GetFullPath($starterTonesZip)) { throw "StarterTones resource does not point at $starterTonesZip." }
+if (-not (Test-Path -LiteralPath $starterTonesZip -PathType Leaf)) { throw "Starter tones input is missing: $starterTonesZip (AcquireStarterTones.ps1)" }
+$starterTonesHash = Get-Sha256Hash $starterTonesZip
+if ($starterTonesHash -ne $starterTones.sha256) { throw "Starter tones do not match the pinned $($starterTones.tag) release: $starterTonesZip" }
+Write-Output ("PASS: Starter tones {0} -> {1} ({2})" -f $starterTones.tag, $starterTonesZip, $starterTonesHash)
+
 foreach ($name in $expected.Keys) {
     $referenced = Get-ResourcePath $name
     $authoritative = [IO.Path]::GetFullPath($expected[$name])

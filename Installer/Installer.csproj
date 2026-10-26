@@ -83,6 +83,7 @@
     <Reference Include="System.Data" />
     <Reference Include="System.Deployment" />
     <Reference Include="System.Drawing" />
+    <Reference Include="System.IO.Compression" />
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
@@ -97,6 +98,7 @@
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
     <Compile Include="Worker.cs" />
+    <Compile Include="StarterTones.cs" />
     <Compile Include="Uninstaller.cs" />
     <Compile Include="GUI.cs">
       <SubType>Form</SubType>
@@ -235,6 +237,10 @@
   <!-- A Release installer is what ships: refuse to package inputs that are stale, the wrong build type or the
        wrong architecture (ValidatePackageResources.ps1), e.g. a Debug RSMods.exe left in the shared
        Installer\Resources\RSModsGUI folder by a Debug build. -->
+  <!-- The Tone designer's starter tones: the pinned tones release (StarterTones.json), fetched and checked by hash. -->
+  <Target Name="AcquireStarterTones" BeforeTargets="PrepareForBuild">
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(ProjectDir)AcquireStarterTones.ps1&quot;" />
+  </Target>
   <Target Name="ValidatePackageResources" BeforeTargets="PrepareForBuild" Condition="'$(Configuration)' == 'Release'">
     <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(ProjectDir)ValidatePackageResources.ps1&quot;" />
   </Target>

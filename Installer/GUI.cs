@@ -81,7 +81,7 @@ namespace RS2014_Mod_Installer
                 return;
             }
 
-            bool written = DLLStuff.InjectDLL(rsPath) && DLLStuff.InjectGUI(rsPath);
+            bool written = DLLStuff.InjectDLL(rsPath) && DLLStuff.InjectGUI(rsPath) && StarterTones.Install();
             // Saved even when a step failed, so Uninstall still knows every file that did get written.
             try { DLLStuff.SaveInstallManifest(rsPath); } catch { /* uninstall falls back to the core file list */ }
             if (!written)
@@ -98,6 +98,7 @@ namespace RS2014_Mod_Installer
                 if (driverError != null)
                 {
                     Uninstaller.RemoveFiles(rsPath, removeSettings: false, menuEntryRemoved: false, keepLogs: true);
+                    StarterTones.Remove();
                     MessageBox.Show("Rocksmith Audio Bridge was not installed: its audio driver is required and could not be set up (" + driverError + ").\n\nRun the installer again and approve the Windows admin prompt.",
                         "Install cancelled", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     UseModsButton.Text = originalButtonText;
@@ -210,6 +211,8 @@ namespace RS2014_Mod_Installer
 
                 // 4. Our files.
                 var failed = Uninstaller.RemoveFiles(rsPath, removeSettings, menuEntryRemoved: menuError == null);
+                // The Tone designer's starter tones in %APPDATA%, where the player has not changed them.
+                failed.AddRange(StarterTones.Remove());
 
                 // 5. UsbDk, when asked. Last, so declining its admin prompt only leaves UsbDk behind.
                 bool usbDkRestart = false;
