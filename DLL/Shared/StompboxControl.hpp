@@ -19,9 +19,10 @@
 
 namespace StompboxControl
 {
-	constexpr wchar_t MAPPING_NAME[] = L"Local\\RocksmithAudioBridge.Stompbox.v1";
+	// v2: the stream's measured load (loadSeq, blockFrames, loadPermille, peakPermille).
+	constexpr wchar_t MAPPING_NAME[] = L"Local\\RocksmithAudioBridge.Stompbox.v2";
 	constexpr uint32_t MAGIC = 0x58425453;   // "STBX"
-	constexpr uint32_t VERSION = 1;
+	constexpr uint32_t VERSION = 2;
 	constexpr int COMMAND_CHARS = 4096;
 	constexpr int CATALOG_CHARS = 262144;     // every pedal with its parameters; File parameters list their files
 	constexpr int PROGRAM_CHARS = 65536;
@@ -59,6 +60,17 @@ namespace StompboxControl
 		char program[PROGRAM_CHARS];   // Stompbox's DumpProgram text
 		volatile LONG presetSeq;
 		char presets[PRESET_CHARS];    // preset names, one per line; the first line is the current preset
+
+		// Written by the host once a second (v2): how long the last second's audio blocks took on this PC, in
+		// thousandths of the block period (1000 = the whole period: that block was late). Bumped after the fields.
+		// The median is the tone's share of real time, nearly the same at any block size, so it is what a tone is
+		// judged by against the base game (480-frame blocks, CableGamePeriod.hpp). The slowest blocks are what a
+		// small block size (ASIO's 128 or 64, the bonus) risks on this PC.
+		volatile LONG loadSeq;
+		volatile LONG blockFrames;     // the stream's block size those were measured at
+		volatile LONG medianPermille;  // the typical block
+		volatile LONG loadPermille;    // the 99th percentile block
+		volatile LONG peakPermille;    // the slowest block
 	};
 
 	inline LONG Load(volatile LONG* value) { return InterlockedCompareExchange(value, 0, 0); }

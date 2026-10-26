@@ -63,6 +63,13 @@ namespace StompboxLink
 		std::vector<Pedal> chain;
 		std::string currentPreset;
 		std::vector<std::string> presets;
+
+		// The last second's audio blocks on this PC, as fractions of the block period (1.0 = a late block).
+		bool hasLoad = false;
+		int blockFrames = 0;
+		float medianLoad = 0.0f;            // the tone's share of real time: judged against the base game
+		float slowLoad = 0.0f;              // the 99th percentile block
+		float peakLoad = 0.0f;              // the slowest block: what this PC's block size risks
 	};
 
 	void OnFrame();

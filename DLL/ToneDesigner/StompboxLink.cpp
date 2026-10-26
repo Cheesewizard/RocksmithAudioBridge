@@ -32,7 +32,7 @@ namespace StompboxLink
 		bool g_openFailed = false;
 		bool g_wantedRead = false;
 		bool g_wanted = false;
-		LONG g_catalogSeen = 0, g_programSeen = 0, g_presetSeen = 0;
+		LONG g_catalogSeen = 0, g_programSeen = 0, g_presetSeen = 0, g_loadSeen = 0;
 		LONG g_sentSequence = 0;
 		std::deque<PendingCommand> g_commands;
 		// The newest program the host published, applied once no edit of ours is outstanding: an older program arriving
@@ -303,6 +303,18 @@ namespace StompboxLink
 		if (s.isConnected) SendNext();
 		s.isBusy = !g_commands.empty() || StompboxControl::Load(&g_shared->commandDone) != StompboxControl::Load(&g_shared->commandSeq);
 		if (s.isConnected && !s.isBusy) s.error.assign(g_shared->error, strnlen(g_shared->error, StompboxControl::ERROR_CHARS));
+
+		const LONG loadSeq = StompboxControl::Load(&g_shared->loadSeq);
+		if (loadSeq != g_loadSeen)
+		{
+			g_loadSeen = loadSeq;
+			s.hasLoad = true;
+			s.blockFrames = StompboxControl::Load(&g_shared->blockFrames);
+			s.medianLoad = StompboxControl::Load(&g_shared->medianPermille) / 1000.0f;
+			s.slowLoad = StompboxControl::Load(&g_shared->loadPermille) / 1000.0f;
+			s.peakLoad = StompboxControl::Load(&g_shared->peakPermille) / 1000.0f;
+		}
+		if (!s.isPlaying) s.hasLoad = false;
 
 		std::string text;
 		if (StompboxControl::ReadText(&g_shared->catalogSeq, g_shared->catalog, StompboxControl::CATALOG_CHARS, g_catalogSeen, text))

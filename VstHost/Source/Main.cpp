@@ -1092,14 +1092,30 @@ namespace
 		g_control->outputPeak = static_cast<LONG>(std::min(g_outputMeter, 4.0f) * 1000.0f);
 	}
 
-	// Every 30 s while Stompbox plays: how long the stream's blocks took, against the block period. The 99.9th
-	// percentile and the maximum are what decide late buffers, not the median.
-	void LogStreamTiming()
+	// Once a second: how long the stream's blocks took against the block period, measured on this PC while the
+	// player plays. The Tone designer page shows it as the tone's load (StompboxService::PublishLoad). The worst
+	// second of every 30 goes to the log while the Tone designer engine plays.
+	BlockTiming g_worstTiming;
+
+	void MeasureStreamLoad()
 	{
 		const BlockTiming timing = g_router.TakeTiming();
 		if (timing.blocks == 0) return;
+		g_stompboxService.PublishLoad(timing, g_audio.Frames());
+		g_worstTiming.blocks += timing.blocks;
+		g_worstTiming.medianMicroseconds = std::max(g_worstTiming.medianMicroseconds, timing.medianMicroseconds);
+		g_worstTiming.percentile99Microseconds = std::max(g_worstTiming.percentile99Microseconds, timing.percentile99Microseconds);
+		g_worstTiming.percentile999Microseconds = std::max(g_worstTiming.percentile999Microseconds, timing.percentile999Microseconds);
+		g_worstTiming.maximumMicroseconds = std::max(g_worstTiming.maximumMicroseconds, timing.maximumMicroseconds);
+	}
+
+	void LogStreamTiming()
+	{
+		const BlockTiming timing = g_worstTiming;
+		g_worstTiming = {};
+		if (timing.blocks == 0 || !g_stompboxPlays) return;
 		const double periodMicroseconds = 1000000.0 * g_audio.Frames() / SAMPLE_RATE;
-		Log("stompbox: %llu blocks of %d frames (%.0f us each): median %.0f us, p99 %.0f us, p99.9 %.0f us, max %.0f us, limiter %.1f dB on the last block",
+		Log("stompbox: %llu blocks of %d frames (%.0f us each), worst second: median %.0f us, p99 %.0f us, p99.9 %.0f us, max %.0f us, limiter %.1f dB on the last block",
 			static_cast<unsigned long long>(timing.blocks), g_audio.Frames(), periodMicroseconds, timing.medianMicroseconds,
 			timing.percentile99Microseconds, timing.percentile999Microseconds, timing.maximumMicroseconds,
 			20.0 * std::log10(std::max(1e-6, 1.0 - g_router.LimiterReduction())));
@@ -1198,10 +1214,11 @@ namespace
 			if (g_ticks % 4 == 0) RefreshKeepSettings();
 			PreloadStep();
 			if (g_chain.Dirty() && !g_toneModified) { g_toneModified = true; PublishState(); }
+			if (g_ticks % 2 == 0) MeasureStreamLoad();
 			if (++g_ticks >= kAutosaveTicks)
 			{
 				g_ticks = 0;
-				if (g_stompboxPlays) LogStreamTiming();
+				LogStreamTiming();
 				if (g_chain.Dirty()) SaveCurrentChain();
 			}
 			return 0;

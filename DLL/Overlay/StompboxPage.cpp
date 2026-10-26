@@ -4,6 +4,7 @@
 #include "ToneDesigner/StompboxLink.hpp"
 #include "ToneDesigner/VstHostLink.hpp"
 #include "Shared/ShellOpenAsync.hpp"
+#include "ExternalAmp/ExternalAmp.hpp"
 
 #include <ShlObj.h>
 #include <algorithm>
@@ -24,7 +25,12 @@ namespace Overlay
 		constexpr float LIBRARY_WIDTH = 190.0f;
 		constexpr float BOARD_HEIGHT = PEDAL_HEIGHT + 44.0f;
 		constexpr float EDITOR_WIDTH = 360.0f;
-		constexpr int MAX_NAM_PEDALS = 2;      // each NAM amp costs a large share of a 64-frame block
+		// The load meter's lines. The typical block's share of real time is the tone's own cost, judged against the
+		// base game (480-frame blocks): kept under half, a tone has room on slower PCs than the one it was made on.
+		// The slowest block is what this PC's block size risks: ASIO's 128 or 64 frames are a bonus, not the target.
+		constexpr float SHARE_WARN_LOAD = 0.5f;
+		constexpr float SHARE_HEAVY_LOAD = 0.7f;
+		constexpr float PEAK_WARN_LOAD = 0.85f;
 		constexpr char AMP_KIND[] = "NAM";
 		constexpr char CABINET_KIND[] = "Cabinet";
 		constexpr char PEDAL_PAYLOAD[] = "STOMPBOX_PEDAL";
@@ -111,12 +117,6 @@ namespace Overlay
 			return ids;
 		}
 
-		int CountAmps()
-		{
-			const auto& chain = GetSnapshot().chain;
-			return static_cast<int>(std::count_if(chain.begin(), chain.end(), [](const Pedal& p) { return IsAmpKind(p.kind); }));
-		}
-
 		// Where a pedal added without a drop position goes: a gate near the input, an amp before the first cabinet,
 		// a cabinet after the last amp, anything else at the end. Only a default: the player can drag it anywhere.
 		int DefaultInsertIndex(const std::string& kind)
@@ -146,11 +146,6 @@ namespace Overlay
 		// Adds a pedal at `index` (-1: the default place), with the file an amp or cabinet item carries.
 		void AddPedal(const BrowserItem& item, int index)
 		{
-			if (IsAmpKind(item.kind) && CountAmps() >= MAX_NAM_PEDALS)
-			{
-				Notice("A tone can have at most two NAM amps: each one takes a large part of the audio time.");
-				return;
-			}
 			const PedalDefinition* definition = FindDefinition(item.kind);
 			if (!definition)
 			{
@@ -293,6 +288,39 @@ namespace Overlay
 				Spinner(list, ImVec2(at.x + 9.0f, at.y + ImGui::GetFrameHeight() * 0.5f), 6.0f, Color::AccentHi);
 				ImGui::Dummy(ImVec2(18.0f, ImGui::GetFrameHeight()));
 			}
+		}
+
+		// ---- Load -------------------------------------------------------------------------------------------
+
+		// Measured while the player plays: the tone's share of real time and this PC's slowest blocks, with late
+		// blocks (the amp link's count) as the proof that a block did not make it.
+		void DrawLoad()
+		{
+			const Snapshot& s = GetSnapshot();
+			static uint32_t lastLate = 0;
+			static ULONGLONG lateAt = 0;
+			const uint32_t late = ExternalAmp::GetSnapshot().link.lateBlocks;
+			if (late > lastLate) lateAt = GetTickCount64();
+			lastLate = late;
+			const bool recentlyLate = lateAt != 0 && GetTickCount64() - lateAt < 10000;
+			if (!s.hasLoad)
+			{
+				Caption("Load: play a few notes to measure this tone.");
+				return;
+			}
+			const ImU32 shareColor = s.medianLoad >= SHARE_HEAVY_LOAD ? Color::Bad : s.medianLoad >= SHARE_WARN_LOAD ? Color::Warn : Color::Good;
+			const ImU32 peakColor = recentlyLate ? Color::Bad : s.peakLoad >= PEAK_WARN_LOAD ? Color::Warn : Color::Good;
+			char text[160];
+			sprintf_s(text, "Load %d%%   Slowest %d%% at %d samples%s", static_cast<int>(std::lround(s.medianLoad * 100.0f)),
+				static_cast<int>(std::lround(s.peakLoad * 100.0f)), s.blockFrames, recentlyLate ? "   Late blocks" : "");
+			StatusPill(text, shareColor == Color::Bad || peakColor == Color::Bad ? Color::Bad : (shareColor == Color::Warn || peakColor == Color::Warn ? Color::Warn : Color::Good));
+			Hint("Measured on this PC while you play. Load is the tone's share of the audio time, about the same at any block size: "
+				"under 50% leaves room for slower PCs at the game's normal settings. Slowest is the worst block of the last second "
+				"at your block size: small blocks (ASIO's 128 or 64) are a bonus that a heavy tone can run out of.");
+			if (s.medianLoad >= SHARE_HEAVY_LOAD)
+				Caption("This tone is heavy: on a slower PC it may crackle even at the game's normal settings. Remove a pedal or use a lighter NAM capture.");
+			else if (recentlyLate || s.peakLoad >= PEAK_WARN_LOAD)
+				Caption("Your block size is tight for this tone on this PC. It will play at a larger block size (128 or more), or with a lighter tone.");
 		}
 
 		// ---- Pedalboard -------------------------------------------------------------------------------------
@@ -651,6 +679,7 @@ namespace Overlay
 		if (!s.isBusy && !s.isPresetLoading) state.loadingPedals.clear();
 
 		DrawToolbar();
+		DrawLoad();
 		const float width = ImGui::GetContentRegionAvail().x;
 		const ImVec2 top = ImGui::GetCursorPos();
 		DrawLibrary(BOARD_HEIGHT);

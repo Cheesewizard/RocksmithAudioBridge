@@ -1,8 +1,10 @@
 #include "StompboxService.hpp"
 
+#include "AudioFormat.hpp"
 #include "HostLog.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <stdexcept>
 
@@ -96,6 +98,18 @@ namespace VstHost
 				PublishPresets();
 			}
 		}
+	}
+
+	void StompboxService::PublishLoad(const BlockTiming& timing, int frames)
+	{
+		if (!shared || frames <= 0) return;
+		const double periodMicroseconds = 1000000.0 * frames / SAMPLE_RATE;
+		const auto permille = [&](double microseconds) { return static_cast<LONG>(std::lround(1000.0 * microseconds / periodMicroseconds)); };
+		InterlockedExchange(&shared->blockFrames, frames);
+		InterlockedExchange(&shared->medianPermille, permille(timing.medianMicroseconds));
+		InterlockedExchange(&shared->loadPermille, permille(timing.percentile99Microseconds));
+		InterlockedExchange(&shared->peakPermille, permille(timing.maximumMicroseconds));
+		InterlockedIncrement(&shared->loadSeq);
 	}
 
 	void StompboxService::RunCommand(const std::string& command)

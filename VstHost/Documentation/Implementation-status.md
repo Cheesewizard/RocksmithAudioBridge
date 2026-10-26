@@ -108,7 +108,14 @@ The full reports are `Offline-A2-full.json` and `Offline-A2-lite.json`.
   - **Browser:** Effects, Amps (NAM files) and Cabinets (IRs), each with search and a Folder button.
   - **Editor:** one generic in-overlay panel built from the parameter definitions. VSliders are drawn as a bank;
     advanced parameters are folded away; output meters are left out.
-  - **Rules:** default insertion places (gate, amp, cabinet); at most 2 NAM pedals; spinners while a file loads.
+  - **Rules:** default insertion places (gate, amp, cabinet); spinners while a file loads. There is no pedal-count
+    limit.
+  - **Load meter:** measured live, once a second, by the host's block timing (`SourceRouter`, published through
+    `StompboxControl` v2). Two figures:
+    - **Load** is the typical block's share of real time. It barely changes with block size, so it is judged
+      against the base game (480-frame blocks). A warning shows at 50%, and "heavy" at 70%.
+    - **Slowest** is the worst block of the last second at this PC's block size. A warning shows at 85% or after
+      late blocks. ASIO's 128 or 64 frames are a bonus, not the target.
 - **`OverlayShell.cpp`:** the tabs are now **Tone designer | VST rig | External app**. Choosing Tone designer or
   VST rig also chooses what plays. VST rig is today's page, unchanged.
 

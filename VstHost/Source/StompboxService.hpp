@@ -5,6 +5,7 @@
 // program and the preset list; and tells the host when the stream should go through Stompbox (`wanted`).
 // Main thread only (the host's key timer polls it).
 
+#include "SourceRouter.hpp"
 #include "StompboxEngine.hpp"
 
 #include "../../DLL/Shared/StompboxControl.hpp"
@@ -29,6 +30,8 @@ namespace VstHost
 		// rig is the page's one chain (StompboxControl::CHAIN_NAME).
 		void Start(const std::wstring& dataPath, bool isDevelopmentRemote);
 		void Poll();
+		// The last second's block timing at `frames` per block, for the page's load meter.
+		void PublishLoad(const BlockTiming& timing, int frames);
 		void Stop();
 
 	private:
