@@ -3,7 +3,7 @@
 Branch `dev_portable-tone-designer`. This is a partial implementation, not the finished portable Tone Designer
 feature.
 
-**Design:** [PortableTones-Design.md](../../docs/ToneDesigner/PortableTones-Design.md). **Revision 4 (current
+**Start here:** [Handover.md](../../docs/ToneDesigner/Handover.md). **Design:** [PortableTones-Design.md](../../docs/ToneDesigner/PortableTones-Design.md). **Revision 4 (current
 direction):**
 
 - **Engine:** the Tone designer runs the **Stompbox engine** (NAM amps, tone stacks, cabinets and effects) inside
