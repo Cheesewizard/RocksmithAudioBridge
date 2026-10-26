@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "OverlayShell.hpp"
 #include "OverlayUi.hpp"
+#include "ToneDesignerUi.hpp"
 #include "Lib/ImGUI/imgui_internal.h"   // SetItemUsingMouseWheel (the pedalboard scrolls sideways)
 #include "NoteByNote/Ui/NoteByNoteHudLayout.hpp"
 #include "AudioBridge/Engine/AudioBridgeEngine.hpp"
@@ -151,12 +152,7 @@ namespace Overlay
 		bool g_pageFillsHeight = false;
 		float g_pageNaturalHeight = 0.0f;   // a fill page's preferred height (page padding included), set while it draws
 
-		// Linear peak (guitar input or game output) to meter fraction on a -60..0 dBFS scale, as the D3D diagnostics HUD does.
-		float MeterFraction(float peak)
-		{
-			if (peak <= 0.0f) return 0.0f;
-			return std::clamp((20.0f * std::log10(peak) + 60.0f) / 60.0f, 0.0f, 1.0f);
-		}
+		using ToneDesignerUi::MeterFraction;   // linear peak to a -60..0 dBFS meter fraction
 
 		std::filesystem::path GameFolder()
 		{
@@ -895,52 +891,30 @@ namespace Overlay
 			enum class Dialog { None, SaveAs, Rename, Delete, NewTone, Discard, Levels, NewFolder, DeleteTones, Restore };
 			enum Filter { All, Favourites, Amps, Effects, Dynamics, Instruments, Recent, FilterCount };
 
-			// The panel's own colours: neutral greys, so it reads as a separate app inside the overlay.
-			namespace Ink
-			{
-				constexpr ImU32 App = IM_COL32(21, 23, 28, 255);
-				constexpr ImU32 Edge = IM_COL32(42, 46, 55, 255);
-				constexpr ImU32 Bar = IM_COL32(28, 31, 38, 255);
-				constexpr ImU32 Field = IM_COL32(14, 16, 20, 255);
-				constexpr ImU32 FieldEdge = IM_COL32(52, 57, 71, 255);
-				constexpr ImU32 Text = IM_COL32(217, 220, 227, 255);
-				constexpr ImU32 Soft = IM_COL32(184, 189, 200, 255);
-				constexpr ImU32 Muted = IM_COL32(138, 144, 158, 255);
-				constexpr ImU32 Dim = IM_COL32(125, 132, 148, 255);
-				constexpr ImU32 Blue = IM_COL32(47, 111, 208, 255);
-				constexpr ImU32 Amber = IM_COL32(240, 180, 41, 255);
-				constexpr ImU32 Library = IM_COL32(24, 26, 32, 255);
-				constexpr ImU32 RowHover = IM_COL32(34, 38, 46, 255);
-				constexpr ImU32 RowSelected = IM_COL32(36, 58, 92, 255);
-				constexpr ImU32 Rack = IM_COL32(15, 17, 21, 255);
-				constexpr ImU32 RackEdge = IM_COL32(38, 42, 51, 255);
-				constexpr ImU32 Jack = IM_COL32(74, 80, 96, 255);
-				constexpr ImU32 Cable = IM_COL32(58, 64, 77, 255);
-				constexpr ImU32 Outline = IM_COL32(79, 143, 240, 255);
-				constexpr ImU32 Led = IM_COL32(229, 72, 77, 255);
-				constexpr ImU32 LedOff = IM_COL32(61, 37, 38, 255);
-				constexpr ImU32 Sub = IM_COL32(154, 161, 176, 255);
-				constexpr ImU32 Knob = IM_COL32(20, 23, 29, 255);
-				constexpr ImU32 KnobEdge = IM_COL32(92, 100, 117, 255);
-				constexpr ImU32 Switch = IM_COL32(155, 163, 179, 255);
-				constexpr ImU32 SwitchEdge = IM_COL32(98, 106, 122, 255);
-				constexpr ImU32 AddText = IM_COL32(122, 167, 245, 255);
-				constexpr ImU32 Meter = IM_COL32(48, 164, 108, 255);
-				constexpr ImU32 Tag = IM_COL32(36, 58, 92, 255);
-				constexpr ImU32 TagText = IM_COL32(156, 194, 255, 255);
-				constexpr ImU32 Good = IM_COL32(74, 199, 132, 255);
-				constexpr ImU32 Bad = IM_COL32(229, 72, 77, 255);
-			}
+			// The drawing parts both Tone designer tabs share (ToneDesignerUi.hpp).
+			namespace Ink = ToneDesignerUi::Ink;
+			using ToneDesignerUi::PedalLook;
+			using ToneDesignerUi::PushPopupPadding;
+			using ToneDesignerUi::CaptionFont;
+			using ToneDesignerUi::Text;
+			using ToneDesignerUi::TextWidth;
+			using ToneDesignerUi::IconSquare;
+			using ToneDesignerUi::FoldLabel;
+			using ToneDesignerUi::Jack;
+			using ToneDesignerUi::PillLook;
+			using ToneDesignerUi::TintPill;
+			using ToneDesignerUi::PillWidth;
+			using ToneDesignerUi::DrawPill;
+			using ToneDesignerUi::Chip;
 
 			// Pedal body and edge by kind: dynamics teal, amps brown and wider, effects purple, others slate.
-			struct PedalLook { ImU32 body, edge; float width; int knobs; };
 			PedalLook LookFor(VstHostLink::Kind kind)
 			{
 				switch (kind) {
-				case VstHostLink::Kind::Amp: return { IM_COL32(58, 42, 34, 255), IM_COL32(90, 64, 51, 255), 150.0f, 5 };
-				case VstHostLink::Kind::Dynamics: return { IM_COL32(38, 53, 58, 255), IM_COL32(53, 80, 88, 255), 96.0f, 2 };
-				case VstHostLink::Kind::Effect: return { IM_COL32(44, 43, 68, 255), IM_COL32(69, 67, 106, 255), 96.0f, 2 };
-				default: return { IM_COL32(43, 50, 64, 255), IM_COL32(60, 69, 87, 255), 96.0f, 3 };
+				case VstHostLink::Kind::Amp: return ToneDesignerUi::Looks::Amp;
+				case VstHostLink::Kind::Dynamics: return ToneDesignerUi::Looks::Dynamics;
+				case VstHostLink::Kind::Effect: return ToneDesignerUi::Looks::Effect;
+				default: return ToneDesignerUi::Looks::Other;
 				}
 			}
 
@@ -1185,18 +1159,6 @@ namespace Overlay
 				VstHostLink::SetPopout(!vst.popoutWanted);
 			}
 
-			// Popups and menus get room around their items (the overlay's windows have no padding of their own).
-			void PushPopupPadding() { ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10, 8)); }
-
-			ImFont* CaptionFont() { return GetFonts().caption ? GetFonts().caption : ImGui::GetFont(); }
-
-			void Text(ImDrawList* list, ImFont* font, ImVec2 at, ImU32 color, const char* text)
-			{
-				list->AddText(font, font->FontSize, at, color, text);
-			}
-
-			float TextWidth(ImFont* font, const char* text) { return font->CalcTextSizeA(font->FontSize, FLT_MAX, 0.0f, text).x; }
-
 			// The plugins as menu items, vendor on the right. Instruments are left out (they make no sound from a
 			// guitar); the browser still lists them.
 			// Dragging: a pedal carries its slot ("RAB_PEDAL", an int); a plugin from the browser carries its path
@@ -1334,21 +1296,6 @@ namespace Overlay
 			}
 
 			// A square icon button drawn on the bar; `on` lights it blue.
-			bool IconSquare(const char* id, unsigned glyph, bool on, const char* hint, float size)
-			{
-				const ImVec2 at = ImGui::GetCursorScreenPos();
-				const bool pressed = ImGui::InvisibleButton(id, ImVec2(size, size));
-				const bool hovered = ImGui::IsItemHovered();
-				ImDrawList* list = ImGui::GetWindowDrawList();
-				const ImVec2 end(at.x + size, at.y + size);
-				if (on) list->AddRectFilled(at, end, Ink::Blue, 6.0f);
-				else if (hovered) list->AddRectFilled(at, end, Ink::Edge, 6.0f);
-				list->AddRect(at, end, on ? Ink::Blue : Ink::FieldEdge, 6.0f);
-				DrawIcon(list, ImVec2(at.x + size * 0.5f, at.y + size * 0.5f), glyph, on || hovered ? IM_COL32_WHITE : Ink::Soft);
-				Hint(hint);
-				return pressed;
-			}
-
 			// The bar: menus, the tone's name between arrows, A/B, the amp window and power.
 			void Bar(const VstHostLink::Snapshot& vst, const ExternalAmp::Snapshot& amp, float width, float height)
 			{
@@ -1593,17 +1540,6 @@ namespace Overlay
 				ImGui::PopID();
 			}
 
-			void FoldLabel(const char* text)
-			{
-				ImGui::Dummy(ImVec2(0, 2));
-				ImGui::PushFont(CaptionFont());
-				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Ink::Dim));
-				ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 4.0f);
-				ImGui::TextUnformatted(text);
-				ImGui::PopStyleColor();
-				ImGui::PopFont();
-			}
-
 			// Left column: search, favourites, all tones, song tones.
 			void LibraryColumn(const VstHostLink::Snapshot& vst, float width, float height)
 			{
@@ -1711,37 +1647,17 @@ namespace Overlay
 				ImGui::PopStyleVar(2);
 			}
 
-			void Jack(ImDrawList* list, ImVec2 center, const char* label)
-			{
-				list->AddCircle(center, 7.0f, Ink::Jack, 16, 3.0f);
-				ImFont* caption = CaptionFont();
-				Text(list, caption, ImVec2(center.x - TextWidth(caption, label) * 0.5f, center.y + 12.0f), Ink::Dim, label);
-			}
-
 			// A vertical segmented meter in a column `width` wide whose left edge is at `at.x`, centred on `at.y`:
 			// green, then amber, then red at the top; all lit with a red top while it clips. Click for the levels.
 			void MeterColumn(ImDrawList* list, ImVec2 at, float width, const char* label, float peak, const char* id, const VstHostLink::Snapshot& vst)
 			{
-				constexpr int kSegments = 6;
-				const float segH = 8.0f, gap = 3.0f, barW = 10.0f;
-				const float barH = kSegments * (segH + gap) - gap;
-				ImFont* caption = CaptionFont();
-				const float labelTop = at.y - (barH + caption->FontSize + 6.0f) * 0.5f;
-				const float barTop = labelTop + caption->FontSize + 6.0f;
-				const float cx = at.x + width * 0.5f;
+				const float height = ToneDesignerUi::MeterHeight();
+				const float labelTop = at.y - height * 0.5f;
 				ImGui::SetCursorScreenPos(ImVec2(at.x, labelTop));
-				if (ImGui::InvisibleButton(id, ImVec2(width, barTop + barH - labelTop))) Ask(Dialog::Levels);
+				if (ImGui::InvisibleButton(id, ImVec2(width, height))) Ask(Dialog::Levels);
 				Hint(vst.outputPeak > 1.0f ? "The chain's output is clipping. Click to lower the output trim, or lower the last plugin's volume."
 					: "Your guitar into the chain (IN) and the chain's output (OUT). Click for the levels.");
-				Text(list, caption, ImVec2(cx - TextWidth(caption, label) * 0.5f, labelTop), Ink::Dim, label);
-				const bool clipping = peak > 1.0f;
-				const int lit = clipping ? kSegments : static_cast<int>(std::lround(MeterFraction(peak) * kSegments));
-				for (int i = 0; i < kSegments; ++i) {
-					const float y = barTop + barH - (i + 1) * (segH + gap) + gap;
-					const ImVec2 a(cx - barW * 0.5f, y), b(cx + barW * 0.5f, y + segH);
-					const ImU32 on = i == kSegments - 1 ? Ink::Bad : i == kSegments - 2 ? Ink::Amber : Ink::Meter;
-					list->AddRectFilled(a, b, i < lit ? on : Ink::Edge, 2.0f);   // unlit segments stay visible on the rack
-				}
+				ToneDesignerUi::MeterSegments(list, at.x, labelTop, width, label, peak);
 			}
 
 			// Over the rack while plugins load: which plugin, the step of a tone, the seconds so far, and a bar that keeps
@@ -1808,9 +1724,8 @@ namespace Overlay
 				const float rackH = std::max(150.0f, ImGui::GetContentRegionAvail().y - hintH);
 				const ImVec2 board = ImGui::GetCursorScreenPos();
 				ImDrawList* outer = ImGui::GetWindowDrawList();
-				outer->AddRectFilled(board, ImVec2(board.x + boardW, board.y + rackH), Ink::Rack, 10.0f);
-				outer->AddRect(board, ImVec2(board.x + boardW, board.y + rackH), Ink::RackEdge, 10.0f);
-				const float pedalH = 124.0f;
+				ToneDesignerUi::DrawRack(outer, board, boardW, rackH);
+				const float pedalH = ToneDesignerUi::PEDAL_HEIGHT;
 
 				// IN and OUT meters stand at the board's two ends, outside the scrolling rack so a long chain never
 				// scrolls them away (View > Meters hides them). Click either for the levels.
@@ -1850,7 +1765,6 @@ namespace Overlay
 					const bool selected = i == s.selected;
 					const ImVec2 at(x, top);
 					const ImVec2 end(x + look.width, top + pedalH);
-					const ImVec2 footswitch(x + look.width * 0.5f, end.y - 20.0f);
 
 					ImGui::PushID(i);
 					ImGui::SetCursorScreenPos(at);
@@ -1858,8 +1772,7 @@ namespace Overlay
 					ImGui::SetItemUsingMouseWheel();   // the wheel scrolls the rack, not the page
 					const bool hovered = ImGui::IsItemHovered();
 					overTile |= hovered;
-					const ImVec2 mouse = ImGui::GetIO().MousePos;
-					const bool onSwitch = (mouse.x - footswitch.x) * (mouse.x - footswitch.x) + (mouse.y - footswitch.y) * (mouse.y - footswitch.y) < 15.0f * 15.0f;
+					const bool onSwitch = ToneDesignerUi::IsOnFootswitch(at, look, ImGui::GetIO().MousePos);
 					if (pressed) {
 						if (onSwitch) { if (!vst.busy) VstHostLink::SetBypass(i, !slot.bypass); }
 						else s.selected = i;
@@ -1891,41 +1804,24 @@ namespace Overlay
 					}
 					ImGui::PopStyleVar();
 
-					// A bypassed pedal is drawn faded into the rack.
-					auto fade = [&](ImU32 color) { return playing ? color : Mix(Ink::Rack, color, 0.55f); };
-					if (selected) list->AddRect(ImVec2(at.x - 3.0f, at.y - 3.0f), ImVec2(end.x + 3.0f, end.y + 3.0f), Ink::Outline, 11.0f, 0, 2.0f);
-					list->AddRectFilled(at, end, fade(hovered ? Mix(look.body, IM_COL32_WHITE, 0.06f) : look.body), 9.0f);
-					list->AddRect(at, end, fade(look.edge), 9.0f);
-					list->AddCircleFilled(ImVec2(x + look.width * 0.5f, at.y + 12.0f), 4.0f, playing ? Ink::Led : Ink::LedOff, 12);
-					if (slot.windowOpen)   // its plugin window is open
-						DrawIcon(list, ImVec2(end.x - 13.0f, at.y + 13.0f), Glyph::NewWindow, fade(vst.popoutWanted ? Ink::AddText : Ink::Dim));
-					list->PushClipRect(ImVec2(at.x + 4.0f, at.y), ImVec2(end.x - 4.0f, end.y), true);
-					const float nameW = ImGui::CalcTextSize(slot.name.c_str()).x;
-					list->AddText(ImVec2(x + std::max(5.0f, (look.width - nameW) * 0.5f), at.y + 22.0f), fade(IM_COL32_WHITE), slot.name.c_str());
 					const std::string sub = plugin && !plugin->vendor.empty() ? plugin->vendor : (slot.bypass ? "bypassed" : "");
-					const float subW = TextWidth(caption, sub.c_str());
-					Text(list, caption, ImVec2(x + std::max(5.0f, (look.width - subW) * 0.5f), at.y + 24.0f + ImGui::GetFontSize()), fade(Ink::Sub), sub.c_str());
-					list->PopClipRect();
-					const float knobsW = look.knobs * 16.0f + (look.knobs - 1) * 7.0f;
-					for (int k = 0; k < look.knobs; ++k) {
-						const ImVec2 knob(x + (look.width - knobsW) * 0.5f + 8.0f + k * 23.0f, at.y + 68.0f);
-						list->AddCircleFilled(knob, 8.0f, fade(Ink::Knob), 16);
-						list->AddCircle(knob, 8.0f, fade(Ink::KnobEdge), 16, 2.0f);
-						list->AddLine(knob, ImVec2(knob.x - 3.0f, knob.y - 5.0f), fade(Ink::KnobEdge), 1.5f);
+					ToneDesignerUi::PedalTile tile;
+					tile.name = slot.name.c_str();
+					tile.sub = sub.c_str();
+					tile.look = look;
+					tile.isPlaying = playing;
+					tile.isSelected = selected;
+					tile.isHovered = hovered;
+					tile.isOnSwitch = onSwitch;
+					if (slot.windowOpen) {   // its plugin window is open
+						tile.badge = Glyph::NewWindow;
+						tile.badgeColor = vst.popoutWanted ? Ink::AddText : Ink::Dim;
 					}
-					list->AddCircleFilled(footswitch, 12.0f, fade(hovered && onSwitch ? IM_COL32(190, 198, 212, 255) : Ink::Switch), 20);
-					list->AddCircle(footswitch, 12.0f, fade(Ink::SwitchEdge), 20, 2.0f);
+					ToneDesignerUi::DrawPedalTile(list, at, tile);
 					// Its window was asked for and is not open yet: dim the pedal and turn a spinner over it.
 					if (i == g_openingSlot) {
 						if (slot.windowOpen || ImGui::GetTime() - g_openingSince > 15.0) g_openingSlot = -1;
-						else {
-							list->AddRectFilled(at, end, IM_COL32(0, 0, 0, 120), 9.0f);
-							const ImVec2 c(x + look.width * 0.5f, top + pedalH * 0.5f - 6.0f);
-							const float a0 = static_cast<float>(ImGui::GetTime()) * 6.0f;
-							list->PathArcTo(c, 14.0f, a0, a0 + 4.2f, 24);
-							list->PathStroke(Ink::AddText, 0, 3.0f);
-							Text(list, caption, ImVec2(c.x - TextWidth(caption, "Opening") * 0.5f, c.y + 20.0f), IM_COL32_WHITE, "Opening");
-						}
+						else ToneDesignerUi::DrawTileBusy(list, at, look.width, "Opening");
 					}
 					ImGui::PopID();
 					x = end.x + 8.0f;
@@ -1935,7 +1831,7 @@ namespace Overlay
 				gaps.emplace_back(ImVec2(x - 26.0f, top), ImVec2(x + 6.0f, top + pedalH));
 				// Add: a dashed tile, opening the plugin list.
 				if (count < VstHostControl::kMaxSlots) {
-					const float addW = 70.0f;
+					const float addW = ToneDesignerUi::ADD_TILE_WIDTH;
 					const ImVec2 at(x, top), end(x + addW, top + pedalH);
 					ImGui::SetCursorScreenPos(at);
 					ImGui::BeginDisabled(vst.busy);
@@ -1949,17 +1845,7 @@ namespace Overlay
 							if (!vst.busy) VstHostLink::AddPlugin(static_cast<const PluginDrag*>(payload->Data)->path);
 						ImGui::EndDragDropTarget();
 					}
-					const ImU32 dash = hovered ? Ink::AddText : Ink::Jack;
-					for (float d = at.x + 9.0f; d < end.x - 9.0f; d += 8.0f) {
-						list->AddLine(ImVec2(d, at.y), ImVec2(std::min(d + 4.0f, end.x - 9.0f), at.y), dash);
-						list->AddLine(ImVec2(d, end.y), ImVec2(std::min(d + 4.0f, end.x - 9.0f), end.y), dash);
-					}
-					for (float d = at.y + 9.0f; d < end.y - 9.0f; d += 8.0f) {
-						list->AddLine(ImVec2(at.x, d), ImVec2(at.x, std::min(d + 4.0f, end.y - 9.0f)), dash);
-						list->AddLine(ImVec2(end.x, d), ImVec2(end.x, std::min(d + 4.0f, end.y - 9.0f)), dash);
-					}
-					DrawIcon(list, ImVec2(at.x + addW * 0.5f, midY - 8.0f), Glyph::Add, Ink::AddText);
-					Text(list, caption, ImVec2(at.x + (addW - TextWidth(caption, "Add")) * 0.5f, midY + 6.0f), Ink::AddText, "Add");
+					ToneDesignerUi::DrawAddTile(list, at, midY, hovered);
 					x = end.x + 8.0f;
 					cable();
 				}
@@ -2069,10 +1955,6 @@ namespace Overlay
 				}
 			}
 
-			// A status pill's text and colours.
-			struct PillLook { const char* text; ImU32 fill, edge, ink; };
-			PillLook TintPill(const char* text, ImU32 hue) { return { text, Mix(Ink::App, hue, 0.18f), Mix(Ink::App, hue, 0.55f), hue }; }
-
 			// A plugin's status is two separate things, each its own pill: where it stands with the chain (in it,
 			// ready to add, or why not), and whether a copy is kept loaded outside it for fast tone changes. One
 			// word for both hid "In chain" behind "Always loaded".
@@ -2082,7 +1964,7 @@ namespace Overlay
 				if (InChain(vst, plugin.path)) return TintPill("In chain", Ink::Good);
 				if (plugin.kind == VstHostLink::Kind::Instrument) return TintPill("Not for guitar", Ink::Amber);
 				if (Loading(vst, plugin.path)) return TintPill("Loading...", Ink::Amber);
-				return { "Ready", IM_COL32(40, 45, 55, 255), Ink::FieldEdge, Ink::Soft };
+				return ToneDesignerUi::NeutralPill("Ready");
 			}
 
 			bool MemoryPill(const VstHostLink::Snapshot& vst, const VstHostLink::Plugin& plugin, PillLook& look)
@@ -2107,8 +1989,6 @@ namespace Overlay
 				return "The plugin host closed while this loaded in the background, most likely because the plugin crashed it.";
 			}
 
-			float PillWidth(ImFont* font, const char* text, bool dot = false) { return TextWidth(font, text) + 22.0f + (dot ? 14.0f : 0.0f); }
-
 			// The status column's two pill widths: each as wide as its longest label, so every row's pills line up.
 			float ChainPillWidth(ImFont* font)
 			{
@@ -2121,33 +2001,6 @@ namespace Overlay
 				float w = 0.0f;
 				for (const char* t : { "Always loaded", "Loaded", "Loads soon", "Load failed" }) w = std::max(w, PillWidth(font, t));
 				return w;
-			}
-
-			// Draws a pill at `at`, `height` tall, with an optional status dot before the text; returns its width.
-			// A `fixedWidth` makes it that wide with the text centred (the status column).
-			float DrawPill(ImDrawList* list, ImFont* font, ImVec2 at, float height, const PillLook& look, ImU32 dot = 0, float fixedWidth = 0.0f)
-			{
-				const float width = fixedWidth > 0.0f ? fixedWidth : PillWidth(font, look.text, dot != 0);
-				const ImVec2 end(at.x + width, at.y + height);
-				list->AddRectFilled(at, end, look.fill, height * 0.5f);
-				list->AddRect(at, end, look.edge, height * 0.5f);
-				float x = fixedWidth > 0.0f ? at.x + (width - TextWidth(font, look.text)) * 0.5f : at.x + 11.0f;
-				if (dot) { list->AddCircleFilled(ImVec2(x + 4.0f, at.y + height * 0.5f), 4.0f, dot, 12); x += 14.0f; }
-				Text(list, font, ImVec2(x, at.y + (height - font->FontSize) * 0.5f), look.ink, look.text);
-				return width;
-			}
-
-			bool Chip(const char* label, bool on)
-			{
-				ImGui::PushStyleColor(ImGuiCol_Button, ImGui::ColorConvertU32ToFloat4(on ? Ink::Blue : Ink::RowHover));
-				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImGui::ColorConvertU32ToFloat4(on ? Ink::Blue : Ink::Edge));
-				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(on ? IM_COL32_WHITE : Ink::Soft));
-				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10, 3));
-				ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
-				const bool pressed = ImGui::Button(label);
-				ImGui::PopStyleVar(2);
-				ImGui::PopStyleColor(3);
-				return pressed;
 			}
 
 			// Tone choices for a menu: a search box, then tones outside folders and a submenu per folder. While the
@@ -2185,31 +2038,12 @@ namespace Overlay
 			// that pane's first row (PluginBrowser, SongsView). The choice is kept for the session (State::songsMode).
 			void PaneToggle()
 			{
-				ImFont* font = CaptionFont();
 				static const char* const modes[2] = { "Plugins", "Songs" };
+				static const char* const hints[2] = { "Every plugin found: drag one onto the board to use it.",
+					"Your songs: give them tones of their own without playing them, and see which wait for plugins to load. Drag a tone from the left onto them." };
 				State& s = S();
-				ImDrawList* list = ImGui::GetWindowDrawList();
-				const float height = ImGui::GetFrameHeight();
-				const ImVec2 start = ImGui::GetCursorScreenPos();
-				float x = start.x;
-				for (int i = 0; i < 2; ++i) {
-					const float w = TextWidth(font, modes[i]) + 22.0f;
-					const ImVec2 at(x, start.y);
-					const bool on = s.songsMode == (i == 1);
-					ImGui::SetCursorScreenPos(at);
-					ImGui::PushID(i);
-					if (ImGui::InvisibleButton("##pane", ImVec2(w, height))) s.songsMode = i == 1;
-					ImGui::PopID();
-					const bool hovered = ImGui::IsItemHovered();
-					Hint(i == 1 ? "Your songs: give them tones of their own without playing them, and see which wait for plugins to load. Drag a tone from the left onto them."
-						: "Every plugin found: drag one onto the board to use it.");
-					if (on) list->AddRectFilled(at, ImVec2(at.x + w, at.y + height), Ink::Blue, 6.0f, i ? ImDrawFlags_RoundCornersRight : ImDrawFlags_RoundCornersLeft);
-					Text(list, font, ImVec2(at.x + 11.0f, at.y + (height - font->FontSize) * 0.5f), on ? IM_COL32_WHITE : hovered ? Ink::Text : Ink::Muted, modes[i]);
-					x += w;
-				}
-				list->AddRect(start, ImVec2(x, start.y + height), Ink::FieldEdge, 6.0f);
-				ImGui::SetCursorScreenPos(start);
-				ImGui::Dummy(ImVec2(x - start.x, height));
+				const int clicked = ToneDesignerUi::PaneToggle(modes, 2, s.songsMode ? 1 : 0, hints);
+				if (clicked >= 0) s.songsMode = clicked == 1;
 			}
 
 			// The Songs pane under the board: every song in the library (SongLibrary) with its tone and how long its
@@ -3008,22 +2842,18 @@ namespace Overlay
 				}
 
 				list->ChannelsSetCurrent(0);
-				const ImVec2 end(at.x + width, bottom);
-				list->AddRectFilled(at, end, Ink::App, 12.0f);
-				list->AddRectFilled(at, ImVec2(end.x, at.y + barH), Ink::Bar, 12.0f, ImDrawFlags_RoundCornersTop);
-				list->AddLine(ImVec2(at.x, at.y + barH), ImVec2(end.x, at.y + barH), Ink::Edge);
-				if (libraryW > 0.0f) {
-					list->AddRectFilled(ImVec2(at.x, at.y + barH + 1.0f), ImVec2(at.x + libraryW, at.y + barH + mainH), Ink::Library,
-						IsOpen(Browser) ? 0.0f : 12.0f, IsOpen(Browser) ? 0 : ImDrawFlags_RoundCornersBottomLeft);
-					list->AddLine(ImVec2(at.x + libraryW, at.y + barH), ImVec2(at.x + libraryW, at.y + barH + mainH), Ink::Edge);
-				}
-				if (IsOpen(Browser)) {
-					const float lineY = dividerTop + dividerH * 0.5f;
-					list->AddLine(ImVec2(at.x, lineY), ImVec2(end.x, lineY), dividerHot ? Ink::Blue : Ink::Edge, dividerHot ? 2.0f : 1.0f);
-					const float mid = at.x + width * 0.5f;   // a grip in the middle says it moves
-					list->AddRectFilled(ImVec2(mid - 18.0f, lineY - 2.0f), ImVec2(mid + 18.0f, lineY + 2.0f), dividerHot ? Ink::Blue : Ink::FieldEdge, 2.0f);
-				}
-				list->AddRect(at, end, Ink::Edge, 12.0f);
+				ToneDesignerUi::PanelFrame frame;
+				frame.at = at;
+				frame.width = width;
+				frame.barHeight = barH;
+				frame.mainHeight = mainH;
+				frame.libraryWidth = libraryW;
+				frame.bottom = bottom;
+				frame.hasPane = IsOpen(Browser);
+				frame.dividerTop = dividerTop;
+				frame.dividerHeight = dividerH;
+				frame.isDividerHot = dividerHot;
+				ToneDesignerUi::DrawPanelFrame(list, frame);
 				list->ChannelsMerge();
 				ImGui::SetCursorScreenPos(ImVec2(at.x, bottom + 6.0f));
 				ImGui::Dummy(ImVec2(0, 0));
@@ -3410,7 +3240,13 @@ namespace Overlay
 
 			if (g_ampTab != AmpTab::ExternalApp) AmpLinkBar(amp);
 			if (g_ampTab == AmpTab::ExternalApp || g_ampLinkOpen) AmpLinkCard(amp);
-			if (g_ampTab == AmpTab::ToneDesigner) DrawStompboxPage();
+			if (g_ampTab == AmpTab::ToneDesigner) {
+				const float naturalHeight = DrawStompboxPage();
+				if (naturalHeight > 0.0f) {
+					g_pageFillsHeight = true;
+					g_pageNaturalHeight = naturalHeight;
+				}
+			}
 			else if (g_ampTab == AmpTab::VstRig) ToneDesignerTab();
 			else ExternalAppTab(amp);
 		}

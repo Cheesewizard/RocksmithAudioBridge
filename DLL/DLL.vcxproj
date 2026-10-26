@@ -323,6 +323,7 @@
     <ClInclude Include="ToneDesigner\GameTones.hpp" />
     <ClInclude Include="ToneDesigner\StompboxLink.hpp" />
     <ClInclude Include="Overlay\StompboxPage.hpp" />
+    <ClInclude Include="Overlay\ToneDesignerUi.hpp" />
     <ClInclude Include="ExternalAmp\CableAmpLink.hpp" />
     <ClInclude Include="Core\RsModsHelper.hpp" />
     <ClInclude Include="ToneDesigner\SongLibrary.hpp" />

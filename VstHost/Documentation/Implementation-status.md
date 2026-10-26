@@ -102,7 +102,10 @@ The full reports are `Offline-A2-full.json` and `Offline-A2-lite.json`.
   - remembers the player's choice (`HKCU\...\VstHost ToneDesignerEngine`).
 
   `VstHostLink::OnFrame` drives it, so the choice applies while the page is closed.
-- **`DLL/Overlay/StompboxPage.{hpp,cpp}`:** the agreed pedalboard (design §7.0).
+- **`DLL/Overlay/StompboxPage.{hpp,cpp}`:** the agreed pedalboard (design §7.0). It is laid out and drawn exactly as
+  the VST rig page, with the same parts (`DLL/Overlay/ToneDesignerUi.hpp`, which both tabs now use): the framed
+  panel and its bar, the tone library column, the rack with IN/OUT meters, jacks, cables and pedal tiles, the
+  draggable divider, and a "Pedals | Song tones" pane. It fills the overlay's height as the VST rig does.
   - **Library and board:** saved tones on the left; one pedal per effect, with its colour, file name, LED and
     footswitch; drag to reorder or drop from the browser; a right-click menu.
   - **Browser:** Effects, Amps (NAM files) and Cabinets (IRs), each with search and a Folder button.
@@ -150,7 +153,8 @@ The full reports are `Offline-A2-full.json` and `Offline-A2-lite.json`.
 ### Verification
 
 Nothing has been built or run. The new C++ files passed `clang++ -fsyntax-only` with the real ImGui headers and
-stand-in Windows headers. `Main.cpp` and `OverlayShell.cpp` were not compiled.
+stand-in Windows headers. `OverlayShell.cpp` was checked the same way: its only errors are Windows API names the
+stand-ins do not define. `Main.cpp` was not compiled.
 
 ### Known gaps
 

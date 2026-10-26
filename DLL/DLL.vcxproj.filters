@@ -803,6 +803,9 @@
     <ClInclude Include="Overlay\StompboxPage.hpp">
       <Filter>Main Headers</Filter>
     </ClInclude>
+    <ClInclude Include="Overlay\ToneDesignerUi.hpp">
+      <Filter>Main Headers</Filter>
+    </ClInclude>
     <ClInclude Include="ToneDesigner\StompboxLink.hpp">
       <Filter>Main Headers</Filter>
     </ClInclude>
