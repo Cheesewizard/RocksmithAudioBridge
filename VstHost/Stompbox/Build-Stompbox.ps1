@@ -84,8 +84,21 @@ const char* DumpConfig(void* processor)
 	[System.IO.File]::AppendAllText($CapiSource, $Definition)
 }
 
-Invoke-Checked cmake @('-S', $Source, '-B', $Build, '-G', 'Visual Studio 17 2022', '-A', 'x64')
-Invoke-Checked cmake @('--build', $Build, '--config', 'Release', '--target', 'stompbox-capi')
+# CMake ships with Visual Studio's C++ workload but is on the PATH only in its Developer PowerShell; find it there.
+$CMake = (Get-Command cmake -ErrorAction SilentlyContinue).Source
+if (-not $CMake)
+{
+	$VsWhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+	if (Test-Path $VsWhere)
+	{
+		$VsPath = & $VsWhere -latest -version '[17.0,18.0)' -requires Microsoft.VisualStudio.Component.VC.CMake.Project -property installationPath
+		if ($VsPath) { $CMake = Join-Path $VsPath 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe' }
+	}
+	if (-not $CMake -or -not (Test-Path $CMake)) { throw 'CMake was not found. Add "C++ CMake tools for Windows" to Visual Studio 2022 (Visual Studio Installer, Modify), or run: winget install Kitware.CMake' }
+}
+
+Invoke-Checked $CMake @('-S', $Source, '-B', $Build, '-G', 'Visual Studio 17 2022', '-A', 'x64')
+Invoke-Checked $CMake @('--build', $Build, '--config', 'Release', '--target', 'stompbox-capi')
 
 $Dll = Get-ChildItem -Path $Build -Recurse -Filter 'stompbox-capi.dll' | Where-Object { $_.FullName -match '\\Release\\' } | Select-Object -First 1
 if (-not $Dll) { throw "The build finished but stompbox-capi.dll was not found under $Build." }

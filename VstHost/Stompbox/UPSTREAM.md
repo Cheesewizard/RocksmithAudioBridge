@@ -20,7 +20,7 @@ The host project copies it next to `RocksmithAudioBridgeVstHost.exe` and deploys
 powershell -ExecutionPolicy Bypass -File VstHost\Stompbox\Build-Stompbox.ps1
 ```
 
-Requires Git, CMake 3.22+ and Visual Studio 2022 with the C++ workload.
+Requires Git and Visual Studio 2022 with the C++ workload and its "C++ CMake tools for Windows" (the script finds that CMake itself; a CMake 3.22+ on the PATH also works).
 
 ## Local changes
 
