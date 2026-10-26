@@ -54,6 +54,8 @@ namespace RS2014_Mod_Installer
                 WriteFile(Path.Combine(@rocksmithLocation, "RocksmithAudioBridgeAsio64.dll"), Properties.Resources.RocksmithAudioBridgeGuest64);
                 // The VST host: plays the guitar through VST3 plugins over that same link (External amp page).
                 WriteFile(Path.Combine(@rocksmithLocation, "RocksmithAudioBridgeVstHost.exe"), Properties.Resources.RocksmithAudioBridgeVstHost);
+                // The Tone designer's engine (Stompbox, GPL-3.0), which the VST host loads from its own folder.
+                WriteFile(Path.Combine(@rocksmithLocation, "stompbox-capi.dll"), Properties.Resources.StompboxEngine);
                 // The 64-bit driver host: runs an interface's 64-bit-only ASIO driver for the bridge, which the 32-bit
                 // game cannot load itself.
                 WriteFile(Path.Combine(@rocksmithLocation, "RocksmithAudioBridgeDriverHost.exe"), Properties.Resources.RocksmithAudioBridgeDriverHost);
@@ -107,6 +109,9 @@ namespace RS2014_Mod_Installer
                 WriteTextFile(Path.Combine(rootModFolder, "VstHost-JUCE-LICENSE.txt"), Properties.Resources.VstHostJuceLicense);
                 // The notices of the libraries JUCE compiles into the host (zlib, libpng, libjpeg, ...), which travel with binaries.
                 WriteTextFile(Path.Combine(rootModFolder, "VstHost-ThirdParty-Notices.txt"), Properties.Resources.VstHostThirdPartyNotices);
+                // stompbox-capi.dll is GPL-3.0: its licence, where its source is, and the notices of the libraries in it.
+                WriteTextFile(Path.Combine(rootModFolder, "Stompbox-LICENSE.txt"), Properties.Resources.StompboxLicense);
+                WriteTextFile(Path.Combine(rootModFolder, "Stompbox-ThirdParty-Notices.txt"), Properties.Resources.StompboxThirdPartyNotices);
             }
             catch (System.UnauthorizedAccessException ex)
             {

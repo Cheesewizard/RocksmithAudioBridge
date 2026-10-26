@@ -346,6 +346,9 @@
   <data name="RocksmithAudioBridgeVstHost" type="System.Resources.ResXFileRef, System.Windows.Forms">
     <value>..\Resources\Release\RocksmithAudioBridgeVstHost.exe;System.Byte[], mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </data>
+  <data name="StompboxEngine" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>..\Resources\Release\stompbox-capi.dll;System.Byte[], mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </data>
   <data name="RocksmithAudioBridgeDriverHost" type="System.Resources.ResXFileRef, System.Windows.Forms">
     <value>..\Resources\Release\RocksmithAudioBridgeDriverHost.exe;System.Byte[], mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </data>
@@ -366,6 +369,12 @@
   </data>
   <data name="VstHostThirdPartyNotices" type="System.Resources.ResXFileRef, System.Windows.Forms">
     <value>..\..\VstHost\THIRD-PARTY-NOTICES.txt;System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089;utf-8</value>
+  </data>
+  <data name="StompboxLicense" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>..\..\VstHost\Stompbox\LICENSE.txt;System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089;utf-8</value>
+  </data>
+  <data name="StompboxThirdPartyNotices" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>..\..\VstHost\Stompbox\THIRD-PARTY-NOTICES.txt;System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089;utf-8</value>
   </data>
   <data name="zlib_net" type="System.Resources.ResXFileRef, System.Windows.Forms">
     <value>..\Resources\RSModsGUI\zlib.net.dll;System.Byte[], mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>

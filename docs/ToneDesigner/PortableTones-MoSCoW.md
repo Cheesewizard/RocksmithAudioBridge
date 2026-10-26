@@ -41,8 +41,8 @@ against stand-in Windows headers.
 | Song tones: every tone of the song from its manifest, assignment in the overlay, tones prepared before play, switch on the game's tone key, 10 ms dip, 2 s tails | Written |
 | Game's current tone key (`song+0x198`) | Found statically; not confirmed live |
 | Sharing: export/import of a song's tones with model and IR files | **Not started** |
-| Installer shipping the engine, licence notices | **Not started** |
-| Starter content (captures and IRs we may redistribute) | **Not started** |
+| Installer shipping the engine (`stompbox-capi.dll`) with its GPL-3.0 licence, source pointer and the notices of every library in it (M4, M5) | Written, not built |
+| Starter content (S1): 58 NAM captures, 10 cabinet IRs and 26 genre tones, every file with an author and a licence that may travel with CDLC | Built in its own repository, `RocksmithAudioBridge-Tones` (each tone checked in the engine offline); not yet published or installed by the mod |
 
 ## MoSCoW
 

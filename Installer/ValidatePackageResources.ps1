@@ -40,6 +40,7 @@ $expected = @{
     RocksmithAudioBridgeGuest64 = Join-Path $repositoryRoot 'Installer\Resources\Release\RocksmithAudioBridgeAsio64.dll'
     RocksmithAudioBridgeVstHost = Join-Path $repositoryRoot 'Installer\Resources\Release\RocksmithAudioBridgeVstHost.exe'
     RocksmithAudioBridgeDriverHost = Join-Path $repositoryRoot 'Installer\Resources\Release\RocksmithAudioBridgeDriverHost.exe'
+    StompboxEngine = Join-Path $repositoryRoot 'Installer\Resources\Release\stompbox-capi.dll'
     RocksmithAudioBridgeLibrary = Join-Path $repositoryRoot 'Installer\Resources\RSModsGUI\RocksmithAudioBridge.dll'
 }
 
@@ -67,8 +68,9 @@ foreach ($name in $expected.Keys) {
         throw "Authoritative package input is missing: $authoritative"
     }
     # Files loaded by the 32-bit game are x86; the managed runtime is loaded by the 64-bit RSMods.exe, the
-    # External amp guest driver by 64-bit amp sims, and the VST host and the driver host are 64-bit programs.
-    $machine = if ($name -eq 'RocksmithAudioBridgeLibrary' -or $name -eq 'RocksmithAudioBridgeGuest64' -or $name -eq 'RocksmithAudioBridgeVstHost' -or $name -eq 'RocksmithAudioBridgeDriverHost') { 0x8664 } else { 0x14C }
+    # External amp guest driver by 64-bit amp sims, the Stompbox engine by the VST host, and the VST host and the
+    # driver host are 64-bit programs.
+    $machine = if ($name -eq 'RocksmithAudioBridgeLibrary' -or $name -eq 'RocksmithAudioBridgeGuest64' -or $name -eq 'RocksmithAudioBridgeVstHost' -or $name -eq 'StompboxEngine' -or $name -eq 'RocksmithAudioBridgeDriverHost') { 0x8664 } else { 0x14C }
     if ((Get-PeMachine $authoritative) -ne $machine) {
         throw ("{0} must be a PE image for machine 0x{1:X}: {2}" -f $name, $machine, $authoritative)
     }

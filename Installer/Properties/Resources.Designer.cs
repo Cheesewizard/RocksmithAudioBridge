@@ -920,6 +920,16 @@ namespace RS2014_Mod_Installer.Properties {
         /// <summary>
         ///   Looks up a localized resource of type System.Byte[].
         /// </summary>
+        internal static byte[] StompboxEngine {
+            get {
+                object obj = ResourceManager.GetObject("StompboxEngine", resourceCulture);
+                return ((byte[])(obj));
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized resource of type System.Byte[].
+        /// </summary>
         internal static byte[] RocksmithAudioBridgeDriverHost {
             get {
                 object obj = ResourceManager.GetObject("RocksmithAudioBridgeDriverHost", resourceCulture);
@@ -979,6 +989,24 @@ namespace RS2014_Mod_Installer.Properties {
         internal static string VstHostThirdPartyNotices {
             get {
                 return ResourceManager.GetString("VstHostThirdPartyNotices", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to the Stompbox engine's licence (GPL-3.0).
+        /// </summary>
+        internal static string StompboxLicense {
+            get {
+                return ResourceManager.GetString("StompboxLicense", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to the notices of the Stompbox engine and the libraries in it.
+        /// </summary>
+        internal static string StompboxThirdPartyNotices {
+            get {
+                return ResourceManager.GetString("StompboxThirdPartyNotices", resourceCulture);
             }
         }
 
