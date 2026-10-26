@@ -232,25 +232,27 @@ namespace VstHost
 		if (StartsWith(command, "SavePreset") || StartsWith(command, "DeletePreset")) RebuildScenes();
 	}
 
-	// SongTone "<tone key>" "<saved tone>": an empty saved tone clears the assignment.
+	// SongTone "<song key>" "<tone key>" "<saved tone>": an empty saved tone clears the assignment. Any song: the page
+	// lists every tone of the song from its manifest, so nothing has to be reached in the game first.
 	void StompboxService::RunSongToneCommand(const std::string& command)
 	{
 		const std::vector<std::string> words = Words(command);
-		if (words.size() != 3 || words[1].empty())
+		if (words.size() != 4 || words[1].empty() || words[2].empty())
 		{
 			SetError("The song tone assignment was malformed.");
 			Log("stompbox: malformed song tone command: %s", command.c_str());
 			return;
 		}
-		if (songKey.empty())
-		{
-			SetError("Song tones can be assigned while a song is chosen.");
-			return;
-		}
-		if (words[2].empty()) assignments.erase(words[1]);
-		else assignments[words[1]] = words[2];
-		WriteAssignments();
-		Log("stompbox: song %s: game tone '%s' -> %s", songKey.c_str(), words[1].c_str(), words[2].empty() ? "(cleared)" : words[2].c_str());
+		const std::string& song = words[1];
+		const std::string& tone = words[2];
+		const std::string& saved = words[3];
+		std::map<std::string, std::string> tones = song == songKey ? assignments : ReadAssignments(song);
+		if (saved.empty()) tones.erase(tone);
+		else tones[tone] = saved;
+		WriteAssignments(song, tones);
+		Log("stompbox: song %s: game tone '%s' -> %s", song.c_str(), tone.c_str(), saved.empty() ? "(cleared)" : saved.c_str());
+		if (song != songKey) return;
+		assignments = std::move(tones);
 		PublishSong();
 		RebuildScenes();
 	}
@@ -271,7 +273,7 @@ namespace VstHost
 	{
 		songKey = key;
 		toneKey.clear();
-		ReadAssignments();
+		assignments = ReadAssignments(songKey);
 		PublishSong();
 		RebuildScenes();
 	}
@@ -436,29 +438,30 @@ namespace VstHost
 		return dataPath + L"\\SongTones\\" + name + L".txt";
 	}
 
-	void StompboxService::ReadAssignments()
+	std::map<std::string, std::string> StompboxService::ReadAssignments(const std::string& song) const
 	{
-		assignments.clear();
-		if (songKey.empty()) return;
-		std::ifstream file(std::filesystem::path(SongTonesFile(songKey)));
+		std::map<std::string, std::string> tones;
+		if (song.empty()) return tones;
+		std::ifstream file(std::filesystem::path(SongTonesFile(song)));
 		for (std::string line; std::getline(file, line);)
 		{
 			if (!line.empty() && line.back() == '\r') line.pop_back();
 			const size_t tab = line.find('\t');
 			if (tab == std::string::npos || tab == 0 || tab + 1 >= line.size())
 			{
-				if (!line.empty()) Log("stompbox: song %s: ignoring a malformed song tone line", songKey.c_str());
+				if (!line.empty()) Log("stompbox: song %s: ignoring a malformed song tone line", song.c_str());
 				continue;
 			}
-			assignments[line.substr(0, tab)] = line.substr(tab + 1);
+			tones[line.substr(0, tab)] = line.substr(tab + 1);
 		}
+		return tones;
 	}
 
-	void StompboxService::WriteAssignments() const
+	void StompboxService::WriteAssignments(const std::string& song, const std::map<std::string, std::string>& tones) const
 	{
-		const std::wstring file = SongTonesFile(songKey);
+		const std::wstring file = SongTonesFile(song);
 		CreateDirectoryW((dataPath + L"\\SongTones").c_str(), nullptr);
-		if (assignments.empty())
+		if (tones.empty())
 		{
 			DeleteFileW(file.c_str());
 			return;
@@ -466,14 +469,14 @@ namespace VstHost
 		const std::wstring temp = file + L".tmp";
 		{
 			std::ofstream out(std::filesystem::path(temp), std::ios::binary | std::ios::trunc);
-			for (const auto& assignment : assignments) out << assignment.first << '\t' << assignment.second << "\r\n";
+			for (const auto& tone : tones) out << tone.first << '\t' << tone.second << "\r\n";
 			if (!out)
 			{
-				Log("stompbox: song %s: the song tones could not be written", songKey.c_str());
+				Log("stompbox: song %s: the song tones could not be written", song.c_str());
 				return;
 			}
 		}
-		if (!MoveFileExW(temp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING)) Log("stompbox: song %s: the song tones could not be saved (%lu)", songKey.c_str(), GetLastError());
+		if (!MoveFileExW(temp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING)) Log("stompbox: song %s: the song tones could not be saved (%lu)", song.c_str(), GetLastError());
 	}
 
 	void StompboxService::PublishSong()

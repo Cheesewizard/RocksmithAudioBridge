@@ -417,12 +417,14 @@ namespace StompboxLink
 
 	void LoadPreset(const std::string& name) { Queue({}, "LoadPreset " + StompboxControl::Quote(name)); }
 
-	void AssignSongTone(const std::string& gameToneKey, const std::string& savedTone)
+	void AssignSongTone(const std::string& songKey, const std::string& toneKey, const std::string& savedTone)
 	{
-		if (gameToneKey.empty()) throw std::invalid_argument("AssignSongTone needs the game tone's key.");
-		Queue({}, std::string(StompboxControl::SONG_TONE_COMMAND) + " " + StompboxControl::Quote(gameToneKey) + " " + StompboxControl::Quote(savedTone));
-		if (savedTone.empty()) g_snapshot.songTones.erase(gameToneKey);
-		else g_snapshot.songTones[gameToneKey] = savedTone;
+		if (songKey.empty() || toneKey.empty()) throw std::invalid_argument("AssignSongTone needs the song's key and the tone's key.");
+		Queue({}, std::string(StompboxControl::SONG_TONE_COMMAND) + " " + StompboxControl::Quote(songKey) + " " + StompboxControl::Quote(toneKey)
+			+ " " + StompboxControl::Quote(savedTone));
+		if (songKey != g_snapshot.songKey) return;   // the host publishes the current song's only
+		if (savedTone.empty()) g_snapshot.songTones.erase(toneKey);
+		else g_snapshot.songTones[toneKey] = savedTone;
 	}
 	void SavePreset(const std::string& name) { Queue({}, "SavePreset " + StompboxControl::Quote(name)); }
 	void DeletePreset(const std::string& name) { Queue({}, "DeletePreset " + StompboxControl::Quote(name)); }

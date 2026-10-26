@@ -11,6 +11,15 @@
 // refreshed in the background the first time the Tone designer page is shown in a session.
 namespace SongLibrary
 {
+	// One of an arrangement's tones (its manifest's Tone_Base / Tone_A..D): what the Tone designer's song tones assign.
+	struct SongTone
+	{
+		std::string arrangement;    // "Lead", "Rhythm", "Bass"
+		std::string slot;           // "Base", "A".."D"
+		std::string key;            // the tone key the game reports while it plays (GameTones::CurrentToneKey)
+		std::string name;           // what players see; the key when the manifest names none
+	};
+
 	struct Song
 	{
 		std::string key;            // the game's song key (what song tones are stored under)
@@ -18,6 +27,7 @@ namespace SongLibrary
 		std::string arrangements;   // "Lead,Rhythm,Bass"
 		std::string file;           // the .psarc it is in
 		int year = 0;
+		std::vector<SongTone> tones;   // every arrangement's, in arrangement then slot order
 	};
 
 	struct Library

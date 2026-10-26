@@ -71,8 +71,8 @@ namespace VstHost
 		void Retire(std::unique_ptr<SceneSet> scenes);
 		std::unique_ptr<StompboxEngine> CreateEngine(std::string& error);
 		std::wstring SongTonesFile(const std::string& songKey) const;
-		void ReadAssignments();
-		void WriteAssignments() const;
+		std::map<std::string, std::string> ReadAssignments(const std::string& song) const;
+		void WriteAssignments(const std::string& song, const std::map<std::string, std::string>& tones) const;
 		void PublishCatalog();
 		void PublishProgram();
 		void PublishPresets();
@@ -96,7 +96,7 @@ namespace VstHost
 		LONG gameSeen = 0;
 		std::string songKey;
 		std::string toneKey;
-		std::map<std::string, std::string> assignments;     // game tone key -> saved tone
+		std::map<std::string, std::string> assignments;     // the current song's: game tone key -> saved tone
 		std::vector<std::unique_ptr<StompboxEngine>> preparing;
 		std::vector<std::string> preparingTones;
 		int preparedBlocks = 0;

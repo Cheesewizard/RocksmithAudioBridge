@@ -95,9 +95,9 @@ namespace StompboxLink
 	void LoadPreset(const std::string& name);
 	void SavePreset(const std::string& name);
 	void DeletePreset(const std::string& name);
-	// Assigns a saved tone to one of the current song's game tones (its key, as GameTones reports it); an empty saved
+	// Assigns a saved tone to one of a song's tones (its manifest's tone key, SongLibrary::SongTone); an empty saved
 	// tone clears it. The host loads the song's tones before it plays and follows the game's tone changes.
-	void AssignSongTone(const std::string& gameToneKey, const std::string& savedTone);
+	void AssignSongTone(const std::string& songKey, const std::string& toneKey, const std::string& savedTone);
 
 	// A free instance id for a new pedal of `kind` on this chain: "Delay", then "Delay_2", ...
 	std::string NewPedalId(const std::string& kind);

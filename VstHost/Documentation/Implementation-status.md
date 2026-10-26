@@ -124,9 +124,15 @@ The full reports are `Offline-A2-full.json` and `Offline-A2-lite.json`.
 - **How tones are keyed.** By the game's own **tone key** (`GameTones::CurrentToneKey`, `song+0x198`: the
   manifest's `Tone_Base`/`Tone_A..D` key), not the slot number or the arrangement. Arrangements that share a key
   share a tone, so the unresolved arrangement `PersistentID` is not needed.
-- **Assigning.** While a song is chosen, the page shows the game's current tone and assigns it a saved tone
-  (`SongTone "<key>" "<saved tone>"`, the page's own command). To reach the other tones, play on or press 1–4.
-  Assignments are stored per song in `%APPDATA%\RocksmithAudioBridge\Stompbox\SongTones\<song key>.txt`.
+- **Assigning, from the overlay only.** While a song is chosen, the page lists **every tone of every arrangement**
+  (Base, A–D, with the names players see) and gives each one a saved-tone picker. Nothing has to be reached in the
+  game first, and there is no hotkey limit. The game's current tone is marked "(now)".
+  - **Where the list comes from:** the song list (`RSMods.exe --song-index`, `ToneDesignerTools.cs`) now also
+    writes `song-index.tones.tsv` from each arrangement manifest's `Tone_Base`/`Tone_A..D` keys and `Tones` names.
+    `SongLibrary` reads it into `Song::tones`. The cache key is now v3, so every PSARC is read once more.
+  - **The command:** the page's own `SongTone "<song key>" "<tone key>" "<saved tone>"`. It works for any song,
+    not just the one playing.
+  - **Storage:** per song, in `%APPDATA%\RocksmithAudioBridge\Stompbox\SongTones\<song key>.txt`.
 - **Preparing (host, `StompboxService`).** When the song is chosen, and only while the Tone designer plays, every
   assigned saved tone is loaded into an engine of its own at the stream's block size. Each is run on silence on the
   main thread until Stompbox has loaded it and it has settled for 0.5 s. Stompbox loads presets only inside its own

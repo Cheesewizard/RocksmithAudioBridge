@@ -37,8 +37,8 @@ namespace StompboxControl
 	// The current song's tones: none assigned, being loaded into engines of their own, or ready to switch.
 	enum class SongState : LONG { None = 0, Preparing = 1, Ready = 2, Failed = 3 };
 
-	// The page's own command (not Stompbox's): SongTone "<tone key>" "<saved tone>" assigns a saved tone to one of the
-	// current song's game tones; an empty saved tone clears it.
+	// The page's own command (not Stompbox's): SongTone "<song key>" "<tone key>" "<saved tone>" assigns a saved tone
+	// to one of a song's tones (its manifest's Tone_Base / Tone_A..D key); an empty saved tone clears it.
 	constexpr char SONG_TONE_COMMAND[] = "SongTone";
 
 	// Catalogue lines, tab separated (text fields never contain tabs or line breaks):

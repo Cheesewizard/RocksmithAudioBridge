@@ -3,6 +3,7 @@
 #include "OverlayUi.hpp"
 #include "ToneDesigner/StompboxLink.hpp"
 #include "ToneDesigner/VstHostLink.hpp"
+#include "ToneDesigner/SongLibrary.hpp"
 #include "Shared/ShellOpenAsync.hpp"
 #include "ExternalAmp/ExternalAmp.hpp"
 
@@ -325,33 +326,44 @@ namespace Overlay
 
 		// ---- Song tones -------------------------------------------------------------------------------------
 
-		// While a song is chosen: which saved tone each of its game tones plays. The game's current tone is the one
-		// to assign (play through the song, or press 1-4, to reach the others); the host loads them all before the
-		// song plays and follows the game's tone changes.
+		// One song tone and the saved tone it plays; the one the game plays now is marked.
+		void SongToneRow(const std::string& songKey, const std::string& label, const std::string& toneKey)
+		{
+			const Snapshot& s = GetSnapshot();
+			const bool isPlayingNow = toneKey == s.gameToneKey;
+			const auto assigned = s.songTones.find(toneKey);
+			const std::string current = assigned == s.songTones.end() ? std::string() : assigned->second;
+			ImGui::PushID(toneKey.c_str());
+			ImGui::AlignTextToFramePadding();
+			if (isPlayingNow) ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Color::Good), "%s  (now)", label.c_str());
+			else ImGui::TextUnformatted(label.c_str());
+			Hint(toneKey.c_str());
+			ImGui::SameLine(230.0f);
+			ImGui::SetNextItemWidth(220.0f);
+			if (ImGui::BeginCombo("##savedTone", current.empty() ? "Keep the tone before" : current.c_str()))
+			{
+				if (ImGui::Selectable("Keep the tone before", current.empty()) && !current.empty()) AssignSongTone(songKey, toneKey, {});
+				for (const std::string& preset : s.presets)
+					if (ImGui::Selectable(preset.c_str(), preset == current) && preset != current) AssignSongTone(songKey, toneKey, preset);
+				ImGui::EndCombo();
+			}
+			ImGui::PopID();
+		}
+
+		// While a song is chosen: every tone of every arrangement, read from the song's own manifest (the song list),
+		// each with the saved tone it plays. Nothing has to be reached in the game first. The host loads the assigned
+		// tones before the song plays and follows the game's tone changes.
 		void DrawSongTones()
 		{
 			const Snapshot& s = GetSnapshot();
 			if (s.songKey.empty()) return;
-			ImGui::AlignTextToFramePadding();
-			if (s.gameToneKey.empty())
-			{
-				Caption("Song tones: start the song to pick a tone for each of its game tones (1-4 switch them).");
-				return;
-			}
-			ImGui::Text("Game tone '%s' plays", s.gameToneKey.c_str());
-			ImGui::SameLine();
-			const auto assigned = s.songTones.find(s.gameToneKey);
-			const std::string current = assigned == s.songTones.end() ? std::string() : assigned->second;
-			ImGui::SetNextItemWidth(220.0f);
-			if (ImGui::BeginCombo("##songTone", current.empty() ? "the board's tone" : current.c_str()))
-			{
-				if (ImGui::Selectable("the board's tone", current.empty()) && !current.empty()) AssignSongTone(s.gameToneKey, {});
-				Hint("Not assigned: this game tone keeps the tone playing before it.");
-				for (const std::string& preset : s.presets)
-					if (ImGui::Selectable(preset.c_str(), preset == current) && preset != current) AssignSongTone(s.gameToneKey, preset);
-				ImGui::EndCombo();
-			}
-			ImGui::SameLine();
+			SongLibrary::Refresh();   // once per session: reads the song list, and the tones in it
+			const auto library = SongLibrary::Get();
+			const SongLibrary::Song* song = library->Find(s.songKey);
+			const std::string title = song ? song->artist + " - " + song->title : s.songKey;
+			const std::string header = "Song tones: " + title + "###songTones";
+			if (!ImGui::CollapsingHeader(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) return;
+
 			switch (s.songState)
 			{
 			case SongState::Preparing:
@@ -365,7 +377,7 @@ namespace Overlay
 				break;
 			}
 			case SongState::Ready:
-				ImGui::Text("Playing: %s", s.playingTone.empty() ? "the board" : s.playingTone.c_str());
+				ImGui::Text("Playing: %s", s.playingTone.empty() ? "the board's tone" : s.playingTone.c_str());
 				break;
 			case SongState::Failed:
 				ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Color::Bad), "The song's tones did not load");
@@ -373,22 +385,24 @@ namespace Overlay
 			default:
 				break;
 			}
-			if (s.songTones.size() > 1 || (s.songTones.size() == 1 && assigned == s.songTones.end()))
+
+			if (!song || song->tones.empty())
 			{
-				ImGui::SameLine();
-				if (Button("All song tones")) ImGui::OpenPopup("##allSongTones");
-				if (ImGui::BeginPopup("##allSongTones"))
+				Caption(SongLibrary::GetState() == SongLibrary::State::Reading
+					? "Reading the song list for this song's tones..."
+					: "This song's tones are not in the song list. They appear once the song list has been read again.");
+				if (!s.gameToneKey.empty()) SongToneRow(s.songKey, "Playing now", s.gameToneKey);
+				return;
+			}
+			std::string arrangement;
+			for (const SongLibrary::SongTone& tone : song->tones)
+			{
+				if (tone.arrangement != arrangement)
 				{
-					for (const auto& [gameTone, saved] : s.songTones)
-					{
-						ImGui::PushID(gameTone.c_str());
-						ImGui::Text("%s  ->  %s", gameTone.c_str(), saved.c_str());
-						ImGui::SameLine();
-						if (ImGui::SmallButton("Clear")) AssignSongTone(gameTone, {});
-						ImGui::PopID();
-					}
-					ImGui::EndPopup();
+					arrangement = tone.arrangement;
+					SectionLabel(arrangement.c_str());
 				}
+				SongToneRow(s.songKey, tone.slot + "  " + tone.name, tone.key);
 			}
 		}
 

@@ -17,9 +17,11 @@ namespace RSMods
 	// window, exit code 0 = done):
 	//   --song-index <Rocksmith folder> <out.tsv>   every song in songs.psarc and dlc\*_p.psarc, one line each:
 	//                                                key, title, artist, album, year, arrangements, file (tab separated,
-	//                                                UTF-8). Each .psarc is read once: <out.tsv>.cache.v2.json keeps what
+	//                                                UTF-8). Each .psarc is read once: <out.tsv>.cache.v3.json keeps what
 	//                                                was found per file (by size and time), so later runs only read new
-	//                                                or changed files.
+	//                                                or changed files. <out.tsv minus .tsv>.tones.tsv lists every
+	//                                                arrangement's tones: song key, arrangement, slot (Base, A-D),
+	//                                                tone key, tone name (the Tone designer's song tones).
 	//   --tone-backup <out.zip>                     the Tone designer's data (tones, song tones, plugin settings) and its
 	//                                                settings (HKCU\Software\RSMods\VstHost) in one zip
 	//   --tone-backup-auto <folder>                 one "Auto yyyy-MM-dd.zip" a day in that folder, the newest 7 kept
@@ -76,7 +78,17 @@ namespace RSMods
 		{
 			public string Key, Title, Artist, Album, Arrangements, File;
 			public int Year;
+			public List<SongTone> Tones = new List<SongTone>();
 		}
+
+		// One of an arrangement's tones, from its manifest: Tone_Base and Tone_A..D name tone keys, its Tones list the
+		// names players see. The game switches between them at the chart's tone changes.
+		private sealed class SongTone
+		{
+			public string Arrangement, Slot, Key, Name;
+		}
+
+		private static readonly string[] ToneSlots = { "Tone_Base", "Tone_A", "Tone_B", "Tone_C", "Tone_D" };
 
 		private sealed class CachedFile
 		{
@@ -93,7 +105,7 @@ namespace RSMods
 			var disc = Path.Combine(rocksmithFolder, "songs.psarc");
 			if (File.Exists(disc)) files.Add(disc);
 
-			var cachePath = outPath + ".cache.v2.json";   // v2: manifests read as plain JSON
+			var cachePath = outPath + ".cache.v3.json";   // v3: each arrangement's tones; v2: manifests read as plain JSON
 			Dictionary<string, CachedFile> cache = null;
 			try { if (File.Exists(cachePath)) cache = JsonConvert.DeserializeObject<Dictionary<string, CachedFile>>(File.ReadAllText(cachePath)); }
 			catch (Exception) { cache = null; }
@@ -144,6 +156,7 @@ namespace RSMods
 								var name = (string)a["ArrangementName"] ?? "";
 								if (name.Length > 0 && name != "Vocals" && name != "JVocals" && !song.Arrangements.Split(',').Contains(name))
 									song.Arrangements = song.Arrangements.Length == 0 ? name : song.Arrangements + "," + name;
+								AddTones(song, name, a);
 							}
 						}
 						entry.Songs = byKey.Values.ToList();
@@ -170,10 +183,52 @@ namespace RSMods
 						.Append(Clean(song.Arrangements)).Append('\t').Append(Clean(song.File)).Append('\n');
 				}
 
+			// Every arrangement's tones, for the songs listed above.
+			var tones = new StringBuilder();
+			var listed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			foreach (var file in fresh.Keys.OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+				foreach (var song in fresh[file].Songs)
+				{
+					if (!listed.Add(song.Key)) continue;
+					foreach (var tone in song.Tones)
+						tones.Append(Clean(song.Key)).Append('\t').Append(Clean(tone.Arrangement)).Append('\t').Append(Clean(tone.Slot)).Append('\t')
+							.Append(Clean(tone.Key)).Append('\t').Append(Clean(tone.Name)).Append('\n');
+				}
+
 			Directory.CreateDirectory(Path.GetDirectoryName(outPath));
 			WriteAtomically(outPath, Encoding.UTF8.GetBytes(text.ToString()));
+			WriteAtomically(TonesPath(outPath), Encoding.UTF8.GetBytes(tones.ToString()));
 			WriteAtomically(cachePath, Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(new Dictionary<string, CachedFile>(fresh, StringComparer.OrdinalIgnoreCase))));
 			Log("song index: " + seen.Count + " songs from " + files.Count + " files (" + read + " read, the rest from the cache)");
+		}
+
+		private static string TonesPath(string indexPath) =>
+			Path.Combine(Path.GetDirectoryName(indexPath), Path.GetFileNameWithoutExtension(indexPath) + ".tones.tsv");
+
+		// The arrangement's Tone_Base / Tone_A..D keys, named from its Tones list (the key itself when it has no name).
+		private static void AddTones(Song song, string arrangement, Newtonsoft.Json.Linq.JToken attributes)
+		{
+			if (arrangement.Length == 0 || arrangement == "Vocals" || arrangement == "JVocals") return;
+			var names = new Dictionary<string, string>(StringComparer.Ordinal);
+			if (attributes["Tones"] is Newtonsoft.Json.Linq.JArray list)
+				foreach (var tone in list)
+				{
+					var key = (string)tone["Key"];
+					if (!string.IsNullOrEmpty(key) && !names.ContainsKey(key)) names[key] = (string)tone["Name"] ?? key;
+				}
+			foreach (var slot in ToneSlots)
+			{
+				var key = (string)attributes[slot];
+				if (string.IsNullOrWhiteSpace(key)) continue;
+				if (song.Tones.Any(t => t.Arrangement == arrangement && t.Key == key)) continue;   // Tone_A repeating Tone_Base
+				song.Tones.Add(new SongTone
+				{
+					Arrangement = arrangement,
+					Slot = slot == "Tone_Base" ? "Base" : slot.Substring(5),
+					Key = key,
+					Name = names.TryGetValue(key, out var name) && !string.IsNullOrWhiteSpace(name) ? name : key,
+				});
+			}
 		}
 
 		private static string Clean(string text) => (text ?? "").Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ').Trim();
