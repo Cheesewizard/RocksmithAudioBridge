@@ -42,6 +42,7 @@
     <ClCompile Include="AsioProxy\AmpLinkHost.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="Core\RsModsHelper.cpp" />
     <ClCompile Include="ToneDesigner\SongLibrary.cpp" />
+    <ClCompile Include="ToneDesigner\ToneCatalog.cpp" />
     <ClCompile Include="ToneDesigner\ToneBackup.cpp" />
     <ClCompile Include="Recorder\GameAudioRecorder.cpp" />
     <ClCompile Include="DropPedal\DelayLinePitchShifter.cpp" />
@@ -327,6 +328,7 @@
     <ClInclude Include="ExternalAmp\CableAmpLink.hpp" />
     <ClInclude Include="Core\RsModsHelper.hpp" />
     <ClInclude Include="ToneDesigner\SongLibrary.hpp" />
+    <ClInclude Include="ToneDesigner\ToneCatalog.hpp" />
     <ClInclude Include="ToneDesigner\ToneBackup.hpp" />
     <ClInclude Include="Shared\VstHostControl.hpp" />
     <ClInclude Include="Shared\StompboxControl.hpp" />

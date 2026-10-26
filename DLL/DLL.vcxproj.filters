@@ -1006,6 +1006,9 @@
     <ClCompile Include="ToneDesigner\SongLibrary.cpp">
       <Filter>ToneDesigner</Filter>
     </ClCompile>
+    <ClCompile Include="ToneDesigner\ToneCatalog.cpp">
+      <Filter>ToneDesigner</Filter>
+    </ClCompile>
     <ClCompile Include="ToneDesigner\ToneBackup.cpp">
       <Filter>ToneDesigner</Filter>
     </ClCompile>
@@ -1123,6 +1126,9 @@
       <Filter>Core</Filter>
     </ClInclude>
     <ClInclude Include="ToneDesigner\SongLibrary.hpp">
+      <Filter>ToneDesigner</Filter>
+    </ClInclude>
+    <ClInclude Include="ToneDesigner\ToneCatalog.hpp">
       <Filter>ToneDesigner</Filter>
     </ClInclude>
     <ClInclude Include="ToneDesigner\ToneBackup.hpp">

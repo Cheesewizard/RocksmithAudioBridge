@@ -6,6 +6,7 @@
 #include "ToneDesigner/StompboxLink.hpp"
 #include "ToneDesigner/VstHostLink.hpp"
 #include "ToneDesigner/SongLibrary.hpp"
+#include "ToneDesigner/ToneCatalog.hpp"
 #include "Shared/ShellOpenAsync.hpp"
 #include "ExternalAmp/ExternalAmp.hpp"
 
@@ -59,6 +60,11 @@ namespace Overlay
 
 		enum class BrowserTab { Effects, Amps, Cabinets };
 
+		// What the Amps and Cabinets lists can be narrowed to, from the starter tones' manifest (ToneCatalog). Index 0
+		// is everything, including files the player added.
+		constexpr const char* AMP_FILTERS[] = { "All", "Clean", "Crunch", "High gain", "Pedals", "Bass" };
+		constexpr const char* CABINET_FILTERS[] = { "All", "Guitar", "Bass" };
+
 		// What the browser offers: a pedal kind, and for amps and cabinets the file it loads.
 		struct BrowserItem
 		{
@@ -77,8 +83,11 @@ namespace Overlay
 		{
 			std::string selectedPedal;          // pedal id on the board
 			bool isEditorOpen = false;
+			bool shouldCenterEditor = false;    // the editor was just opened: put it in the middle of the panel
+			ImVec2 panelCenter;                 // the panel's middle on screen, from its last frame
 			bool isSongsMode = false;           // the pane under the board shows the song's tones
 			BrowserTab tab = BrowserTab::Effects;
+			int soundFilter = 0;                // AMP_FILTERS or CABINET_FILTERS, for the tab shown
 			int selectedItem = -1;              // row in the browser's current list
 			char search[64] = {};
 			char toneSearch[64] = {};
@@ -247,10 +256,42 @@ namespace Overlay
 		{
 			State().selectedPedal = id;
 			State().isEditorOpen = true;
+			State().shouldCenterEditor = true;
 			State().isSongsMode = false;
 		}
 
-		std::vector<BrowserItem> BrowserItems(BrowserTab tab, const char* search)
+		const ToneCatalog::FileInfo* CatalogInfo(const BrowserItem& item)
+		{
+			if (item.file.empty()) return nullptr;
+			return ToneCatalog::Find(item.kind == CABINET_KIND ? "Cabinets" : "NAM", item.file);
+		}
+
+		bool PassesFilter(BrowserTab tab, int filter, const ToneCatalog::FileInfo* info)
+		{
+			using ToneCatalog::Character;
+			if (filter == 0) return true;
+			if (!info) return false;
+			if (tab == BrowserTab::Cabinets) return filter == 1 ? !info->isBass : info->isBass;
+			switch (filter)
+			{
+			case 1: return !info->isPedal && !info->isBass && info->character == Character::Clean;
+			case 2: return !info->isPedal && !info->isBass && info->character == Character::Crunch;
+			case 3: return !info->isPedal && !info->isBass && info->character == Character::HighGain;
+			case 4: return info->isPedal;
+			default: return info->isBass;
+			}
+		}
+
+		// Clean amps first, then crunch, high gain, pedals and bass; the player's own files last.
+		int SoundOrder(const ToneCatalog::FileInfo* info)
+		{
+			if (!info) return 9;
+			if (info->isBass) return 5;
+			if (info->isPedal) return 4;
+			return static_cast<int>(info->character);
+		}
+
+		std::vector<BrowserItem> BrowserItems(BrowserTab tab, const char* search, int filter)
 		{
 			std::vector<BrowserItem> items;
 			if (tab == BrowserTab::Effects)
@@ -267,9 +308,13 @@ namespace Overlay
 			{
 				for (const std::string& choice : file->choices)
 				{
-					if (ContainsText(choice, search)) items.push_back({ kind, choice });
+					const BrowserItem item{ kind, choice };
+					const ToneCatalog::FileInfo* info = CatalogInfo(item);
+					const bool isMatch = ContainsText(choice, search) || (info && ContainsText(info->description, search));
+					if (isMatch && PassesFilter(tab, filter, info)) items.push_back(item);
 				}
 			}
+			std::stable_sort(items.begin(), items.end(), [](const BrowserItem& a, const BrowserItem& b) { return SoundOrder(CatalogInfo(a)) < SoundOrder(CatalogInfo(b)); });
 			return items;
 		}
 
@@ -625,7 +670,7 @@ namespace Overlay
 		{
 			for (const BrowserTab tab : { BrowserTab::Effects, BrowserTab::Amps, BrowserTab::Cabinets })
 			{
-				const std::vector<BrowserItem> items = BrowserItems(tab, "");
+				const std::vector<BrowserItem> items = BrowserItems(tab, "", 0);
 				const char* label = tab == BrowserTab::Effects ? "Effects" : tab == BrowserTab::Amps ? "Amps" : "Cabinets";
 				if (!ImGui::BeginMenu(label, !items.empty())) continue;
 				for (const BrowserItem& item : items)
@@ -927,7 +972,33 @@ namespace Overlay
 
 		// ---- Browser ----------------------------------------------------------------------------------------
 
-		// The browser's rows, styled as the VST rig's plugin list: name, then what it is.
+		// What a capture or cabinet sounds like, as a pill before its description; null for effects and the player's
+		// own files.
+		const PillLook* SoundPill(const BrowserItem& item, const ToneCatalog::FileInfo* info)
+		{
+			using ToneCatalog::Character;
+			static const PillLook clean = TintPill("Clean", Ink::Good);
+			static const PillLook crunch = TintPill("Crunch", Ink::Amber);
+			static const PillLook highGain = TintPill("High gain", Ink::Bad);
+			static const PillLook drive = TintPill("Drive", Ink::TagText);
+			static const PillLook boost = TintPill("Boost", Ink::TagText);
+			static const PillLook bass = TintPill("Bass", Ink::Outline);
+			static const PillLook guitar = TintPill("Guitar", Ink::Soft);
+			if (!info) return nullptr;
+			if (info->isBass) return &bass;
+			if (item.kind == CABINET_KIND) return &guitar;
+			switch (info->character)
+			{
+			case Character::Clean: return &clean;
+			case Character::Crunch: return &crunch;
+			case Character::HighGain: return &highGain;
+			case Character::Drive: return &drive;
+			case Character::Boost: return &boost;
+			default: return nullptr;
+			}
+		}
+
+		// The browser's rows, styled as the VST rig's plugin list: name, then what it sounds like.
 		void BrowserList(const std::vector<BrowserItem>& items, float width, float height)
 		{
 			PageState& state = State();
@@ -953,7 +1024,8 @@ namespace Overlay
 				const BrowserItem& item = items[i];
 				const PedalDefinition* definition = FindDefinition(item.kind);
 				const std::string name = item.file.empty() ? item.kind : item.file;
-				const std::string detail = !item.file.empty() ? item.file : definition ? definition->description : std::string();
+				const ToneCatalog::FileInfo* info = CatalogInfo(item);
+				const std::string detail = info ? info->description : !item.file.empty() ? std::string("Your file") : definition ? definition->description : std::string();
 				ImGui::PushID(i);
 				const ImVec2 at = ImGui::GetCursorScreenPos();
 				if (ImGui::InvisibleButton("##item", ImVec2(rowW, rowH))) state.selectedItem = i;
@@ -989,8 +1061,14 @@ namespace Overlay
 				list->PushClipRect(at, ImVec2(at.x + detailX - 8.0f, end.y), true);
 				list->AddText(ImVec2(at.x + 28.0f, at.y + 5.0f), isSelected ? IM_COL32_WHITE : Ink::Text, name.c_str());
 				list->PopClipRect();
-				list->PushClipRect(ImVec2(at.x + detailX, at.y), ImVec2(at.x + statusX - 6.0f, end.y), true);
-				Text(list, caption, ImVec2(at.x + detailX, at.y + (rowH - caption->FontSize) * 0.5f), Ink::Muted, detail.c_str());
+				float detailStart = at.x + detailX;
+				if (const PillLook* sound = SoundPill(item, info))
+				{
+					const float pillH = caption->FontSize + 6.0f;
+					detailStart += DrawPill(list, caption, ImVec2(detailStart, at.y + (rowH - pillH) * 0.5f), pillH, *sound) + 8.0f;
+				}
+				list->PushClipRect(ImVec2(detailStart, at.y), ImVec2(at.x + statusX - 6.0f, end.y), true);
+				Text(list, caption, ImVec2(detailStart, at.y + (rowH - caption->FontSize) * 0.5f), Ink::Muted, detail.c_str());
 				list->PopClipRect();
 				if (IsItemInChain(item))
 					Text(list, caption, ImVec2(at.x + statusX, at.y + (rowH - caption->FontSize) * 0.5f), Ink::Good, "In chain");
@@ -1012,6 +1090,7 @@ namespace Overlay
 				if (Chip(chips[c], static_cast<int>(state.tab) == c) && static_cast<int>(state.tab) != c)
 				{
 					state.tab = static_cast<BrowserTab>(c);
+					state.soundFilter = 0;
 					state.selectedItem = -1;
 				}
 			}
@@ -1027,7 +1106,27 @@ namespace Overlay
 			ImGui::PopStyleVar();
 			ImGui::PopStyleColor();
 
-			const std::vector<BrowserItem> items = BrowserItems(state.tab, state.search);
+			// Amps and Cabinets: narrow the list by what it sounds like.
+			if (state.tab != BrowserTab::Effects)
+			{
+				const bool isAmps = state.tab == BrowserTab::Amps;
+				const char* const* filters = isAmps ? AMP_FILTERS : CABINET_FILTERS;
+				const int count = isAmps ? static_cast<int>(std::size(AMP_FILTERS)) : static_cast<int>(std::size(CABINET_FILTERS));
+				ImGui::SetCursorPosX(left);
+				ImGui::Dummy(ImVec2(0, 2));
+				ImGui::SetCursorPosX(left);
+				for (int f = 0; f < count; ++f)
+				{
+					if (f > 0) ImGui::SameLine(0.0f, 6.0f);
+					if (Chip(filters[f], state.soundFilter == f) && state.soundFilter != f)
+					{
+						state.soundFilter = f;
+						state.selectedItem = -1;
+					}
+				}
+			}
+
+			const std::vector<BrowserItem> items = BrowserItems(state.tab, state.search, state.soundFilter);
 			if (state.selectedItem < 0 || state.selectedItem >= static_cast<int>(items.size())) state.selectedItem = -1;
 			const float footH = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.y + 4.0f;
 			ImGui::SetCursorPosX(left);
@@ -1381,9 +1480,10 @@ namespace Overlay
 			ImGui::EndChild();
 		}
 
-		// The selected pedal's controls in a window of their own, opened in the middle of the overlay window
-		// (`overlayCenter`). Not saved in imgui.ini: each pedal id would leave an entry there for good.
-		void DrawEditorWindow(ImVec2 overlayCenter)
+		// The selected pedal's controls in a window of their own, put in the middle of the Tone designer's panel
+		// (`panelCenter`) each time it is opened, then wherever the player moves it. Not saved in imgui.ini: each
+		// pedal id would leave an entry there for good.
+		void DrawEditorWindow(ImVec2 panelCenter)
 		{
 			PageState& state = State();
 			const Snapshot& snapshot = GetSnapshot();
@@ -1398,7 +1498,12 @@ namespace Overlay
 			constexpr float INITIAL_EDITOR_HEIGHT = 360.0f;
 			ImGui::SetNextWindowSize(ImVec2(EDITOR_WIDTH, INITIAL_EDITOR_HEIGHT), ImGuiCond_Appearing);
 			ImGui::SetNextWindowSizeConstraints(ImVec2(360.0f, 220.0f), ImVec2(FLT_MAX, FLT_MAX));
-			ImGui::SetNextWindowPos(overlayCenter, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+			if (state.shouldCenterEditor)
+			{
+				ImGui::SetNextWindowPos(panelCenter, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+				ImGui::SetNextWindowFocus();
+				state.shouldCenterEditor = false;
+			}
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 10.0f));
 			ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::ColorConvertU32ToFloat4(Ink::Library));
 			bool isOpen = state.isEditorOpen;
@@ -1500,6 +1605,7 @@ namespace Overlay
 			frame.isDividerHot = isDividerHot;
 			ToneDesignerUi::DrawPanelFrame(list, frame);
 			list->ChannelsMerge();
+			state.panelCenter = ImVec2(at.x + width * 0.5f, (at.y + bottom) * 0.5f);
 			ImGui::SetCursorScreenPos(ImVec2(at.x, bottom + 6.0f));
 			ImGui::Dummy(ImVec2(0, 0));
 			return naturalHeight;
@@ -1516,10 +1622,8 @@ namespace Overlay
 		if (!s.isBusy && !s.isPresetLoading) state.loadingPedals.clear();
 		if (!s.isPlaying) StatusPill("Switching to the Tone designer...", Color::Warn);
 		if (!s.error.empty()) StatusPill(s.error.c_str(), Color::Bad);
-		const ImGuiWindow* overlay = ImGui::GetCurrentWindow()->RootWindow;
-		const ImVec2 overlayCenter(overlay->Pos.x + overlay->Size.x * 0.5f, overlay->Pos.y + overlay->Size.y * 0.5f);
 		const float naturalHeight = Panel();
-		if (state.isEditorOpen) DrawEditorWindow(overlayCenter);
+		if (state.isEditorOpen) DrawEditorWindow(state.panelCenter);
 		return naturalHeight;
 	}
 }
