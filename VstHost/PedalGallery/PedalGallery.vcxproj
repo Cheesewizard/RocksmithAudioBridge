@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pedal gallery (Main.cpp): a prototype window for the generated pedal editors in ..\Source\PedalUi, built on
+     the same JUCE copy as the VST host, with only the GUI modules. Not shipped; built by hand:
+     MSBuild VstHost\PedalGallery\PedalGallery.vcxproj -p:Configuration=Release -p:Platform=x64 -->
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64"><Configuration>Debug</Configuration><Platform>x64</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{B6F2C9D4-3A71-4E58-9C0B-7D1E2A4F6B93}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <RootNamespace>PedalGallery</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseDebugLibraries Condition="'$(Configuration)'=='Debug'">true</UseDebugLibraries>
+    <UseDebugLibraries Condition="'$(Configuration)'!='Debug'">false</UseDebugLibraries>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <TargetName>PedalGallery</TargetName>
+    <OutDir>$(ProjectDir)..\..\build\PedalGallery\$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)..\..\build\PedalGallery\$(Configuration)\obj\</IntDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <WarningLevel>Level3</WarningLevel>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Lib\JUCE\modules;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_WINDOWS;UNICODE;_UNICODE;NOMINMAX;_CRT_SECURE_NO_WARNINGS;JUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1;JUCE_STANDALONE_APPLICATION=1;JUCE_USE_CURL=0;JUCE_WEB_BROWSER=0;JUCE_DISPLAY_SPLASH_SCREEN=0;JUCE_REPORT_APP_USAGE=0;JUCE_MODULE_AVAILABLE_juce_core=1;JUCE_MODULE_AVAILABLE_juce_events=1;JUCE_MODULE_AVAILABLE_juce_data_structures=1;JUCE_MODULE_AVAILABLE_juce_graphics=1;JUCE_MODULE_AVAILABLE_juce_gui_basics=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalOptions>/bigobj /utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
+      <PreprocessorDefinitions Condition="'$(Configuration)'=='Debug'">_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)'!='Debug'">NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary Condition="'$(Configuration)'=='Debug'">MultiThreadedDebug</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)'!='Debug'">MultiThreaded</RuntimeLibrary>
+      <Optimization Condition="'$(Configuration)'!='Debug'">MaxSpeed</Optimization>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="Main.cpp" />
+    <ClCompile Include="..\Source\PedalUi\PedalCatalog.cpp" />
+    <ClCompile Include="..\Source\PedalUi\PedalLookAndFeel.cpp" />
+    <ClCompile Include="..\Source\PedalUi\PedalView.cpp" />
+    <ClCompile Include="..\Source\PedalUi\PedalStage.cpp" />
+    <ClCompile Include="..\Source\PedalUi\PedalSkin.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\Source\PedalUi\PedalCatalog.hpp" />
+    <ClInclude Include="..\Source\PedalUi\PedalLookAndFeel.hpp" />
+    <ClInclude Include="..\Source\PedalUi\PedalView.hpp" />
+    <ClInclude Include="..\Source\PedalUi\PedalStage.hpp" />
+    <ClInclude Include="..\Source\PedalUi\PedalSkin.hpp" />
+  </ItemGroup>
+  <!-- JUCE 9 (..\Lib\JUCE, AGPLv3), the GUI modules only. -->
+  <ItemGroup>
+    <ClCompile Include="..\Lib\JUCE\modules\juce_core\juce_core.cpp" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_core\juce_core_CompilationTime.cpp" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_events\juce_events.cpp" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_data_structures\juce_data_structures.cpp" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_graphics\juce_graphics.cpp" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_graphics\juce_graphics_Harfbuzz.cpp" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_gui_basics\juce_gui_basics.cpp" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_gui_basics\juce_gui_basics_2.cpp" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_gui_basics\juce_gui_basics_3.cpp" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_gui_basics\juce_gui_basics_4.cpp" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_gui_basics\juce_gui_basics_5.cpp" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_core\juce_core_zlib.c" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_graphics\juce_graphics_Sheenbidi.c" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_graphics\juce_graphics_libjpg_1.c" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_graphics\juce_graphics_libjpg_2.c" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_graphics\juce_graphics_libjpg_3.c" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_graphics\juce_graphics_libpng.c" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_graphics\juce_graphics_libwebp_dec.c" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_graphics\juce_graphics_libwebp_dsp_dec.c" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_graphics\juce_graphics_libwebp_dsp_dec_avx2.c" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_graphics\juce_graphics_libwebp_dsp_dec_sse41.c" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_graphics\juce_graphics_libwebp_dsp_enc.c" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_graphics\juce_graphics_libwebp_dsp_enc_avx2.c" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_graphics\juce_graphics_libwebp_dsp_enc_sse41.c" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_graphics\juce_graphics_libwebp_enc.c" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_graphics\juce_graphics_libwebp_sharpyuv.c" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_graphics\juce_graphics_libwebp_utils.c" />
+    <ClCompile Include="..\Lib\JUCE\modules\juce_graphics\juce_graphics_lunasvg.c" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

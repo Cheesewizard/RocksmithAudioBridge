@@ -36,6 +36,9 @@ namespace VstHost
 		void Move(int index, int delta);
 		void SetBypass(int index, bool bypass);
 		bool Duplicate(int index, std::string& error);   // the copy, with the same settings, goes right after it
+		// Puts a plugin in at `index` with these settings (empty: its own starting point) and bypass, taking a spare
+		// of it when there is one. For undo and redo (Main.cpp): a plugin that left the chain comes back as it was.
+		bool Insert(int index, const std::wstring& path, const std::vector<char>& state, bool bypass, std::string& error);
 		// Unloads every copy of a plugin file (chain and spares), so JUCE releases its module (ExitDll, FreeLibrary),
 		// then loads the chain's copies from scratch with their settings. For a plugin that only sees something new
 		// (tones imported into it, a changed library) when it starts. The rest of the chain plays on without them
@@ -75,6 +78,7 @@ namespace VstHost
 		// Every plugin skipped (the clean guitar plays); each slot keeps its own bypass. Not part of the tone.
 		void SetChainBypass(bool bypass) { m_chainBypass = bypass; }
 		bool ChainBypassed() const { return m_chainBypass.load(); }
+		int LatencySamples();   // what the playing slots report, summed (0 while the whole chain is bypassed)
 		int InputTenths() const { return m_inputTenths; }
 		int OutputTenths() const { return m_outputTenths; }
 		float TakeInputPeak() { return m_inputPeak.exchange(0.0f); }

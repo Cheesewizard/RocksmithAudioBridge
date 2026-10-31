@@ -1,7 +1,7 @@
 #include "BridgeAudio.hpp"
 
 #include "HostLog.hpp"
-#include "../../DLL/AsioProxy/AsioInterface.h"
+#include "../../Mod/Shared/AsioInterface.h"
 
 #include <algorithm>
 #include <cstring>

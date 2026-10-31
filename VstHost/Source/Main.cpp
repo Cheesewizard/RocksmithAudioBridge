@@ -3,7 +3,7 @@
 // plugins are 64-bit only; audio goes through the bridge driver's external amp link, the same path an external
 // amp sim uses.
 //
-// The overlay's Tone designer page drives it through a shared block (DLL/Shared/VstHostControl.hpp): build the
+// The overlay's Tone designer page drives it through a shared block (Mod/Shared/VstHostControl.hpp): build the
 // chain, pick which plugin's window shows, save and load tones, set levels. The shown plugin's editor lives in a
 // borderless, always-on-top popout over the game that shows with the overlay, so the amp can be adjusted without
 // leaving Rocksmith. That needs Rocksmith in windowed or borderless fullscreen; nothing can draw over exclusive
@@ -19,8 +19,14 @@
 #include "BridgeAudio.hpp"
 #include "Chain.hpp"
 #include "HostLog.hpp"
+#include "PedalEditor.hpp"
+#include "PicturePublisher.hpp"
+#include "SourceRouter.hpp"
+#include "StompboxEngine.hpp"
+#include "StompboxService.hpp"
+#include "AudioFormat.hpp"
 
-#include "../../DLL/Shared/VstHostControl.hpp"
+#include "../../Mod/Shared/VstHostControl.hpp"
 
 #include <Windows.h>
 #include <ShlObj.h>
@@ -28,7 +34,9 @@
 #include <shellapi.h>
 #include <TlHelp32.h>
 #include <DbgHelp.h>
+#include <dwmapi.h>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <string>
 
@@ -47,11 +55,20 @@ namespace
 	constexpr int kAutosaveTicks = 60;   // 30 s
 	constexpr UINT_PTR kKeyTimer = 2;
 	constexpr UINT kKeyMs = 15;
-	constexpr UINT kOverlayKey = VK_OEM_5;   // backslash, the game overlay's key (DLL/dllmain.cpp)
+	constexpr UINT kDefaultOverlayKey = VK_OEM_5;   // backslash, the game overlay's default key (DLL/dllmain.cpp)
 	constexpr int kStripDip = 26;            // drag bar above the editor
 
 	Chain g_chain;
 	BridgeAudio g_audio;
+	// The stream's sink: the VST chain, or the Stompbox engine while the Tone designer page asks for it
+	// (StompboxService). The engine is loaded when the host starts and processes only while it plays.
+	SourceRouter g_router;
+	StompboxEngine g_stompbox;
+	bool g_stompboxPlays = false;
+	bool SetStompboxPlays(bool plays);
+	StompboxService g_stompboxService{ g_stompbox, g_router, [](bool plays) { return SetStompboxPlays(plays); } };
+	// The built-in pedals' window (the page's EditPedal). Made once JUCE runs (StartStompbox), released before it stops.
+	std::unique_ptr<PedalEditor> g_pedalEditor;
 	HWND g_main = nullptr;            // message-only window (kMainClass)
 	HINSTANCE g_instance = nullptr;
 	HFONT g_font = nullptr;
@@ -80,6 +97,8 @@ namespace
 	// Spares the player asked for (RefreshKeepSettings): KeepLoadedPlugins ("Always keep loaded"), and this run's
 	// "Load in the background"; PreloadFailed, plugins that went down loading that way.
 	std::vector<std::wstring> g_alwaysLoaded, g_sessionLoaded, g_preloadFailed;
+	// The page's undo history (see Undo below). Made once JUCE runs (wWinMain), released before it stops.
+	std::unique_ptr<juce::UndoManager> g_undo;
 
 	bool ReadDword(const wchar_t* name, DWORD& value)
 	{
@@ -141,6 +160,28 @@ namespace
 	}
 
 	std::wstring CurrentChainFile() { return DataDirectory() + L"\\Current.rabtone"; }
+
+	// The Tone designer's engine, loaded as the host starts so its pedal catalogue is ready before the page opens.
+	// Models, cabinets and presets live in %APPDATA%\RocksmithAudioBridge\Stompbox. HKCU\Software\RSMods\VstHost
+	// StompboxDev = 1 is for development: Stompbox keeps its own layout and starts its local server for its desktop
+	// remote (StompboxRemote, connect to 127.0.0.1).
+	void StartStompbox()
+	{
+		PWSTR appData = nullptr;
+		if (FAILED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, KF_FLAG_CREATE, nullptr, &appData)))
+		{
+			Log("stompbox: no AppData folder; the Tone designer engine is not started");
+			return;
+		}
+		const std::wstring dataPath = std::wstring(appData) + L"\\RocksmithAudioBridge\\Stompbox";
+		CoTaskMemFree(appData);
+		SHCreateDirectoryExW(nullptr, dataPath.c_str(), nullptr);
+		DWORD development = 0;
+		ReadDword(L"StompboxDev", development);
+		g_pedalEditor = std::make_unique<PedalEditor>(g_stompboxService);
+		g_stompboxService.onEditPedal = [](const std::string& pedalId) { if (g_pedalEditor) g_pedalEditor->Open(pedalId); };
+		g_stompboxService.Start(dataPath, development != 0);
+	}
 
 	// Tone names become file names: keep them to characters every file system takes.
 	std::wstring SafeFilePart(const std::wstring& part)
@@ -251,43 +292,6 @@ namespace
 		wcsncpy_s(destination, VstHostControl::kPathChars, path.c_str(), _TRUNCATE);
 	}
 
-	// The game's process once found: waiting on its handle costs nothing, where listing every process on the system
-	// (until it is found, or if the handle cannot be opened) costs a kernel walk each time.
-	HANDLE g_gameProcess = nullptr;
-
-	bool RocksmithRunning()
-	{
-		if (g_gameProcess)
-		{
-			if (WaitForSingleObject(g_gameProcess, 0) == WAIT_TIMEOUT) return true;
-			CloseHandle(g_gameProcess);
-			g_gameProcess = nullptr;
-			return false;
-		}
-		HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-		if (snapshot == INVALID_HANDLE_VALUE) return true;   // cannot tell: assume it is, never close by mistake
-		PROCESSENTRY32W entry{ sizeof(entry) };
-		bool found = false;
-		for (BOOL more = Process32FirstW(snapshot, &entry); more && !found; more = Process32NextW(snapshot, &entry))
-			found = _wcsicmp(entry.szExeFile, L"Rocksmith2014.exe") == 0;
-		CloseHandle(snapshot);
-		if (found) g_gameProcess = OpenProcess(SYNCHRONIZE, FALSE, entry.th32ProcessID);
-		return found;
-	}
-
-	// The host is the game's companion: once it has seen Rocksmith, it closes (saving the chain) when the game
-	// does, instead of staying behind with nothing to play and its exe locked. Started by hand with no game, it
-	// stays until closed. Checked every 2 s.
-	bool GameClosed()
-	{
-		static bool seen = false;
-		static int tick = 0;
-		if (++tick % 4 != 0) return false;
-		const bool running = RocksmithRunning();
-		seen = seen || running;
-		return seen && !running;
-	}
-
 	bool IsRocksmithProcess(DWORD pid)
 	{
 		HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
@@ -299,6 +303,73 @@ namespace
 		if (!ok) return false;
 		const wchar_t* name = wcsrchr(path, L'\\');
 		return _wcsicmp(name ? name + 1 : path, L"Rocksmith2014.exe") == 0;
+	}
+
+	// ---- Closing with the game --------------------------------------------------------------------------------
+	// The host is the game's companion: once it has seen Rocksmith, it closes (saving the chain) when the game does.
+	// The game starts it, so Steam counts it as part of the game: a host left behind keeps Steam showing Rocksmith
+	// as running. This used to be a 2 s check on the window thread's timer, which asked for WM_CLOSE and then
+	// trusted the close to finish; when it did not (a plugin's teardown or its DLL unloading at exit can hang, as
+	// can a window thread already stuck in a plugin), the host stayed. Now a thread of its own waits on the game's
+	// process, asks the window thread to close, and ends the process itself if the close does not finish in time.
+	// Started by hand with no game, the host stays until closed.
+	std::atomic<bool> g_closeHandled{ false };   // the window thread runs its timers, so it handles WM_CLOSE
+	std::atomic<bool> g_chainSaved{ false };     // WM_CLOSE saved the chain; only teardown is left
+	constexpr ULONGLONG kCloseSaveMs = 30000;     // a heavy chain's plugin states can take many seconds to save
+	constexpr ULONGLONG kCloseTeardownMs = 5000;  // after the save: releasing the plugins and the audio link
+
+	DWORD ParentProcessId()
+	{
+		HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+		if (snapshot == INVALID_HANDLE_VALUE) return 0;
+		PROCESSENTRY32W entry{ sizeof(entry) };
+		DWORD parent = 0;
+		for (BOOL more = Process32FirstW(snapshot, &entry); more; more = Process32NextW(snapshot, &entry))
+			if (entry.th32ProcessID == GetCurrentProcessId()) { parent = entry.th32ParentProcessID; break; }
+		CloseHandle(snapshot);
+		return parent;
+	}
+
+	// The game's process: the parent when the overlay started the host (its ShellExecute runs in the game), else
+	// the first Rocksmith2014.exe running.
+	HANDLE OpenGameProcess()
+	{
+		const DWORD parent = ParentProcessId();
+		if (parent && IsRocksmithProcess(parent))
+			if (HANDLE game = OpenProcess(SYNCHRONIZE, FALSE, parent)) return game;
+		HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+		if (snapshot == INVALID_HANDLE_VALUE) return nullptr;
+		PROCESSENTRY32W entry{ sizeof(entry) };
+		HANDLE game = nullptr;
+		for (BOOL more = Process32FirstW(snapshot, &entry); more && !game; more = Process32NextW(snapshot, &entry))
+			if (_wcsicmp(entry.szExeFile, L"Rocksmith2014.exe") == 0) game = OpenProcess(SYNCHRONIZE, FALSE, entry.th32ProcessID);
+		CloseHandle(snapshot);
+		return game;
+	}
+
+	DWORD WINAPI WatchGame(void*)
+	{
+		HANDLE game = nullptr;
+		while (!(game = OpenGameProcess())) Sleep(2000);
+		WaitForSingleObject(game, INFINITE);
+		CloseHandle(game);
+		Log("host: Rocksmith has closed, closing too");
+		// Still restoring the chain (no timers yet): nothing has changed that needs saving.
+		if (!g_closeHandled) { Log("host: closed while starting"); TerminateProcess(GetCurrentProcess(), 0); }
+		PostMessageW(g_main, WM_CLOSE, 0, 0);
+		const ULONGLONG start = GetTickCount64();
+		ULONGLONG savedAt = 0;
+		for (;;)
+		{
+			Sleep(100);
+			const ULONGLONG now = GetTickCount64();
+			if (g_chainSaved && savedAt == 0) savedAt = now;
+			if (savedAt ? now - savedAt >= kCloseTeardownMs : now - start >= kCloseSaveMs) break;
+		}
+		Log(savedAt ? "host: saved, but releasing the plugins did not finish; ending the process"
+			: "host: the chain did not save in time; ending the process");
+		TerminateProcess(GetCurrentProcess(), 0);
+		return 0;
 	}
 
 	// The game's main window: its largest visible top-level window.
@@ -482,6 +553,185 @@ namespace
 		WriteDword(L"ShownSlot", static_cast<DWORD>(std::max(g_shown, 0)));
 	}
 
+	// ---- Inspector picture -----------------------------------------------------------------------------------------
+	// The page's Inspector shows a picture of the inspected plugin's own window (Mod/Shared/PluginPicture.hpp),
+	// printed kPictureMs apart while the overlay is on screen: a picture, so four or five a second is plenty, and the
+	// print runs here on the main thread, never near the stream.
+	// A plugin has one editor, and it must exist to be printed:
+	//   - the plugin's window is open and on screen: that is printed;
+	//   - its window is open but hidden ("Show plugin windows" off, standby): it is shown cloaked (DWM keeps drawing
+	//     it but puts nothing on screen), lent to the picture, and hidden and uncloaked again before anything else
+	//     shows or hides it (ReturnLentFrame), so the player's window behaves exactly as before;
+	//   - no window: the editor opens in a window of our own (g_pictureEditor), a cloaked tool window on the game's
+	//     monitor, which is never on screen, in the taskbar or in Alt+Tab. It is released when the inspected slot
+	//     changes, the plugin reloads, or nothing printed it for kPictureIdleMs, and at once when the player opens
+	//     the plugin's real window (OpenWindow), which then makes its editor exactly as it always has. Hiding the
+	//     overlay only stops the printing: a heavy editor (AmpliTube takes about a second to open) is not made again
+	//     each time the player toggles the overlay.
+	// Cloaked rather than off screen: JUCE (ours, and every JUCE-built plugin's own copy) repaints on the vertical
+	// blank of the monitor its window is on, and a window on no monitor would never repaint after its first frame.
+	// Tried standalone: a cloaked window with a GDI child and a flip-model Direct3D 11 child prints both, before and
+	// after they redraw.
+	constexpr ULONGLONG kPictureMs = 220;
+	constexpr ULONGLONG kPictureIdleMs = 30000;
+	constexpr ULONGLONG kPictureSettleMs = 1500;   // a black print this soon after the editor opened is not a failure yet
+	PicturePublisher g_picture;
+	bool g_pictureOpen = false;
+	ULONGLONG g_pictureAt = 0;
+	struct PictureEditor
+	{
+		PluginHost* plugin = nullptr;   // compared only once the plugin may have left the chain, like AmpWindow
+		HWND frame = nullptr;
+		ULONGLONG openedAt = 0;
+		ULONGLONG usedAt = 0;
+	};
+	PictureEditor g_pictureEditor;
+	HWND g_lentFrame = nullptr;     // a hidden plugin window shown cloaked for the picture
+	ULONGLONG g_lentAt = 0;
+
+	bool Cloak(HWND window, bool cloaked)
+	{
+		const BOOL value = cloaked ? TRUE : FALSE;
+		return SUCCEEDED(DwmSetWindowAttribute(window, DWMWA_CLOAK, &value, sizeof(value)));
+	}
+
+	void ReleasePictureEditor()
+	{
+		if (!g_pictureEditor.frame) return;
+		// The plugin may have left the chain (its editor went with it), or been reloaded in place (its editor closed).
+		PluginHost* plugin = g_pictureEditor.plugin;
+		if (SlotOf(plugin) >= 0 && plugin->EditorParent() == g_pictureEditor.frame) plugin->CloseEditor();
+		DestroyWindow(g_pictureEditor.frame);
+		g_pictureEditor = PictureEditor{};
+		Log("picture: hidden editor released");
+	}
+
+	bool OpenPictureEditor(PluginHost* plugin)
+	{
+		ReleasePictureEditor();
+		const RECT area = WorkArea(nullptr);
+		const HWND frame = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kEditorClass, L"Rocksmith Audio Bridge picture",
+			WS_POPUP | WS_CLIPCHILDREN, area.left, area.top, 800, 600, nullptr, nullptr, g_instance, nullptr);
+		if (!frame) return false;
+		if (!Cloak(frame, true))
+		{
+			// Without cloaking it would show over the game; there is nothing to print then.
+			DestroyWindow(frame);
+			Log("picture: could not cloak a window for the hidden editor");
+			return false;
+		}
+		// The same limits as the plugin's own window (OpenWindow), so the picture shows the size the player gets.
+		const int maxWidth = (area.right - area.left) * 9 / 10;
+		const int maxHeight = (area.bottom - area.top) * 9 / 10 - StripHeight(frame);
+		if (!plugin->OpenEditor(frame, [](int, int) {}, maxWidth, maxHeight))
+		{
+			DestroyWindow(frame);
+			return false;
+		}
+		ShowWindow(frame, SW_SHOWNOACTIVATE);   // cloaked: drawn by DWM, never on screen
+		const ULONGLONG now = GetTickCount64();
+		g_pictureEditor = PictureEditor{ plugin, frame, now, now };
+		Log("picture: hidden editor opened for %s", plugin->Name().c_str());
+		return true;
+	}
+
+	// Hands a lent window back the way it was: hidden (unless the windows are on screen) and uncloaked. Before
+	// UpdateWindows shows or hides the windows, and whenever the picture no longer needs it.
+	void ReturnLentFrame()
+	{
+		if (!g_lentFrame) return;
+		if (IsWindow(g_lentFrame))
+		{
+			if (!g_windowsShown) ShowWindow(g_lentFrame, SW_HIDE);
+			Cloak(g_lentFrame, false);   // hidden by now, so this never flashes it
+		}
+		g_lentFrame = nullptr;
+	}
+
+	bool LendFrame(HWND frame)
+	{
+		if (g_lentFrame == frame) return true;
+		ReturnLentFrame();
+		if (!Cloak(frame, true)) return false;
+		SetWindowPos(frame, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+		g_lentFrame = frame;
+		g_lentAt = GetTickCount64();
+		return true;
+	}
+
+	void StopPicture()
+	{
+		ReleasePictureEditor();
+		ReturnLentFrame();
+		if (g_pictureOpen) g_picture.Report(PluginPicture::State::None, -1);
+	}
+
+	// The overlay reports in and is on screen. Unlike OverlayOnScreen, an overlay that does not report counts as
+	// hidden: nobody looks at the picture then.
+	bool OverlayShowing()
+	{
+		if (!g_control) return false;
+		const bool overlayReporting = g_overlayBeatSeenAt != 0 && GetTickCount64() - g_overlayBeatSeenAt < static_cast<ULONGLONG>(VstHostControl::kAliveMs);
+		return overlayReporting && g_control->overlayVisible != 0;
+	}
+
+	void UpdatePicture()
+	{
+		if (!g_pictureOpen || g_inCommand) return;   // a command may be swapping the very plugin
+		const ULONGLONG now = GetTickCount64();
+		if (g_pictureEditor.frame && now - g_pictureEditor.usedAt > kPictureIdleMs) ReleasePictureEditor();
+		const LONG slot = g_control ? g_control->inspectSlot : -1;
+		PluginHost* plugin = g_chain.Plugin(slot);   // none for -1 or a slot past the chain's end
+		if (!plugin) { StopPicture(); return; }
+		if (g_pictureEditor.frame && g_pictureEditor.plugin != plugin) ReleasePictureEditor();   // another slot now
+		if (!OverlayShowing())
+		{
+			// Nobody looks: stop printing, but keep the hidden editor until kPictureIdleMs (see above).
+			ReturnLentFrame();
+			g_picture.Report(PluginPicture::State::None, -1);
+			return;
+		}
+		if (now - g_pictureAt < kPictureMs) return;
+		g_pictureAt = now;
+		if (!plugin->HasOwnEditor())
+		{
+			ReleasePictureEditor();
+			ReturnLentFrame();
+			g_picture.Report(PluginPicture::State::NoEditor, slot);
+			return;
+		}
+
+		HWND top = nullptr, content = nullptr;
+		ULONGLONG openedAt = 0;
+		if (AmpWindow* window = WindowForPlugin(plugin))
+		{
+			if (g_lentFrame && g_lentFrame != window->frame) ReturnLentFrame();
+			if (!IsWindowVisible(window->frame) && !LendFrame(window->frame))
+			{
+				g_picture.Report(PluginPicture::State::Failed, slot, "The plugin's window is open but hidden, and could not be drawn unseen.");
+				return;
+			}
+			top = window->frame;
+			content = window->area;
+			openedAt = g_lentFrame == window->frame ? g_lentAt : 0;
+		}
+		else
+		{
+			ReturnLentFrame();
+			// Reloaded in place (a replaced pedal, a tone): the editor in our window closed with the old plugin.
+			if (g_pictureEditor.frame && plugin->EditorParent() != g_pictureEditor.frame) ReleasePictureEditor();
+			if (!g_pictureEditor.frame && !OpenPictureEditor(plugin))
+			{
+				g_picture.Report(PluginPicture::State::Failed, slot, "The plugin's window could not be opened for the picture.");
+				return;
+			}
+			g_pictureEditor.usedAt = now;
+			top = content = g_pictureEditor.frame;
+			openedAt = g_pictureEditor.openedAt;
+		}
+		g_picture.Capture(slot, top, content, openedAt != 0 && now - openedAt < kPictureSettleMs);
+	}
+
 	// Opens the window of a slot's plugin, or brings it to the front when it is open already.
 	void OpenWindow(int slot)
 	{
@@ -509,6 +759,8 @@ namespace
 		const int maxHeight = (area.bottom - area.top) * 9 / 10 - StripHeight(window.frame);
 		const HWND frame = window.frame;
 		const auto onResized = [frame](int width, int height) { if (AmpWindow* found = WindowForFrame(frame)) FitWindow(*found, width, height); };
+		// The Inspector's picture may hold this plugin's editor in its hidden window; the real window takes it over.
+		if (g_pictureEditor.plugin == plugin) ReleasePictureEditor();
 		if (!plugin->OpenEditor(window.area, onResized, maxWidth, maxHeight))
 			FitWindow(window, Scale(window.frame, 460), Scale(window.frame, 60));
 		UpdateTitle(window);
@@ -529,6 +781,7 @@ namespace
 		if (inChain) window.plugin->CloseEditor();
 		RememberPosition(window);
 		const bool hadFocus = GetForegroundWindow() == window.frame;
+		if (g_lentFrame == window.frame) g_lentFrame = nullptr;   // going anyway
 		DestroyWindow(window.frame);
 		g_windows.erase(it);
 		RememberOpenWindowNames();
@@ -557,18 +810,25 @@ namespace
 		while (!g_windows.empty()) CloseWindow(g_windows.back()->plugin);
 	}
 
+	// The overlay's key, as the overlay last published it ([Keybinds] OverlayKey); backslash before it has.
+	UINT OverlayKey()
+	{
+		const LONG key = g_control ? g_control->overlayKey : 0;
+		return key > 0 && key < 256 ? static_cast<UINT>(key) : kDefaultOverlayKey;
+	}
+
 	// The overlay key while a plugin window has focus: the game never sees it, so hand focus back and pass the key on.
 	// The game then closes its overlay, and the windows follow it (UpdateWindows).
-	void OnOverlayKeyReleased()
+	void OnOverlayKeyReleased(UINT key)
 	{
 		const HWND foreground = GetForegroundWindow();
 		if (!foreground || !IsOurWindow(foreground)) return;
 		if (HWND game = FindGameWindow())
 		{
 			SetForegroundWindow(game);
-			const UINT scan = MapVirtualKeyW(kOverlayKey, MAPVK_VK_TO_VSC);
-			PostMessageW(game, WM_KEYDOWN, kOverlayKey, 1 | (scan << 16));
-			PostMessageW(game, WM_KEYUP, kOverlayKey, 1 | (scan << 16) | (1u << 30) | (1u << 31));
+			const UINT scan = MapVirtualKeyW(key, MAPVK_VK_TO_VSC);
+			PostMessageW(game, WM_KEYDOWN, key, 1 | (scan << 16));
+			PostMessageW(game, WM_KEYUP, key, 1 | (scan << 16) | (1u << 30) | (1u << 31));
 		}
 	}
 
@@ -589,6 +849,7 @@ namespace
 		}
 		show = show && !g_standby;
 		if (show == g_windowsShown) return;
+		ReturnLentFrame();   // the Inspector's picture gives a hidden window back before the windows change
 		g_windowsShown = show;
 		const bool hadFocus = GetForegroundWindow() && IsOurWindow(GetForegroundWindow());
 		for (auto& window : g_windows)
@@ -599,6 +860,15 @@ namespace
 		if (!show && hadFocus) if (HWND game = FindGameWindow()) SetForegroundWindow(game);
 		if (g_control) g_control->popoutShown = show ? 1 : 0;
 		Log("windows: %s (%zu open)", show ? "shown" : "hidden", g_windows.size());
+	}
+
+	// The overlay is on screen, or none reports in (Rocksmith closed, or an older overlay). The pedal window follows
+	// this alone: the page opened it, so "Show plugin windows" (the VST rig's switch) does not apply.
+	bool OverlayOnScreen()
+	{
+		if (!g_control) return true;
+		const bool overlayReporting = g_overlayBeatSeenAt != 0 && GetTickCount64() - g_overlayBeatSeenAt < static_cast<ULONGLONG>(VstHostControl::kAliveMs);
+		return !overlayReporting || g_control->overlayVisible != 0;
 	}
 
 	void PaintStrip(HWND frame)
@@ -668,6 +938,8 @@ namespace
 			if (i < spares) wcsncpy_s(destination, VstHostControl::kPathChars, g_chain.SparePath(i).c_str(), _TRUNCATE);
 		}
 		g_control->spareCount = spares;
+		CopyText(g_control->undoLabel, sizeof(g_control->undoLabel), g_undo ? g_undo->getUndoDescription().toStdString() : std::string());
+		CopyText(g_control->redoLabel, sizeof(g_control->redoLabel), g_undo ? g_undo->getRedoDescription().toStdString() : std::string());
 		InterlockedIncrement(&g_control->stateSeq);
 	}
 
@@ -782,8 +1054,599 @@ namespace
 
 	void SetStandby(bool on);
 
+	// ---- Undo -------------------------------------------------------------------------------------------------
+	// The page's chain edits can be taken back and done again (Command::Undo, Redo), the JUCE way: each edit is a
+	// juce::UndoableAction (the Command pattern) kept by one juce::UndoManager on this thread. An action does its edit
+	// through the Chain's own methods, so the stream pauses exactly as for the page's command, and knows how to take it
+	// back. Only an edit that takes a plugin out of the chain (Remove, Replace, Clear) keeps that plugin's settings
+	// (getStateInformation, a memento) to put it back as it was; nothing snapshots the whole tone. A plugin that comes
+	// back is taken from the spares when it is still kept loaded (Chain::Insert), so undo is quick.
+	// One page action is one undo step; a dragged level slider or a dragged parameter is one step too (coalesced).
+	// Edits made in a plugin's own window are the plugin's business and are not recorded, as in any DAW. Loading a
+	// tone or starting a new one clears the history. Each step carries a short name for the page's Edit menu
+	// (undoLabel, redoLabel). If an undo or redo cannot be done (the chain is not what the step expects, a plugin
+	// no longer loads), JUCE drops the whole history rather than leave steps that no longer fit.
+	std::string g_undoKey;           // the last recorded edit, for coalescing ("levels", "param:2:14:7"); empty = none
+	ULONGLONG g_undoAt = 0;
+	int g_gesture = 0;               // SetParam gestures so far: each Begin or Set starts a new undo step
+	constexpr ULONGLONG kLevelsJoinMs = 1500;   // level changes this close together are one step (one slider drag)
+	constexpr int kUndoUnitsKept = 64 * 1024;   // units are kilobytes of kept plugin settings: about 64 MB
+	constexpr int kUndoStepsKept = 30;          // at least this many steps whatever their size
+
+	bool SlotIs(int slot, const std::wstring& path)
+	{
+		return slot >= 0 && slot < g_chain.Count() && _wcsicmp(g_chain.Path(slot).c_str(), path.c_str()) == 0;
+	}
+
+	void KeepShownInRange()
+	{
+		if (g_shown >= g_chain.Count()) g_shown = g_chain.Count() - 1;
+	}
+
+	// Two slots changed places: the page's selection follows its pedal.
+	void SwapShown(int a, int b)
+	{
+		if (g_shown == a) g_shown = b;
+		else if (g_shown == b) g_shown = a;
+	}
+
+	std::string SlotName(int slot)
+	{
+		PluginHost* plugin = g_chain.Plugin(slot);
+		return plugin ? plugin->Name() : std::string("plugin");
+	}
+
+	std::string PluginFileName(const std::wstring& path)
+	{
+		std::wstring name = path.substr(path.find_last_of(L"\\/") + 1);
+		if (name.size() > 5 && _wcsicmp(name.c_str() + name.size() - 5, L".vst3") == 0) name.resize(name.size() - 5);
+		return Utf8(name);
+	}
+
+	// The undo history's size is counted in kilobytes of kept settings, so a few heavy amp states do not crowd out
+	// many light steps.
+	int SizeInUnits(size_t bytes) { return 1 + static_cast<int>(bytes / 1024); }
+
+	// AddPlugin, `position` = the slot it goes in at (-1: the end). Undo takes it out again (kept as a spare); redo
+	// puts it back with the settings it had then.
+	class AddAction final : public juce::UndoableAction
+	{
+	public:
+		AddAction(std::wstring path, int position) : m_path(std::move(path)), m_position(position) {}
+
+		bool perform() override
+		{
+			std::string error;
+			BeginLoading();
+			bool ok;
+			if (m_first)
+			{
+				m_first = false;
+				ok = g_chain.Add(m_path, error);
+				if (ok)
+				{
+					// Added last, then stepped back to its place (a plugin dropped between two pedals).
+					int at = g_chain.Count() - 1;
+					if (m_position >= 0)
+						for (const int position = std::min(m_position, at); at > position; --at) g_chain.Move(at, -1);
+					m_slot = at;
+					OpenWindow(at);
+				}
+				else SetFailedPath(m_path);
+			}
+			else ok = g_chain.Insert(m_slot, m_path, m_state, m_bypass, error);
+			if (ok) MarkModified();
+			else SetLoadError(error.empty() ? "That plugin did not load." : error);
+			EndLoading();
+			return ok;
+		}
+
+		bool undo() override
+		{
+			if (!SlotIs(m_slot, m_path)) return false;
+			PluginHost* plugin = g_chain.Plugin(m_slot);
+			plugin->GetState(m_state);
+			m_bypass = g_chain.Bypassed(m_slot);
+			CloseWindow(plugin);
+			g_chain.Remove(m_slot);
+			MarkModified();
+			KeepShownInRange();
+			return true;
+		}
+
+		int getSizeInUnits() override { return SizeInUnits(m_state.size()); }
+
+	private:
+		std::wstring m_path;
+		int m_position;
+		int m_slot = -1;
+		bool m_first = true;
+		std::vector<char> m_state;   // as it was when undo took it out
+		bool m_bypass = false;
+	};
+
+	// ReplaceSlot. The plugin that goes keeps its settings here, so undo brings it back exactly; redo gives the new one
+	// back the settings it had when undo took it out. The slot keeps its bypass, and a slot with a window gets one for
+	// its new plugin.
+	class ReplaceAction final : public juce::UndoableAction
+	{
+	public:
+		ReplaceAction(int slot, std::wstring path) : m_slot(slot), m_newPath(std::move(path)) {}
+
+		bool perform() override
+		{
+			if (m_first) { if (!g_chain.Plugin(m_slot)) return false; m_oldPath = g_chain.Path(m_slot); }
+			else if (!SlotIs(m_slot, m_oldPath)) return false;
+			std::vector<char> before;
+			g_chain.Plugin(m_slot)->GetState(before);
+			const bool ok = Swap(m_newPath, m_first ? std::vector<char>() : m_newState);
+			if (ok) m_oldState = std::move(before);
+			else if (m_first) SetFailedPath(m_newPath);
+			m_first = false;
+			return ok;
+		}
+
+		bool undo() override
+		{
+			if (!SlotIs(m_slot, m_newPath)) return false;
+			std::vector<char> after;
+			g_chain.Plugin(m_slot)->GetState(after);
+			if (!Swap(m_oldPath, m_oldState)) return false;
+			m_newState = std::move(after);
+			return true;
+		}
+
+		int getSizeInUnits() override { return SizeInUnits(m_oldState.size() + m_newState.size()); }
+
+	private:
+		bool Swap(const std::wstring& path, const std::vector<char>& state)
+		{
+			PluginHost* old = g_chain.Plugin(m_slot);
+			const bool hadWindow = WindowForPlugin(old) != nullptr;
+			BeginLoading();
+			CloseWindow(old);   // before the plugin goes
+			std::string error;
+			const bool ok = g_chain.Replace(m_slot, path, error);
+			if (ok)
+			{
+				// The plugin plays already; JUCE keeps state calls and processing apart (as LoadTone does for kept ones).
+				if (!state.empty()) g_chain.Plugin(m_slot)->SetState(state);
+				MarkModified();
+			}
+			else SetLoadError(error.empty() ? "That plugin did not load." : error);
+			if (hadWindow) OpenWindow(m_slot);   // the new pedal gets the old one's window
+			EndLoading();
+			return ok;
+		}
+
+		int m_slot;
+		std::wstring m_newPath, m_oldPath;
+		std::vector<char> m_oldState, m_newState;
+		bool m_first = true;
+	};
+
+	// RemoveSlot. The plugin's settings, bypass and window are kept, so undo puts it back as it was.
+	class RemoveAction final : public juce::UndoableAction
+	{
+	public:
+		explicit RemoveAction(int slot) : m_slot(slot) {}
+
+		bool perform() override
+		{
+			if (m_first) { if (!g_chain.Plugin(m_slot)) return false; m_path = g_chain.Path(m_slot); m_first = false; }
+			else if (!SlotIs(m_slot, m_path)) return false;
+			PluginHost* plugin = g_chain.Plugin(m_slot);
+			plugin->GetState(m_state);
+			m_bypass = g_chain.Bypassed(m_slot);
+			m_hadWindow = WindowForPlugin(plugin) != nullptr;
+			CloseWindow(plugin);
+			g_chain.Remove(m_slot);
+			MarkModified();
+			KeepShownInRange();
+			return true;
+		}
+
+		bool undo() override
+		{
+			std::string error;
+			BeginLoading();
+			const bool ok = g_chain.Insert(m_slot, m_path, m_state, m_bypass, error);
+			if (ok)
+			{
+				MarkModified();
+				if (m_hadWindow) OpenWindow(m_slot);
+			}
+			else SetLoadError(error.empty() ? "That plugin did not load again." : error);
+			EndLoading();
+			return ok;
+		}
+
+		int getSizeInUnits() override { return SizeInUnits(m_state.size()); }
+
+	private:
+		int m_slot;
+		std::wstring m_path;
+		std::vector<char> m_state;
+		bool m_bypass = false;
+		bool m_hadWindow = false;
+		bool m_first = true;
+	};
+
+	// MoveSlot: one step earlier (-1) or later (+1); undo moves it back.
+	class MoveAction final : public juce::UndoableAction
+	{
+	public:
+		MoveAction(int slot, int delta) : m_slot(slot), m_delta(delta) {}
+
+		bool perform() override { return Move(m_slot, m_delta); }
+		bool undo() override { return Move(m_slot + m_delta, -m_delta); }
+
+	private:
+		static bool Move(int slot, int delta)
+		{
+			if (slot < 0 || slot >= g_chain.Count() || slot + delta < 0 || slot + delta >= g_chain.Count()) return false;
+			g_chain.Move(slot, delta);
+			SwapShown(slot, slot + delta);
+			MarkModified();
+			return true;
+		}
+
+		int m_slot, m_delta;
+	};
+
+	// SetBypass on one slot.
+	class BypassAction final : public juce::UndoableAction
+	{
+	public:
+		BypassAction(int slot, bool bypass) : m_slot(slot), m_bypass(bypass) {}
+
+		bool perform() override
+		{
+			if (m_first) { if (!g_chain.Plugin(m_slot)) return false; m_path = g_chain.Path(m_slot); m_was = g_chain.Bypassed(m_slot); m_first = false; }
+			return Set(m_bypass);
+		}
+
+		bool undo() override { return Set(m_was); }
+
+	private:
+		bool Set(bool bypass)
+		{
+			if (!SlotIs(m_slot, m_path)) return false;
+			g_chain.SetBypass(m_slot, bypass);
+			MarkModified();
+			return true;
+		}
+
+		int m_slot;
+		bool m_bypass, m_was = false, m_first = true;
+		std::wstring m_path;
+	};
+
+	// DuplicateSlot: the copy goes right after it. Undo takes the copy out (its settings kept for redo).
+	class DuplicateAction final : public juce::UndoableAction
+	{
+	public:
+		explicit DuplicateAction(int slot) : m_slot(slot) {}
+
+		bool perform() override
+		{
+			std::string error;
+			BeginLoading();
+			bool ok;
+			if (m_first)
+			{
+				m_first = false;
+				const bool hadWindow = WindowForPlugin(g_chain.Plugin(m_slot)) != nullptr;
+				ok = g_chain.Duplicate(m_slot, error);
+				if (ok)
+				{
+					m_path = g_chain.Path(m_slot + 1);
+					if (hadWindow) OpenWindow(m_slot + 1);
+				}
+			}
+			else ok = SlotIs(m_slot, m_path) && g_chain.Insert(m_slot + 1, m_path, m_state, m_bypass, error);
+			if (ok) MarkModified();
+			else SetLoadError(error.empty() ? "That plugin did not load a second time." : error);
+			EndLoading();
+			return ok;
+		}
+
+		bool undo() override
+		{
+			if (!SlotIs(m_slot + 1, m_path)) return false;
+			PluginHost* copy = g_chain.Plugin(m_slot + 1);
+			copy->GetState(m_state);
+			m_bypass = g_chain.Bypassed(m_slot + 1);
+			CloseWindow(copy);
+			g_chain.Remove(m_slot + 1);
+			MarkModified();
+			KeepShownInRange();
+			return true;
+		}
+
+		int getSizeInUnits() override { return SizeInUnits(m_state.size()); }
+
+	private:
+		int m_slot;
+		std::wstring m_path;
+		std::vector<char> m_state;
+		bool m_bypass = false;
+		bool m_first = true;
+	};
+
+	// ClearChain as a step ("clear board"): every plugin with its settings, bypass and window, and the tone's name,
+	// are kept so undo puts the board back as it was.
+	class ClearAction final : public juce::UndoableAction
+	{
+	public:
+		bool perform() override
+		{
+			if (g_chain.Count() == 0 && g_toneName.empty()) return false;
+			m_slots.clear();
+			for (int i = 0; i < g_chain.Count(); ++i)
+			{
+				Entry entry{ g_chain.Path(i), {}, g_chain.Bypassed(i) };
+				g_chain.Plugin(i)->GetState(entry.state);
+				m_slots.push_back(std::move(entry));
+			}
+			m_windows = OpenWindowMask();
+			m_toneName = g_toneName;
+			m_toneModified = g_toneModified;
+			m_shown = g_shown;
+			CloseAllWindows();
+			g_chain.Clear();
+			g_toneName.clear();
+			g_toneModified = false;
+			g_shown = -1;
+			return true;
+		}
+
+		bool undo() override
+		{
+			if (g_chain.Count() != 0) return false;
+			bool ok = true;
+			std::string firstError;
+			BeginLoading();
+			for (size_t i = 0; i < m_slots.size(); ++i)
+			{
+				std::string error;
+				if (!g_chain.Insert(static_cast<int>(i), m_slots[i].path, m_slots[i].state, m_slots[i].bypass, error))
+				{
+					ok = false;
+					if (firstError.empty()) firstError = PluginFileName(m_slots[i].path) + ": " + (error.empty() ? "it did not load again." : error);
+				}
+			}
+			g_toneName = m_toneName;
+			g_toneModified = m_toneModified || !ok;
+			g_shown = std::min(m_shown, g_chain.Count() - 1);
+			RememberTone();
+			if (ok) ReopenWindows(m_windows);   // slot numbers only match when every plugin came back
+			else SetLoadError(firstError);
+			EndLoading();
+			return ok;
+		}
+
+		int getSizeInUnits() override
+		{
+			size_t bytes = 0;
+			for (const Entry& entry : m_slots) bytes += entry.state.size();
+			return SizeInUnits(bytes);
+		}
+
+	private:
+		struct Entry
+		{
+			std::wstring path;
+			std::vector<char> state;
+			bool bypass = false;
+		};
+		std::vector<Entry> m_slots;
+		unsigned m_windows = 0;
+		std::wstring m_toneName;
+		bool m_toneModified = false;
+		int m_shown = -1;
+	};
+
+	// SetChainBypass (every plugin skipped). Not part of the tone, so the tone is not marked changed.
+	class ChainBypassAction final : public juce::UndoableAction
+	{
+	public:
+		explicit ChainBypassAction(bool bypass) : m_bypass(bypass) {}
+
+		bool perform() override
+		{
+			if (m_first) { m_was = g_chain.ChainBypassed(); m_first = false; if (m_was == m_bypass) return false; }
+			Set(m_bypass);
+			return true;
+		}
+
+		bool undo() override { Set(m_was); return true; }
+
+	private:
+		static void Set(bool bypass)
+		{
+			g_chain.SetChainBypass(bypass);
+			Log("chain: %s", bypass ? "bypassed (clean guitar)" : "playing");
+		}
+
+		bool m_bypass, m_was = false, m_first = true;
+	};
+
+	// SetLevels. Global, not part of the tone: saved for every session and every tone; the tone is not marked
+	// changed. A slider drag sends many; consecutive ones coalesce into one step (Record's key, createCoalescedAction).
+	class LevelsAction final : public juce::UndoableAction
+	{
+	public:
+		LevelsAction(int input, int output) : m_input(input), m_output(output) {}
+
+		bool perform() override
+		{
+			if (m_first) { m_oldInput = g_chain.InputTenths(); m_oldOutput = g_chain.OutputTenths(); m_first = false; }
+			Apply(m_input, m_output);
+			return true;
+		}
+
+		bool undo() override { Apply(m_oldInput, m_oldOutput); return true; }
+
+		juce::UndoableAction* createCoalescedAction(juce::UndoableAction* next) override
+		{
+			const auto* later = dynamic_cast<LevelsAction*>(next);
+			if (!later) return nullptr;
+			auto* joined = new LevelsAction(later->m_input, later->m_output);
+			joined->m_oldInput = m_oldInput;
+			joined->m_oldOutput = m_oldOutput;
+			joined->m_first = false;
+			return joined;
+		}
+
+	private:
+		static void Apply(int input, int output)
+		{
+			g_chain.SetLevels(input, output);
+			WriteDword(L"InputTrimTenths", static_cast<DWORD>(input));
+			WriteDword(L"OutputTrimTenths", static_cast<DWORD>(output));
+		}
+
+		int m_input, m_output, m_oldInput = 0, m_oldOutput = 0;
+		bool m_first = true;
+	};
+
+	// SetParam from the Inspector. The first perform follows the gesture (a drag: beginChangeGesture on Begin, the
+	// value on every Change, endChangeGesture on End); undo and redo set the value as one complete gesture each. The
+	// steps of one gesture coalesce into one undo step that goes from the value before the drag to the last one.
+	class ParamAction final : public juce::UndoableAction
+	{
+	public:
+		ParamAction(int slot, int index, float value, VstHostControl::ParamPhase phase) : m_slot(slot), m_index(index), m_value(value), m_phase(phase) {}
+
+		bool perform() override
+		{
+			using VstHostControl::ParamPhase;
+			if (m_first)
+			{
+				PluginHost* plugin = g_chain.Plugin(m_slot);
+				if (!plugin || !plugin->HasParameter(m_index)) return false;
+				m_path = g_chain.Path(m_slot);
+				m_old = plugin->ParameterValue(m_index);
+				m_first = false;
+				if (m_phase == ParamPhase::Begin) plugin->BeginGesture(m_index);
+				plugin->SetParameter(m_index, m_value, m_phase == ParamPhase::Set);
+				if (m_phase == ParamPhase::End) plugin->EndGesture(m_index);
+				return true;
+			}
+			return Set(m_value);
+		}
+
+		bool undo() override { return Set(m_old); }
+
+		juce::UndoableAction* createCoalescedAction(juce::UndoableAction* next) override
+		{
+			const auto* later = dynamic_cast<ParamAction*>(next);
+			if (!later || later->m_slot != m_slot || later->m_index != m_index) return nullptr;
+			auto* joined = new ParamAction(m_slot, m_index, later->m_value, later->m_phase);
+			joined->m_path = m_path;
+			joined->m_old = m_old;
+			joined->m_first = false;
+			return joined;
+		}
+
+	private:
+		bool Set(float value)
+		{
+			if (!SlotIs(m_slot, m_path)) return false;
+			g_chain.Plugin(m_slot)->SetParameter(m_index, value, true);
+			return true;
+		}
+
+		int m_slot, m_index;
+		float m_value, m_old = 0.0f;
+		VstHostControl::ParamPhase m_phase;
+		std::wstring m_path;
+		bool m_first = true;
+	};
+
+	// Does an edit and records it as one undo step named `name`. An edit with the same non-empty `key` as the last
+	// one recorded joins that step instead (coalesced), within `joinMs` of it when that is not 0. False when the edit
+	// could not be done (nothing is recorded then).
+	bool Record(juce::UndoableAction* action, const std::string& name, const std::string& key = {}, ULONGLONG joinMs = 0)
+	{
+		const ULONGLONG now = GetTickCount64();
+		const bool joins = !key.empty() && key == g_undoKey && (joinMs == 0 || now - g_undoAt < joinMs);
+		if (!joins) g_undo->beginNewTransaction(juce::String::fromUTF8(name.c_str()));
+		const bool done = g_undo->perform(action);
+		g_undoKey = done ? key : std::string();
+		g_undoAt = now;
+		return done;
+	}
+
+	void ClearUndo(const char* why)
+	{
+		if (!g_undo->canUndo() && !g_undo->canRedo()) return;
+		g_undo->clearUndoHistory();
+		g_undoKey.clear();
+		Log("undo: history cleared (%s)", why);
+	}
+
+	// ---- Inspector ------------------------------------------------------------------------------------------------
+	// The page's Inspector shows the parameters of one slot (inspectSlot). They are published under a sequence lock
+	// when the plugin reports a change (its window, automation, the page's own SetParam), at most every
+	// kParamsMinMs, and every kBeatMs regardless, so a value a plugin changes without telling still shows.
+	constexpr ULONGLONG kParamsMinMs = 40;
+	LONG g_paramsSlot = -2;
+	const PluginHost* g_paramsPlugin = nullptr;
+	uint32_t g_paramsChanges = 0;
+	ULONGLONG g_paramsAt = 0;
+
+	void PublishParams()
+	{
+		if (!g_control) return;
+		const LONG wanted = g_control->inspectSlot;
+		PluginHost* plugin = g_chain.Plugin(wanted);   // none for -1 or a slot past the chain's end
+		const LONG slot = plugin ? wanted : -1;
+		const ULONGLONG now = GetTickCount64();
+		const bool moved = slot != g_paramsSlot || plugin != g_paramsPlugin || (plugin && plugin->ParameterChanges() != g_paramsChanges);
+		if (!(moved && now - g_paramsAt >= kParamsMinMs) && now - g_paramsAt < static_cast<ULONGLONG>(VstHostControl::kBeatMs)) return;
+		g_paramsSlot = slot;
+		g_paramsPlugin = plugin;
+		g_paramsChanges = plugin ? plugin->ParameterChanges() : 0;
+		g_paramsAt = now;
+		int total = 0;
+		const std::vector<PluginHost::ParameterInfo> list = plugin ? plugin->ListParameters(VstHostControl::kMaxParams, total) : std::vector<PluginHost::ParameterInfo>();
+		InterlockedIncrement(&g_control->paramSeq);   // odd: being written
+		g_control->paramSlot = slot;
+		g_control->paramTotal = total;
+		g_control->paramCount = static_cast<LONG>(list.size());
+		for (size_t i = 0; i < list.size(); ++i)
+		{
+			const PluginHost::ParameterInfo& info = list[i];
+			VstHostControl::Param& param = g_control->params[i];
+			param.index = info.index;
+			param.value = info.value;
+			param.steps = info.steps;
+			param.flags = (info.discrete ? VstHostControl::kParamDiscrete : 0) | (info.boolean ? VstHostControl::kParamBoolean : 0);
+			CopyText(param.name, sizeof(param.name), info.name);
+			CopyText(param.text, sizeof(param.text), info.text);
+			CopyText(param.label, sizeof(param.label), info.label);
+		}
+		InterlockedIncrement(&g_control->paramSeq);   // even: complete
+	}
+
+	// SetParam: a drag (Begin, Change..., End) is one gesture and one undo step; Set is both on its own.
+	void RunSetParam(int slot, int index, float value, VstHostControl::ParamPhase phase)
+	{
+		using VstHostControl::ParamPhase;
+		if (!std::isfinite(value)) return;
+		if (phase == ParamPhase::Begin || phase == ParamPhase::Set) ++g_gesture;
+		PluginHost* plugin = g_chain.Plugin(slot);
+		if (!plugin) return;
+		const std::string key = "param:" + std::to_string(slot) + ":" + std::to_string(index) + ":" + std::to_string(g_gesture);
+		Record(new ParamAction(slot, index, value, phase), "change " + plugin->ParameterName(index), key);
+		if (phase == ParamPhase::End || phase == ParamPhase::Set) g_undoKey.clear();   // the next edit is a step of its own
+		g_paramsAt = 0;   // the Inspector shows the new value at once
+	}
+
 	// One command from the Tone designer page.
-	void RunCommand(VstHostControl::Command op, int arg, int arg2, const std::wstring& text)
+	void RunCommand(VstHostControl::Command op, int arg, int arg2, const std::wstring& text, float value, int phase)
 	{
 		using VstHostControl::Command;
 		SetLoadError({});
@@ -792,46 +1655,28 @@ namespace
 		switch (op)
 		{
 		case Command::AddPlugin:
-			BeginLoading();
-			if (g_chain.Add(text, error))
+		{
+			// arg = position + 1 to insert it there (a plugin dropped between two pedals); 0 appends. The step is
+			// named after the plugin once it has loaded (its file name until then).
+			const int position = arg > 0 ? arg - 1 : -1;
+			if (Record(new AddAction(text, position), "add " + PluginFileName(text)))
 			{
-				// arg = position + 1 to insert it there (a plugin dropped between two pedals); 0 appends. It is
-				// added last, then stepped back, so an overlay that sends 0 behaves as before.
-				int at = g_chain.Count() - 1;
-				if (arg > 0)
-					for (const int position = std::min(arg - 1, at); at > position; --at) g_chain.Move(at, -1);
-				MarkModified();
-				OpenWindow(at);
+				const int at = position >= 0 ? std::min(position, g_chain.Count() - 1) : g_chain.Count() - 1;
+				g_undo->setCurrentTransactionName(juce::String::fromUTF8(("add " + SlotName(at)).c_str()));
 			}
-			else { SetLoadError(error.empty() ? "That plugin did not load." : error); SetFailedPath(text); }
-			EndLoading();
 			break;
+		}
 		case Command::ReplaceSlot:
-			BeginLoading();
-			if (PluginHost* old = g_chain.Plugin(arg)) CloseWindow(old);   // before the plugin goes
-			if (g_chain.Replace(arg, text, error)) MarkModified();
-			else { SetLoadError(error.empty() ? "That plugin did not load." : error); SetFailedPath(text); }
-			if (InMask(openBefore, arg)) OpenWindow(arg);   // the new pedal gets the old one's window
-			EndLoading();
+			if (g_chain.Plugin(arg)) Record(new ReplaceAction(arg, text), "replace " + SlotName(arg));
 			break;
 		case Command::RemoveSlot:
-			if (PluginHost* old = g_chain.Plugin(arg)) CloseWindow(old);
-			g_chain.Remove(arg);
-			MarkModified();
-			if (g_shown >= g_chain.Count()) g_shown = g_chain.Count() - 1;
+			Record(new RemoveAction(arg), "remove " + SlotName(arg));
 			break;
 		case Command::MoveSlot:
-			if (arg + arg2 >= 0 && arg + arg2 < g_chain.Count())
-			{
-				g_chain.Move(arg, arg2);
-				if (g_shown == arg) g_shown = arg + arg2;
-				else if (g_shown == arg + arg2) g_shown = arg;
-				MarkModified();
-			}
+			Record(new MoveAction(arg, arg2), "move " + SlotName(arg));
 			break;
 		case Command::SetBypass:
-			g_chain.SetBypass(arg, arg2 != 0);
-			MarkModified();
+			Record(new BypassAction(arg, arg2 != 0), (arg2 != 0 ? "bypass " : "turn on ") + SlotName(arg));
 			break;
 		case Command::ShowSlot:
 			OpenWindow(arg);
@@ -855,6 +1700,7 @@ namespace
 				if (!CopyFileW(file.c_str(), CurrentChainFile().c_str(), FALSE)) SaveCurrentChain();
 				else RememberTone();
 				if (!missing.empty()) SetLoadError("Not installed, skipped: " + missing);
+				ClearUndo("a tone was loaded");
 			}
 			else SetLoadError(error);
 			ReopenWindows(openBefore);
@@ -888,24 +1734,39 @@ namespace
 			break;
 		}
 		case Command::SetLevels:
-			// Global, not part of the tone: saved for every session and every tone; the tone is not marked changed.
-			g_chain.SetLevels(arg, arg2);
-			WriteDword(L"InputTrimTenths", static_cast<DWORD>(arg));
-			WriteDword(L"OutputTrimTenths", static_cast<DWORD>(arg2));
+			// Global, not part of the tone (LevelsAction); a slider drag is one step.
+			Record(new LevelsAction(arg, arg2), "levels", "levels", kLevelsJoinMs);
 			break;
 		case Command::SetMuted:
 			g_chain.SetMuted(arg != 0);
 			Log("chain: %s", arg ? "muted (tuning)" : "unmuted");
 			break;
 		case Command::DuplicateSlot:
-			BeginLoading();
-			if (g_chain.Duplicate(arg, error)) { MarkModified(); if (InMask(openBefore, arg)) OpenWindow(arg + 1); }
-			else SetLoadError(error.empty() ? "That plugin did not load a second time." : error);
-			EndLoading();
+			if (g_chain.Plugin(arg)) Record(new DuplicateAction(arg), "duplicate " + SlotName(arg));
 			break;
 		case Command::SetChainBypass:
-			g_chain.SetChainBypass(arg != 0);
-			Log("chain: %s", arg ? "bypassed (clean guitar)" : "playing");
+			Record(new ChainBypassAction(arg != 0), arg != 0 ? "bypass whole chain" : "turn on whole chain");
+			break;
+		case Command::SetParam:
+			RunSetParam(arg, arg2, value, static_cast<VstHostControl::ParamPhase>(phase));
+			break;
+		case Command::Undo:
+			if (g_undo->canUndo())
+			{
+				Log("undo: %s", g_undo->getUndoDescription().toRawUTF8());
+				g_undo->undo();
+			}
+			g_undoKey.clear();
+			KeepShownInRange();
+			break;
+		case Command::Redo:
+			if (g_undo->canRedo())
+			{
+				Log("redo: %s", g_undo->getRedoDescription().toRawUTF8());
+				g_undo->redo();
+			}
+			g_undoKey.clear();
+			KeepShownInRange();
 			break;
 		case Command::RenameTone:
 		{
@@ -979,17 +1840,21 @@ namespace
 			else if (sparesDropped > 0 && slots.empty()) LoadSpareNow(text, "reloaded", true);
 			for (size_t k = 0; k < slots.size() && k < hadWindow.size(); ++k)
 				if (hadWindow[k] && slots[k] >= 0) OpenWindow(slots[k]);
-			if (g_chain.Count() != countBefore) MarkModified();
+			// A copy that did not come back moved the slots after it: the history's steps no longer fit the chain.
+			if (g_chain.Count() != countBefore) { MarkModified(); ClearUndo("a plugin did not reload"); }
 			if (g_shown >= g_chain.Count()) g_shown = g_chain.Count() - 1;
 			EndLoading();
 			break;
 		}
 		case Command::ClearChain:
+			// arg = 1: a new tone, which starts a fresh history; 0: the board cleared, one undo step.
+			if (arg == 0) { Record(new ClearAction(), "clear board"); break; }
 			CloseAllWindows();
 			g_chain.Clear();
 			g_toneName.clear();
 			g_toneModified = false;
 			g_shown = -1;
+			ClearUndo("a new tone");
 			break;
 		default:
 			break;
@@ -1006,7 +1871,8 @@ namespace
 		wchar_t text[VstHostControl::kPathChars]{};
 		memcpy(text, const_cast<const wchar_t*>(g_control->commandText), sizeof(text) - sizeof(wchar_t));
 		g_inCommand = true;
-		RunCommand(static_cast<VstHostControl::Command>(g_control->commandOp), g_control->commandArg, g_control->commandArg2, text);
+		RunCommand(static_cast<VstHostControl::Command>(g_control->commandOp), g_control->commandArg, g_control->commandArg2, text,
+			g_control->commandValue, g_control->commandPhase);
 		g_inCommand = false;
 		InterlockedExchange(&g_control->commandDone, g_handledCommand);
 	}
@@ -1015,10 +1881,41 @@ namespace
 	void PublishMeters()
 	{
 		if (!g_control) return;
-		g_inputMeter = std::max(g_chain.TakeInputPeak(), g_inputMeter * 0.85f);
-		g_outputMeter = std::max(g_chain.TakeOutputPeak(), g_outputMeter * 0.85f);
+		const float inputPeak = g_stompboxPlays ? g_stompboxService.TakeInputPeak() : g_chain.TakeInputPeak();
+		const float outputPeak = g_stompboxPlays ? g_stompboxService.TakeOutputPeak() : g_chain.TakeOutputPeak();
+		g_inputMeter = std::max(inputPeak, g_inputMeter * 0.85f);
+		g_outputMeter = std::max(outputPeak, g_outputMeter * 0.85f);
 		g_control->inputPeak = static_cast<LONG>(std::min(g_inputMeter, 4.0f) * 1000.0f);
 		g_control->outputPeak = static_cast<LONG>(std::min(g_outputMeter, 4.0f) * 1000.0f);
+	}
+
+	// Once a second: how long the stream's blocks took against the block period, measured on this PC while the
+	// player plays. The Tone designer page shows it as the tone's load (StompboxService::PublishLoad). The worst
+	// second of every 30 goes to the log while the Tone designer engine plays.
+	BlockTiming g_worstTiming;
+
+	void MeasureStreamLoad()
+	{
+		const BlockTiming timing = g_router.TakeTiming();
+		if (timing.blocks == 0) return;
+		g_stompboxService.PublishLoad(timing, g_audio.Frames());
+		g_worstTiming.blocks += timing.blocks;
+		g_worstTiming.medianMicroseconds = std::max(g_worstTiming.medianMicroseconds, timing.medianMicroseconds);
+		g_worstTiming.percentile99Microseconds = std::max(g_worstTiming.percentile99Microseconds, timing.percentile99Microseconds);
+		g_worstTiming.percentile999Microseconds = std::max(g_worstTiming.percentile999Microseconds, timing.percentile999Microseconds);
+		g_worstTiming.maximumMicroseconds = std::max(g_worstTiming.maximumMicroseconds, timing.maximumMicroseconds);
+	}
+
+	void LogStreamTiming()
+	{
+		const BlockTiming timing = g_worstTiming;
+		g_worstTiming = {};
+		if (timing.blocks == 0 || !g_stompboxPlays) return;
+		const double periodMicroseconds = 1000000.0 * g_audio.Frames() / SAMPLE_RATE;
+		Log("stompbox: %llu blocks of %d frames (%.0f us each), worst second: median %.0f us, p99 %.0f us, p99.9 %.0f us, max %.0f us, limiter %.1f dB on the last block",
+			static_cast<unsigned long long>(timing.blocks), g_audio.Frames(), periodMicroseconds, timing.medianMicroseconds,
+			timing.percentile99Microseconds, timing.percentile999Microseconds, timing.maximumMicroseconds,
+			20.0 * std::log10(std::max(1e-6, 1.0 - g_router.LimiterReduction())));
 	}
 
 	// Open (or reopen after the game changed its buffer size) the stream and run the chain on it.
@@ -1027,12 +1924,29 @@ namespace
 		g_audio.Stop();
 		g_chain.Suspend();
 		std::string error;
-		if (!g_audio.Open(window, &g_chain, error) || !g_chain.Prepare(g_audio.Frames(), error) || !g_audio.Start(error))
+		if (!g_audio.Open(window, &g_router, error) || !g_chain.Prepare(g_audio.Frames(), error))
+		{
+			ShowError(error);
+			return false;
+		}
+		if (g_stompboxPlays) g_stompboxService.PrepareStream(g_audio.Frames());   // the stream is stopped: Stompbox may allocate
+		g_router.SetSource(g_stompboxPlays ? g_stompboxService.Sink() : &g_chain, g_stompboxPlays);
+		if (!g_audio.Start(error))
 		{
 			ShowError(error);
 			return false;
 		}
 		return true;
+	}
+
+	// The Tone designer page chose its engine (true) or the VST chain (false). Reopens the stream so the engine is
+	// prepared while it is stopped; in standby the stream opens with this source when the player turns it on.
+	bool SetStompboxPlays(bool plays)
+	{
+		if (plays == g_stompboxPlays) return true;
+		g_stompboxPlays = plays;
+		Log("stompbox: the stream plays through %s", plays ? "the Tone designer engine" : "the VST chain");
+		return g_standby || StartAudio(g_main);
 	}
 
 	// Off (standby) and back on. Stopping the stream releases the amp link, so the overlay's ExternalAmp brings the
@@ -1074,11 +1988,16 @@ namespace
 				// Only while one of our windows has the keyboard (otherwise the game sees the key itself): the key
 				// read goes through Steam's overlay hook, which Steam injects into this process, so it is not free.
 				const HWND foreground = GetForegroundWindow();
-				const bool down = foreground && IsOurWindow(foreground) && (GetAsyncKeyState(kOverlayKey) & 0x8000) != 0;
-				if (g_keyDown && !down) OnOverlayKeyReleased();
+				const UINT overlayKey = OverlayKey();
+				const bool down = foreground && IsOurWindow(foreground) && (GetAsyncKeyState(overlayKey) & 0x8000) != 0;
+				if (g_keyDown && !down) OnOverlayKeyReleased(overlayKey);
 				g_keyDown = down;
 				UpdateWindows();
 				PollCommand();
+				PublishParams();
+				UpdatePicture();
+				g_stompboxService.Poll();
+				if (g_pedalEditor) g_pedalEditor->Poll(OverlayOnScreen());
 				PublishMeters();
 				if (g_control && g_control->quitRequested)
 				{
@@ -1089,20 +2008,17 @@ namespace
 				return 0;
 			}
 			if (g_control) InterlockedIncrement(&g_control->hostBeat);
+			if (g_control) InterlockedExchange(&g_control->chainLatencySamples, g_chain.LatencySamples());
 			InstallCrashReporter();   // a plugin may have replaced it with its own
-			if (GameClosed())
-			{
-				Log("host: Rocksmith has closed, closing too");
-				PostMessageW(window, WM_CLOSE, 0, 0);
-				return 0;
-			}
 			if (g_chain.TakeRestartRequest() && !g_standby) StartAudio(window);
 			if (g_ticks % 4 == 0) RefreshKeepSettings();
 			PreloadStep();
 			if (g_chain.Dirty() && !g_toneModified) { g_toneModified = true; PublishState(); }
+			if (g_ticks % 2 == 0) MeasureStreamLoad();
 			if (++g_ticks >= kAutosaveTicks)
 			{
 				g_ticks = 0;
+				LogStreamTiming();
 				if (g_chain.Dirty()) SaveCurrentChain();
 			}
 			return 0;
@@ -1111,8 +2027,11 @@ namespace
 			KillTimer(window, kHousekeepingTimer);
 			g_audio.Stop();
 			SaveCurrentChain();
+			g_chainSaved = true;     // WatchGame: only teardown is left
 			RememberOpenWindows();   // reopened next time
+			StopPicture();
 			CloseAllWindows();
+			if (g_pedalEditor) g_pedalEditor->Close();
 			DestroyWindow(window);
 			return 0;
 		case WM_DESTROY:
@@ -1328,6 +2247,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 	juce::ScopedJuceInitialiser_GUI juce;
 	g_mainThread = GetCurrentThreadId();
 	InstallCrashReporter();
+	g_undo = std::make_unique<juce::UndoManager>(kUndoUnitsKept, kUndoStepsKept);
 
 	// One host at a time: the external amp link carries one amp sim.
 	HANDLE singleInstance = CreateMutexW(nullptr, TRUE, L"Local\\RocksmithAudioBridge.VstHost");
@@ -1371,6 +2291,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 		InterlockedIncrement(&g_control->hostBeat);
 		InterlockedExchange(&g_control->hostPid, static_cast<LONG>(GetCurrentProcessId()));
 	}
+	// Before the chain restores: a game that closes meanwhile ends a host that is still loading.
+	if (HANDLE watcher = CreateThread(nullptr, 0, WatchGame, nullptr, 0, nullptr)) CloseHandle(watcher);
 	g_chain.SetLoadReporter(ReportLoading);
 	// A starred plugin that took the host down while it loaded in the background (PreloadStep) is not tried again.
 	if (const std::wstring crashed = ReadString(L"PreloadingNow"); !crashed.empty())
@@ -1409,11 +2331,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 	g_font = CreateFontW(-MulDiv(13, static_cast<int>(GetDpiForSystem()), 96), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
 		OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
 
+	g_pictureOpen = g_picture.Open();
+	StartStompbox();
 	// In standby the stream opens when the player turns Tone designer on.
 	if (!g_standby && !StartAudio(g_main))
 	{
 		if (g_control) { InterlockedExchange(&g_control->hostPid, 0); EndLoading(); }
+		g_picture.Close();
 		DestroyWindow(g_main);
+		g_undo.reset();
 		g_chain.ReleaseAll();
 		ReleasePluginFormats();
 		OleUninitialize();
@@ -1439,6 +2365,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 	UpdateWindows();
 	SetTimer(g_main, kHousekeepingTimer, kHousekeepingMs, nullptr);
 	SetTimer(g_main, kKeyTimer, kKeyMs, nullptr);
+	g_closeHandled = true;
 
 	MSG message;
 	while (GetMessageW(&message, nullptr, 0, 0) > 0)
@@ -1455,6 +2382,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 		InterlockedExchange(&g_control->hostPid, 0);
 	}
 	g_audio.Close();
+	g_picture.Close();
+	g_stompboxService.onEditPedal = nullptr;
+	g_pedalEditor.reset();   // a JUCE window: before JUCE shuts down
+	g_stompboxService.Stop();
+	g_stompbox.Unload();
+	g_undo.reset();   // its steps hold plugin settings only, but it is a JUCE object: before JUCE shuts down
 	g_chain.ReleaseAll();
 	ReleasePluginFormats();
 	if (g_font) DeleteObject(g_font);

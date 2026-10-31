@@ -1,6 +1,7 @@
 #include "PluginHost.hpp"
 
 #include "HostLog.hpp"
+#include "AudioFormat.hpp"
 
 #include <ShlObj.h>
 #include <algorithm>
@@ -10,7 +11,6 @@ namespace VstHost
 {
 	namespace
 	{
-		constexpr double kSampleRate = 48000.0;
 		constexpr char kStateMagic[8] = { 'R', 'A', 'B', 'J', 'S', 'T', '1', 0 };
 		// Loading settings makes a plugin report parameter changes for a moment; those are not the player's edits.
 		constexpr ULONGLONG kSettleMs = 750;
@@ -53,7 +53,7 @@ namespace VstHost
 			info.setTimeSignature(TimeSignature{ 4, 4 });
 			info.setIsPlaying(true);
 			info.setTimeInSamples(samples);
-			info.setTimeInSeconds(static_cast<double>(samples) / kSampleRate);
+			info.setTimeInSeconds(static_cast<double>(samples) / SAMPLE_RATE);
 			return info;
 		}
 		int64_t samples = 0;   // stream thread
@@ -83,7 +83,7 @@ namespace VstHost
 			if (!type->isInstrument) { chosen = type; break; }
 
 		juce::String message;
-		m_plugin = PluginFormats().createPluginInstance(*chosen, kSampleRate, std::max(m_frames, 512), message);
+		m_plugin = PluginFormats().createPluginInstance(*chosen, SAMPLE_RATE, std::max(m_frames, 512), message);
 		if (!m_plugin)
 		{
 			error = message.isNotEmpty() ? message.toStdString() : "The plugin failed to start.";
@@ -141,8 +141,8 @@ namespace VstHost
 		Suspend();
 		if (!m_plugin) { error = "No plugin loaded."; return false; }
 		m_frames = frames;
-		m_plugin->setRateAndBufferSizeDetails(kSampleRate, frames);
-		m_plugin->prepareToPlay(kSampleRate, frames);
+		m_plugin->setRateAndBufferSizeDetails(SAMPLE_RATE, frames);
+		m_plugin->prepareToPlay(SAMPLE_RATE, frames);
 		const int channels = std::max({ m_plugin->getTotalNumInputChannels(), m_plugin->getTotalNumOutputChannels(), 2 });
 		m_buffer.setSize(channels, frames, false, true, false);
 		m_midi.ensureSize(256);
@@ -157,6 +157,8 @@ namespace VstHost
 		while (m_inProcess.load()) YieldProcessor();   // one block at most
 		if (wasProcessing) m_plugin->releaseResources();
 	}
+
+	int PluginHost::LatencySamples() const { return m_plugin ? (std::max)(0, m_plugin->getLatencySamples()) : 0; }
 
 	bool PluginHost::Process(const float* inLeft, const float* inRight, float* left, float* right, int frames)
 	{
@@ -201,12 +203,80 @@ namespace VstHost
 
 	void PluginHost::audioProcessorParameterChanged(juce::AudioProcessor*, int, float)
 	{
+		m_parameterChanges.fetch_add(1, std::memory_order_relaxed);
 		if (GetTickCount64() >= m_quietUntil) m_dirty = true;
 	}
 
 	void PluginHost::audioProcessorChanged(juce::AudioProcessor*, const ChangeDetails& details)
 	{
+		if (details.parameterInfoChanged || details.programChanged) m_parameterChanges.fetch_add(1, std::memory_order_relaxed);
 		if ((details.programChanged || details.nonParameterStateChanged) && GetTickCount64() >= m_quietUntil) m_dirty = true;
+	}
+
+	int PluginHost::ParameterCount() const { return m_plugin ? m_plugin->getParameters().size() : 0; }
+
+	bool PluginHost::HasParameter(int index) const { return index >= 0 && index < ParameterCount(); }
+
+	std::vector<PluginHost::ParameterInfo> PluginHost::ListParameters(int limit, int& total) const
+	{
+		std::vector<ParameterInfo> list;
+		total = 0;
+		if (!m_plugin) return list;
+		const juce::AudioProcessorParameter* bypass = m_plugin->getBypassParameter();
+		const juce::Array<juce::AudioProcessorParameter*>& parameters = m_plugin->getParameters();
+		for (int i = 0; i < parameters.size(); ++i)
+		{
+			const juce::AudioProcessorParameter* parameter = parameters[i];
+			// The chain has its own bypass; a parameter the plugin keeps from automation is not the player's to set.
+			if (parameter == bypass || !parameter->isAutomatable()) continue;
+			++total;
+			if (static_cast<int>(list.size()) >= limit) continue;
+			ParameterInfo info;
+			info.index = i;
+			info.value = parameter->getValue();
+			info.name = parameter->getName(64).toStdString();
+			info.text = parameter->getCurrentValueAsText().toStdString();
+			info.label = parameter->getLabel().toStdString();
+			info.discrete = parameter->isDiscrete();
+			info.boolean = parameter->isBoolean();
+			const int steps = parameter->getNumSteps();
+			// JUCE answers its default (0x7fffffff) for a continuous parameter.
+			info.steps = steps > 1 && steps < juce::AudioProcessor::getDefaultNumParameterSteps() ? steps : 0;
+			list.push_back(std::move(info));
+		}
+		return list;
+	}
+
+	float PluginHost::ParameterValue(int index) const
+	{
+		return HasParameter(index) ? m_plugin->getParameters()[index]->getValue() : 0.0f;
+	}
+
+	std::string PluginHost::ParameterName(int index) const
+	{
+		return HasParameter(index) ? m_plugin->getParameters()[index]->getName(64).toStdString() : std::string();
+	}
+
+	// setValueNotifyingHost tells the plugin's controller and our listener (the tone is "changed", the Inspector
+	// refreshes), as an edit in the plugin's own window would.
+	void PluginHost::SetParameter(int index, float value, bool gesture)
+	{
+		if (!HasParameter(index)) return;
+		juce::AudioProcessorParameter* parameter = m_plugin->getParameters()[index];
+		value = std::clamp(value, 0.0f, 1.0f);
+		if (gesture) parameter->beginChangeGesture();
+		parameter->setValueNotifyingHost(value);
+		if (gesture) parameter->endChangeGesture();
+	}
+
+	void PluginHost::BeginGesture(int index)
+	{
+		if (HasParameter(index)) m_plugin->getParameters()[index]->beginChangeGesture();
+	}
+
+	void PluginHost::EndGesture(int index)
+	{
+		if (HasParameter(index)) m_plugin->getParameters()[index]->endChangeGesture();
 	}
 
 	bool PluginHost::OpenEditor(HWND window, std::function<void(int, int)> onResized, int maxWidth, int maxHeight)

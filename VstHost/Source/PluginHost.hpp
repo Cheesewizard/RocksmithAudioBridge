@@ -49,8 +49,43 @@ namespace VstHost
 		void SaveIfDirty();
 		bool TakeRestartRequest() { return false; }   // JUCE re-prepares the plugin itself when its layout changes
 
+		// Parameters, for the overlay's Inspector and its undo (Main.cpp). Main thread. `index` is the plugin's own
+		// parameter index (JUCE's getParameters order); values are normalized 0..1.
+		struct ParameterInfo
+		{
+			int index = 0;
+			std::string name;
+			float value = 0.0f;
+			std::string text;       // the value as the plugin shows it, without its unit
+			std::string label;      // its unit ("dB"); may be empty
+			int steps = 0;          // 0 = continuous; else how many values it takes
+			bool discrete = false;
+			bool boolean = false;
+		};
+		int ParameterCount() const;
+		// The parameters an Inspector lists (automatable ones, not the plugin's own bypass), in index order, at most
+		// `limit`; `total` is how many there are.
+		std::vector<ParameterInfo> ListParameters(int limit, int& total) const;
+		bool HasParameter(int index) const;
+		float ParameterValue(int index) const;
+		std::string ParameterName(int index) const;
+		// An edit from the page: `gesture` wraps it in beginChangeGesture / endChangeGesture (a single edit); a drag
+		// calls BeginGesture, SetParameter as often as it moves, then EndGesture.
+		void SetParameter(int index, float value, bool gesture);
+		void BeginGesture(int index);
+		void EndGesture(int index);
+		// Moves whenever a parameter changes (the page, the plugin's own window, its presets). Any thread.
+		uint32_t ParameterChanges() const { return m_parameterChanges.load(std::memory_order_relaxed); }
+
 		const std::string& Name() const { return m_name; }
+		// The delay the plugin reports for its processing (look-ahead, oversampling filters), in samples.
+		int LatencySamples() const;
 		bool HasEditor() const { return m_editor != nullptr; }
+		// The plugin draws a window of its own (JUCE's generic sliders, which OpenEditor falls back to, do not count).
+		bool HasOwnEditor() const { return m_plugin && m_plugin->hasEditor(); }
+		// The window the open editor sits in (OpenEditor's `editor`), none while no editor is open. Main.cpp's
+		// Inspector picture checks with it that the editor it made is still the plugin's (a reload closes it).
+		HWND EditorParent() const { return m_editor ? m_window : nullptr; }
 
 		// Stream thread. Stereo in and out; false (and silence) while the plugin is not ready.
 		bool Process(const float* inLeft, const float* inRight, float* left, float* right, int frames);
@@ -87,6 +122,7 @@ namespace VstHost
 		std::atomic<bool> m_inProcess{ false };
 		std::atomic<bool> m_dirty{ false };
 		std::atomic<unsigned long long> m_quietUntil{ 0 };   // GetTickCount64: changes before this are the load's, not edits
+		std::atomic<uint32_t> m_parameterChanges{ 0 };
 
 		std::string m_name;
 		std::string m_identifier;   // JUCE's PluginDescription identifier: names this plugin's settings file

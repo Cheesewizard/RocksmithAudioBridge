@@ -1,0 +1,107 @@
+# Builds stompbox-capi.dll from the pinned Stompbox commit (see UPSTREAM.md) into VstHost\Stompbox\bin.
+$ErrorActionPreference = 'Stop'
+
+$Commit = '17bc65264ff89a6b8a19843264292ca7762fdad3'
+$Repository = 'https://github.com/mikeoliphant/stompbox'
+$Here = $PSScriptRoot
+$Source = Join-Path $Here 'build\source'
+$Build = Join-Path $Here 'build\cmake'
+$Output = Join-Path $Here 'bin'
+
+function Invoke-Checked([string]$File, [string[]]$Arguments)
+{
+	& $File @Arguments
+	if ($LASTEXITCODE -ne 0) { throw "$File $($Arguments -join ' ') failed with exit code $LASTEXITCODE." }
+}
+
+if (-not (Test-Path (Join-Path $Source '.git')))
+{
+	New-Item -ItemType Directory -Force -Path $Source | Out-Null
+	Invoke-Checked git @('-C', $Source, 'init', '--quiet')
+	Invoke-Checked git @('-C', $Source, 'remote', 'add', 'origin', $Repository)
+}
+Invoke-Checked git @('-C', $Source, 'fetch', '--quiet', '--depth', '1', 'origin', $Commit)
+Invoke-Checked git @('-C', $Source, 'checkout', '--quiet', '--force', $Commit)
+Invoke-Checked git @('-C', $Source, 'submodule', 'update', '--init', '--recursive', '--depth', '1')
+
+# Local change: the remote server listens on this PC only.
+$Server = Join-Path $Source 'stompbox-core\StompboxServer.cpp'
+$Text = [System.IO.File]::ReadAllText($Server)
+$Upstream = 'iResult = getaddrinfo(NULL, DEFAULT_PORT, &hints, &result);'
+$Local = 'iResult = getaddrinfo("127.0.0.1", DEFAULT_PORT, &hints, &result);'
+if (-not $Text.Contains($Local))
+{
+	if (-not $Text.Contains($Upstream)) { throw "StompboxServer.cpp no longer has the line the localhost patch replaces; review the upstream change." }
+	[System.IO.File]::WriteAllText($Server, $Text.Replace($Upstream, $Local))
+}
+
+# Local change: register the circuit-modelled tone stack (Bassman, JCM800, AC30, ...) as a selectable pedal.
+# Upstream defines CreateTonestackPlugin but does not add it to the factory at the pinned commit.
+$Plugins = Join-Path $Source 'stompbox-stomps\DefaultPlugins.cpp'
+$Text = [System.IO.File]::ReadAllText($Plugins)
+$Anchor = 'factory.AddPlugin("EQ-7", &CreateEQ7Plugin);'
+$Registration = 'factory.AddPlugin("Tonestack", &CreateTonestackPlugin);'
+if (-not $Text.Contains($Registration))
+{
+	if (-not $Text.Contains($Anchor) -or -not $Text.Contains('StompBox* CreateTonestackPlugin(')) { throw "DefaultPlugins.cpp no longer matches the Tonestack registration patch; review the upstream change." }
+	[System.IO.File]::WriteAllText($Plugins, $Text.Replace($Anchor, $Anchor + "`n`t" + $Registration))
+}
+
+# Local change: describe the tone stack, which upstream leaves without a description (the browser shows it).
+$Text = [System.IO.File]::ReadAllText($Plugins)
+$Created = 'Tonestack* tonestack = new Tonestack();'
+$Described = $Created + "`n`ttonestack->Description = `"Classic amp tone stack: bass, middle and treble, modelled on amp circuits`";"
+if (-not $Text.Contains('tonestack->Description'))
+{
+	if (-not $Text.Contains($Created)) { throw "DefaultPlugins.cpp no longer creates the tone stack where the description patch expects it; review the upstream change." }
+	[System.IO.File]::WriteAllText($Plugins, $Text.Replace($Created, $Described))
+}
+
+# Local change: export DumpConfig (every pedal with its parameter definitions, Stompbox's own protocol) from the C
+# API, so the Tone designer page gets the same catalogue Stompbox's remote does.
+$CapiHeader = Join-Path $Source 'stompbox-capi\StompboxCAPI.h'
+$CapiSource = Join-Path $Source 'stompbox-capi\StompboxCAPI.cpp'
+$Header = [System.IO.File]::ReadAllText($CapiHeader)
+$Declaration = 'STOMPBOX_EXTERN const char* DumpConfig(void* processor);'
+$HeaderAnchor = 'STOMPBOX_EXTERN const char* DumpProgram(void* processor);'
+if (-not $Header.Contains($Declaration))
+{
+	if (-not $Header.Contains($HeaderAnchor)) { throw "StompboxCAPI.h no longer declares DumpProgram where the DumpConfig patch expects it." }
+	[System.IO.File]::WriteAllText($CapiHeader, $Header.Replace($HeaderAnchor, $HeaderAnchor + "`r`n`r`n" + $Declaration))
+	$Definition = @"
+
+const char* DumpConfig(void* processor)
+{
+    auto config = ((PluginProcessor*)processor)->DumpConfig();
+
+    size_t len = config.length() + 1;
+    char* buff = (char*)CoTaskMemAlloc(len);
+    strcpy(buff, config.c_str());
+
+    return buff;
+}
+"@
+	[System.IO.File]::AppendAllText($CapiSource, $Definition)
+}
+
+# CMake ships with Visual Studio's C++ workload but is on the PATH only in its Developer PowerShell; find it there.
+$CMake = (Get-Command cmake -ErrorAction SilentlyContinue).Source
+if (-not $CMake)
+{
+	$VsWhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+	if (Test-Path $VsWhere)
+	{
+		$VsPath = & $VsWhere -latest -version '[17.0,18.0)' -requires Microsoft.VisualStudio.Component.VC.CMake.Project -property installationPath
+		if ($VsPath) { $CMake = Join-Path $VsPath 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe' }
+	}
+	if (-not $CMake -or -not (Test-Path $CMake)) { throw 'CMake was not found. Add "C++ CMake tools for Windows" to Visual Studio 2022 (Visual Studio Installer, Modify), or run: winget install Kitware.CMake' }
+}
+
+Invoke-Checked $CMake @('-S', $Source, '-B', $Build, '-G', 'Visual Studio 17 2022', '-A', 'x64')
+Invoke-Checked $CMake @('--build', $Build, '--config', 'Release', '--target', 'stompbox-capi')
+
+$Dll = Get-ChildItem -Path $Build -Recurse -Filter 'stompbox-capi.dll' | Where-Object { $_.FullName -match '\\Release\\' } | Select-Object -First 1
+if (-not $Dll) { throw "The build finished but stompbox-capi.dll was not found under $Build." }
+New-Item -ItemType Directory -Force -Path $Output | Out-Null
+Copy-Item $Dll.FullName (Join-Path $Output 'stompbox-capi.dll') -Force
+Write-Host "stompbox-capi.dll ($Commit) -> $Output"

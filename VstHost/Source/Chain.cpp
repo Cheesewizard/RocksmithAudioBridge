@@ -243,6 +243,22 @@ namespace VstHost
 		return true;
 	}
 
+	bool Chain::Insert(int index, const std::wstring& path, const std::vector<char>& state, bool bypass, std::string& error)
+	{
+		if (Count() >= kMaxSlots) { error = "The chain is full (" + std::to_string(kMaxSlots) + " plugins)."; return false; }
+		auto slot = std::make_unique<Slot>();
+		if (!LoadSlot(*slot, path, error)) return false;
+		if (!state.empty()) slot->plugin->SetState(state);   // before it plays: no stream thread yet
+		slot->bypass = bypass;
+		index = std::clamp(index, 0, Count());
+		Pause();
+		m_slots.insert(m_slots.begin() + index, std::move(slot));
+		m_structureDirty = true;
+		Resume();
+		Log("chain: %ls back in at slot %d (%d in the chain)", path.c_str(), index + 1, Count());
+		return true;
+	}
+
 	bool Chain::Reload(const std::wstring& path, std::string& error, int& sparesDropped, std::vector<int>& slots)
 	{
 		sparesDropped = 0;
@@ -429,6 +445,15 @@ namespace VstHost
 			right[i] = inR[i] * outputGain;
 		}
 		RaisePeak(m_outputPeak, std::max(Peak(left, frames), Peak(right, frames)));
+	}
+
+	int Chain::LatencySamples()
+	{
+		if (m_chainBypass.load()) return 0;
+		int total = 0;
+		for (auto& slot : m_slots)
+			if (!slot->bypass.load()) total += slot->plugin->LatencySamples();
+		return total;
 	}
 
 	// Tone file: magic "RABTONE2", input and output trim (int32 tenths of a dB), slot count (uint32), then per slot
