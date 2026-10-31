@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64"><Configuration>Debug</Configuration><Platform>x64</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{C103920B-976F-4270-B882-7C3A50C023EF}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <RootNamespace>RocksmithAudioBridgeDriverHost</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <!-- 64-bit only: hosts a 64-bit-only ASIO driver for the bridge, which the 32-bit game cannot load itself
+       (../Remote64.hpp). Started by the bridge's stand-in driver; ships in the game root next to it. -->
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseDebugLibraries Condition="'$(Configuration)'=='Debug'">true</UseDebugLibraries>
+    <UseDebugLibraries Condition="'$(Configuration)'!='Debug'">false</UseDebugLibraries>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <TargetName>RocksmithAudioBridgeDriverHost</TargetName>
+    <OutDir>$(ProjectDir)..\..\..\build\native\$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)..\..\..\build\DriverHost64\$(Configuration)\</IntDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <WarningLevel>Level3</WarningLevel>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>_WINDOWS;UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)'=='Debug'">_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)'!='Debug'">NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary Condition="'$(Configuration)'=='Debug'">MultiThreadedDebug</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)'!='Debug'">MultiThreaded</RuntimeLibrary>
+      <Optimization Condition="'$(Configuration)'!='Debug'">MaxSpeed</Optimization>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <AdditionalDependencies>ole32.lib;shell32.lib;advapi32.lib;user32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="DriverHost64.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\Remote64.hpp" />
+    <ClInclude Include="..\..\..\Mod\Shared\AsioInterface.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <!-- Into the game root after every build, next to the bridge driver (shared DeployToGame.targets). -->
+  <Target Name="CollectGameDeployFiles" BeforeTargets="DeployToGame">
+    <ItemGroup>
+      <GameDeployFile Include="$(TargetPath)" Destination="$(RocksmithInstallDir)\$(TargetName)$(TargetExt)" />
+    </ItemGroup>
+  </Target>
+  <Import Project="$(MSBuildThisFileDirectory)..\..\..\DeployToGame.targets" />
+</Project>
