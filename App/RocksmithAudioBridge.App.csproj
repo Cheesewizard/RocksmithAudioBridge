@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Rocksmith Audio Bridge's own desktop app (replaces the 4.x WinForms GUI/, RSMods.exe). Avalonia 11 + Fluent, MVVM
+    with CommunityToolkit.Mvvm. It manages only Rocksmith Audio Bridge: upstream's configurator keeps managing
+    upstream's RSMods features. All logic lives in RocksmithAudioBridge.Core; this project is views and view models.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PlatformTarget>x64</PlatformTarget>
+    <RootNamespace>RocksmithAudioBridge.App</RootNamespace>
+    <AssemblyName>RocksmithAudioBridge</AssemblyName>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <ApplicationIcon>Assets\AudioBridge256.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- The class library and its tests live in sub-folders of this one; keep them out of this project's globs. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);RocksmithAudioBridge.Core\**;RocksmithAudioBridge.Core.Tests\**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.22" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="RocksmithAudioBridge.Core\RocksmithAudioBridge.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\AudioBridgeLogo.png" />
+    <AvaloniaResource Include="Assets\AudioBridge256.ico" />
+  </ItemGroup>
+
+  <!-- A dev build carries the manifest the last mod build dumped (Mod/Build-ModDll.ps1), so the Settings pages work
+       straight from bin. The installed app finds the one shipped beside it. -->
+  <ItemGroup Condition="Exists('..\build\mod\mods.manifest.json')">
+    <None Include="..\build\mod\mods.manifest.json" Link="mods.manifest.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

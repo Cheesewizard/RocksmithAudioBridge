@@ -1,0 +1,332 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="using:RocksmithAudioBridge.App.ViewModels"
+        xmlns:v="using:RocksmithAudioBridge.App.Views"
+        mc:Ignorable="d"
+        x:Class="RocksmithAudioBridge.App.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="Rocksmith Audio Bridge"
+        Icon="avares://RocksmithAudioBridge/Assets/AudioBridge256.ico"
+        Width="1180" Height="800" MinWidth="860" MinHeight="560"
+        WindowStartupLocation="CenterScreen">
+
+  <Window.Resources>
+    <v:ToneBrushConverter x:Key="Tone" />
+  </Window.Resources>
+
+  <Window.DataTemplates>
+
+    <!-- ===== shared pieces ===== -->
+
+    <DataTemplate DataType="vm:StatusRow">
+      <Grid ColumnDefinitions="220,*" Margin="0,5">
+        <TextBlock Classes="muted" Text="{Binding Label}" />
+        <TextBlock Grid.Column="1" Text="{Binding Value}" TextWrapping="Wrap"
+                   Foreground="{Binding Tone, Converter={StaticResource Tone}, ConverterParameter=TextBrush}" />
+      </Grid>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:SettingFieldViewModel">
+      <Grid ColumnDefinitions="*,Auto" Margin="0,8" IsVisible="{Binding IsVisible}">
+        <StackPanel Spacing="2" Margin="0,0,24,0" VerticalAlignment="Center">
+          <TextBlock Classes="label" Text="{Binding Label}" />
+          <TextBlock Classes="caption" Text="{Binding Hint}" IsVisible="{Binding HasHint}" />
+          <TextBlock Classes="caption" Foreground="{StaticResource FaintBrush}" Text="{Binding Location}" />
+          <TextBlock Classes="caption" Foreground="{StaticResource BadBrush}" Text="{Binding Error}" IsVisible="{Binding Error, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+        </StackPanel>
+        <Panel Grid.Column="1" VerticalAlignment="Center" MinWidth="240">
+          <ToggleSwitch IsVisible="{Binding IsBool}" IsChecked="{Binding BoolValue}" OnContent="On" OffContent="Off" HorizontalAlignment="Right" />
+          <NumericUpDown IsVisible="{Binding IsNumber}" Value="{Binding NumberValue}" Minimum="{Binding Minimum}" Maximum="{Binding Maximum}"
+                         Increment="{Binding Increment}" FormatString="{Binding NumberFormat}" Width="240" />
+          <ComboBox IsVisible="{Binding IsChoice}" ItemsSource="{Binding Choices}" SelectedItem="{Binding ChoiceValue}" Width="240" />
+          <TextBox IsVisible="{Binding IsText}" Text="{Binding TextValue, UpdateSourceTrigger=LostFocus}" Width="240" />
+        </Panel>
+      </Grid>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:SettingsGroupViewModel">
+      <Border Classes="card">
+        <StackPanel>
+          <TextBlock Classes="cardTitle" Text="{Binding Title}" />
+          <TextBlock Classes="muted" IsVisible="{Binding IsEmpty}" Text="The mod manifest declares no settings for this yet." />
+          <ItemsControl ItemsSource="{Binding Fields}" />
+        </StackPanel>
+      </Border>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:AuditItemViewModel">
+      <Border Classes="card">
+        <Grid ColumnDefinitions="Auto,*,Auto">
+          <Border Width="10" Height="10" CornerRadius="5" VerticalAlignment="Top" Margin="0,5,14,0"
+                  Background="{Binding Tone, Converter={StaticResource Tone}}" />
+          <StackPanel Grid.Column="1" Spacing="4">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <TextBlock Classes="label" Text="{Binding Name}" />
+              <TextBlock Classes="caption" VerticalAlignment="Center" Text="{Binding StateText}"
+                         Foreground="{Binding Tone, Converter={StaticResource Tone}}" />
+            </StackPanel>
+            <TextBlock Classes="muted" Text="{Binding Detail}" />
+          </StackPanel>
+          <Button Grid.Column="2" Classes="primary" VerticalAlignment="Center" Margin="16,0,0,0"
+                  IsVisible="{Binding HasFix}" Content="{Binding FixLabel}" Command="{Binding FixCommand}" />
+        </Grid>
+      </Border>
+    </DataTemplate>
+
+    <!-- ===== pages ===== -->
+
+    <DataTemplate DataType="vm:OverviewViewModel">
+      <StackPanel>
+        <Border Classes="card">
+          <StackPanel>
+            <TextBlock Classes="cardTitle" Text="Status" />
+            <ItemsControl ItemsSource="{Binding Rows}" />
+            <Button Classes="ghost" Margin="0,12,0,0" Content="Change Rocksmith folder..." Command="{Binding ChooseGameFolderCommand}" />
+          </StackPanel>
+        </Border>
+        <Border Classes="card">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="label" Text="Audio bridge" />
+              <TextBlock Classes="caption" Text="Off leaves Rocksmith's own audio path alone (no ASIO driver, no overlay audio features). Close Rocksmith to change it." />
+            </StackPanel>
+            <ToggleSwitch Grid.Column="1" IsChecked="{Binding Power}" IsEnabled="{Binding CanChangePower}" OnContent="On" OffContent="Off" />
+          </Grid>
+        </Border>
+      </StackPanel>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:InputViewModel">
+      <StackPanel>
+        <Border Classes="card">
+          <StackPanel Spacing="10">
+            <TextBlock Classes="cardTitle" Text="Guitar input" />
+            <StackPanel Orientation="Horizontal" Spacing="2">
+              <ToggleButton Classes="segment" Content="Real Tone Cable" IsChecked="{Binding IsCable, Mode=OneWay}" IsEnabled="{Binding CanSwitch}" Command="{Binding UseCableCommand}" CornerRadius="7,0,0,7" />
+              <ToggleButton Classes="segment" Content="ASIO interface" IsChecked="{Binding IsAsio, Mode=OneWay}" IsEnabled="{Binding CanSwitch}" Command="{Binding UseAsioCommand}" CornerRadius="0,7,7,0" />
+            </StackPanel>
+            <TextBlock Classes="caption" Text="Switches by renaming RS_ASIO's avrt.dll and RS_ASIO.dll in the game folder (.disabled = off). Rocksmith must be closed." />
+            <TextBlock Classes="muted" Foreground="{StaticResource WarnBrush}" Text="{Binding ModeNote}" IsVisible="{Binding ModeNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+          </StackPanel>
+        </Border>
+        <Border Classes="card">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="4">
+              <TextBlock Classes="cardTitle" Text="Rocksmith's audio settings" Margin="0" />
+              <TextBlock Text="{Binding RocksmithDetail}" TextWrapping="Wrap" Foreground="{Binding RocksmithTone, Converter={StaticResource Tone}, ConverterParameter=TextBrush}" />
+              <TextBlock Classes="caption" Text="{Binding Recommended}" />
+            </StackPanel>
+            <Button Grid.Column="1" Classes="primary" VerticalAlignment="Center" Margin="16,0,0,0" Content="Use recommended"
+                    IsVisible="{Binding RocksmithNeedsFix}" Command="{Binding UseRecommendedCommand}" />
+          </Grid>
+        </Border>
+        <ContentControl Content="{Binding Conditioner}" />
+      </StackPanel>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:OutputViewModel">
+      <StackPanel>
+        <Border Classes="card" IsVisible="{Binding !IsAsioMode}">
+          <TextBlock Classes="muted" Text="The guitar input is the Real Tone Cable, so Rocksmith does not use the bridge's ASIO driver now. These choices apply once you switch to ASIO on the Input page." />
+        </Border>
+        <Border Classes="card">
+          <StackPanel Spacing="12">
+            <TextBlock Classes="cardTitle" Text="ASIO interface" Margin="0" />
+            <Grid ColumnDefinitions="*,Auto">
+              <StackPanel Spacing="2" Margin="0,0,24,0">
+                <TextBlock Classes="label" Text="Interface" />
+                <TextBlock Classes="caption" Text="The interface the bridge opens for the guitar and the game's sound. Switches at once while Rocksmith runs." />
+              </StackPanel>
+              <ComboBox Grid.Column="1" Width="300" ItemsSource="{Binding Drivers}" SelectedItem="{Binding SelectedDriver}" IsEnabled="{Binding PickersEnabled}" />
+            </Grid>
+            <Grid ColumnDefinitions="*,Auto">
+              <StackPanel Spacing="2" Margin="0,0,24,0">
+                <TextBlock Classes="label" Text="Input interface" />
+                <TextBlock Classes="caption" Text="Where the guitar comes from. A second interface is kept in time with the first, adding a few milliseconds." />
+              </StackPanel>
+              <ComboBox Grid.Column="1" Width="300" ItemsSource="{Binding InputDrivers}" SelectedItem="{Binding SelectedInputDriver}" IsEnabled="{Binding PickersEnabled}" />
+            </Grid>
+            <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding HasSuggestion}">
+              <TextBlock Classes="muted" VerticalAlignment="Center" Text="{Binding SuggestedTarget, StringFormat='RS_ASIO.ini or your only driver points at {0}.'}" />
+              <Button Classes="primary" Content="Use it" Command="{Binding UseSuggestionCommand}" />
+            </StackPanel>
+            <TextBlock Text="{Binding DriverStatus}" TextWrapping="Wrap" Foreground="{Binding DriverTone, Converter={StaticResource Tone}}" />
+          </StackPanel>
+        </Border>
+        <Border Classes="card">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="4" Margin="0,0,24,0">
+              <TextBlock Classes="cardTitle" Text="Rocksmith Audio Bridge ASIO driver" Margin="0" />
+              <TextBlock Text="{Binding Registration}" TextWrapping="Wrap" Foreground="{Binding RegistrationTone, Converter={StaticResource Tone}}" />
+              <TextBlock Classes="caption" Text="The installer registers it. Repair runs a separate elevated helper (one Windows admin prompt); this app itself never runs as administrator." />
+            </StackPanel>
+            <Button Grid.Column="1" Classes="admin" VerticalAlignment="Center" Command="{Binding RepairDriverCommand}" IsEnabled="{Binding IsIdle}">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Classes="icon" Text="&#xEA18;" Foreground="{StaticResource WarnBrush}" FontSize="14" />
+                <TextBlock Text="Repair driver (admin)" />
+              </StackPanel>
+            </Button>
+          </Grid>
+        </Border>
+        <ContentControl Content="{Binding Routing}" />
+      </StackPanel>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:DropPedalViewModel">
+      <ContentControl Content="{Binding Settings}" />
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:NoteByNoteViewModel">
+      <StackPanel>
+        <Border Classes="card">
+          <StackPanel Spacing="10">
+            <TextBlock Classes="cardTitle" Text="Riff Repeater menu" Margin="0" />
+            <TextBlock Text="{Binding MenuState}" TextWrapping="Wrap" Foreground="{Binding MenuTone, Converter={StaticResource Tone}, ConverterParameter=TextBrush}" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Classes="ghost" Content="Check" Command="{Binding CheckMenuCommand}" IsEnabled="{Binding IsIdle}" />
+              <Button Classes="primary" Content="Add to menu" Command="{Binding InstallMenuCommand}" IsEnabled="{Binding CanChangeMenu}" />
+              <Button Classes="ghost" Content="Remove from menu" Command="{Binding UninstallMenuCommand}" IsEnabled="{Binding CanChangeMenu}" />
+            </StackPanel>
+            <TextBlock Classes="caption" Text="Rebuilds the game's cache.psarc with only the NOTE BY NOTE and FLOW MODE rows changed. Before the first change a recovery copy is kept as cache.pre-note-by-note-menu.psarc. Rocksmith must be closed." />
+          </StackPanel>
+        </Border>
+        <ContentControl Content="{Binding Settings}" />
+      </StackPanel>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:RecorderViewModel">
+      <StackPanel>
+        <Border Classes="card">
+          <StackPanel Spacing="12">
+            <TextBlock Classes="cardTitle" Text="Recordings" Margin="0" />
+            <Grid ColumnDefinitions="*,Auto,Auto">
+              <Border Background="{StaticResource TrackBrush}" CornerRadius="7" Padding="12,8" Margin="0,0,8,0">
+                <TextBlock Text="{Binding Folder}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Folder}" />
+              </Border>
+              <Button Grid.Column="1" Classes="ghost" Content="Change" Margin="0,0,8,0" Command="{Binding ChangeFolderCommand}" />
+              <Button Grid.Column="2" Classes="ghost" Content="Open" Command="{Binding OpenRecordingsCommand}" />
+            </Grid>
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Classes="label" VerticalAlignment="Center" Text="Record" />
+              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="16">
+                <RadioButton GroupName="capture" Content="Video and sound" IsChecked="{Binding Video}" />
+                <RadioButton GroupName="capture" Content="Sound only" IsChecked="{Binding AudioOnly}" />
+              </StackPanel>
+            </Grid>
+            <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding Video}">
+              <TextBlock Classes="label" VerticalAlignment="Center" Text="Video quality" />
+              <ComboBox Grid.Column="1" Width="240" ItemsSource="{Binding Qualities}" SelectedItem="{Binding Quality}" />
+            </Grid>
+          </StackPanel>
+        </Border>
+        <ContentControl Content="{Binding Settings}" />
+      </StackPanel>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:ToneDesignerViewModel">
+      <StackPanel>
+        <Border Classes="card">
+          <StackPanel>
+            <TextBlock Classes="cardTitle" Text="Files" />
+            <ItemsControl ItemsSource="{Binding Rows}" />
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
+              <Button Classes="ghost" Content="Open tones folder" Command="{Binding OpenStompboxCommand}" />
+              <Button Classes="ghost" Content="Open setup exports" Command="{Binding OpenBackupsCommand}" />
+            </StackPanel>
+          </StackPanel>
+        </Border>
+        <Border Classes="card" IsVisible="{Binding !HasSettings}">
+          <TextBlock Classes="muted" Text="The Tone designer declares no settings in the mod manifest yet; everything is on the overlay's Guitar Tone page." />
+        </Border>
+      </StackPanel>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:AuditViewModel">
+      <StackPanel>
+        <TextBlock Classes="section" Text="{Binding ModeName, StringFormat='CHECKS FOR: {0}'}" Margin="0,0,0,10" />
+        <ItemsControl ItemsSource="{Binding Items}" />
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Button Classes="ghost" Content="Restore my RS_ASIO.ini" IsVisible="{Binding CanRestore}" Command="{Binding RestoreRsAsioCommand}" />
+          <Button Classes="ghost" Content="Open backups" Command="{Binding OpenBackupsCommand}" />
+        </StackPanel>
+      </StackPanel>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:SettingsViewModel">
+      <StackPanel>
+        <Border Classes="card" IsVisible="{Binding HasNoManifest}">
+          <TextBlock Classes="muted" Text="{Binding ManifestSource, StringFormat='No settings: {0} Build the mod (Mod/Build-ModDll.ps1) to dump build\\mod\\mods.manifest.json.'}" />
+        </Border>
+        <ItemsControl ItemsSource="{Binding Groups}" />
+        <TextBlock Classes="caption" Foreground="{StaticResource FaintBrush}" Text="{Binding ManifestSource, StringFormat='Manifest: {0}'}" />
+      </StackPanel>
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:AboutViewModel">
+      <StackPanel>
+        <Border Classes="card">
+          <StackPanel Spacing="6">
+            <TextBlock Classes="cardTitle" Text="{Binding Version}" />
+            <TextBlock Classes="muted" Text="Audio routing for Rocksmith 2014: Real Tone Cable and ASIO input through the bridge's own ASIO driver, Drop Pedal and Speaker Mode, the Tone designer, the recorder and Note by Note. Most of it is used in game, on the overlay." />
+          </StackPanel>
+        </Border>
+        <Border Classes="card">
+          <StackPanel Spacing="10">
+            <TextBlock Classes="cardTitle" Text="Report a problem" Margin="0" />
+            <TextBlock Classes="muted" Text="{Binding Email, StringFormat='Zips the last two launches’ logs and your audio settings (your Windows user name removed) and opens an email to {0}. Close Rocksmith first.'}" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Classes="primary" Content="Make bug report" Command="{Binding MakeReportCommand}" IsEnabled="{Binding IsIdle}" />
+              <Button Classes="ghost" Content="Open reports folder" Command="{Binding OpenReportsCommand}" />
+            </StackPanel>
+            <TextBlock Classes="caption" Text="{Binding ReportPath}" IsVisible="{Binding HasReport}" />
+          </StackPanel>
+        </Border>
+      </StackPanel>
+    </DataTemplate>
+  </Window.DataTemplates>
+
+  <Grid ColumnDefinitions="232,*">
+
+    <!-- Sidebar, as in the overlay: logo header, page list, game state at the foot. -->
+    <Border Background="{StaticResource HeaderBrush}" BorderBrush="{StaticResource CardEdgeBrush}" BorderThickness="0,0,1,0">
+      <DockPanel Margin="12,16">
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="10" Margin="6,0,0,20">
+          <Image Source="avares://RocksmithAudioBridge/Assets/AudioBridgeLogo.png" Width="40" Height="40" />
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="Rocksmith" FontWeight="SemiBold" FontSize="14" />
+            <TextBlock Text="Audio Bridge" Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold" FontSize="14" />
+          </StackPanel>
+        </StackPanel>
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="8,12,0,0">
+          <TextBlock Classes="icon" FontSize="12" Text="&#xE7FC;" Foreground="{StaticResource FaintBrush}" />
+          <TextBlock Classes="caption" Text="{Binding GameStatus}" />
+        </StackPanel>
+        <ListBox Classes="nav" ItemsSource="{Binding Pages}" SelectedItem="{Binding SelectedPage}">
+          <ListBox.ItemTemplate>
+            <DataTemplate DataType="vm:PageViewModel">
+              <StackPanel Orientation="Horizontal" Spacing="12">
+                <TextBlock Classes="icon" Text="{Binding Glyph}" Foreground="{StaticResource MutedBrush}" />
+                <TextBlock Text="{Binding Title}" VerticalAlignment="Center" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </Border>
+
+    <!-- The page: title, lead, inline feedback, then the page's own cards. -->
+    <ScrollViewer Grid.Column="1" x:Name="PageScroller">
+      <StackPanel Margin="36,28,36,28" MaxWidth="900" HorizontalAlignment="Left">
+        <TextBlock Classes="pageTitle" Text="{Binding SelectedPage.Title, FallbackValue=''}" />
+        <TextBlock Classes="pageLead" Text="{Binding SelectedPage.Lead, FallbackValue=''}" />
+        <Border Classes="card" Padding="16,10" IsVisible="{Binding SelectedPage.HasMessage, FallbackValue=False}">
+          <TextBlock TextWrapping="Wrap" Text="{Binding SelectedPage.Message, FallbackValue=''}"
+                     Foreground="{Binding SelectedPage.MessageTone, Converter={StaticResource Tone}, ConverterParameter=TextBrush, FallbackValue={StaticResource TextBrush}}" />
+        </Border>
+        <ContentControl Content="{Binding SelectedPage}" />
+      </StackPanel>
+    </ScrollViewer>
+  </Grid>
+</Window>

@@ -1,0 +1,77 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Rocksmith Audio Bridge logic with no UI: game folder detection, Cable / ASIO input switch, RS_ASIO.ini set-up,
+    the ASIO proxy driver registration and status, the audit, the bug report, the Note by Note menu installer and
+    our RSMods.ini settings. Ported from the 4.x WinForms GUI (GUI/), behaviour, registry, ini and log names kept.
+    The desktop app (App/RocksmithAudioBridge.App.csproj) uses it; the installer can reuse it later.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <!-- Off project-wide because the GUI.Core files linked below predate nullable reference types; our own
+         files opt in with #nullable enable. -->
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <PlatformTarget>x64</PlatformTarget>
+    <RootNamespace>RocksmithAudioBridge.Core</RootNamespace>
+    <AssemblyName>RocksmithAudioBridge.Core</AssemblyName>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="RocksmithAudioBridge.Core.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
+    <!-- The audit lists capture endpoints (the Real Tone Cable) through WASAPI; the sub-package only, no UI. -->
+    <PackageReference Include="NAudio.Wasapi" Version="2.0.0" />
+    <PackageReference Include="System.Security.Permissions" Version="8.0.0" />
+  </ItemGroup>
+
+  <!--
+    Upstream's manifest model and its comment-preserving INI reader/writer, linked as source rather than a
+    ProjectReference: GUI.Core.csproj pulls in RocksmithToolkitLib, WinForms, Twitch, NAudio.WinMM, WMI and more, and a
+    ProjectReference would build inside the External/RSMods submodule (obj/bin there). These four files have no
+    dependencies beyond the BCL. Kept byte-identical to upstream; an upstream change arrives with the submodule bump.
+  -->
+  <ItemGroup>
+    <Compile Include="..\..\External\RSMods\GUI.Core\Settings\SettingDescriptor.cs" Link="Upstream\SettingDescriptor.cs" />
+    <Compile Include="..\..\External\RSMods\GUI.Core\Settings\ManifestService.cs" Link="Upstream\ManifestService.cs" />
+    <Compile Include="..\..\External\RSMods\GUI.Core\Settings\IniManager.cs" Link="Upstream\IniManager.cs" />
+    <Compile Include="..\..\External\RSMods\GUI.Core\Util\WinMsgUtil.cs" Link="Upstream\WinMsgUtil.cs" />
+  </ItemGroup>
+
+  <!--
+    The Note by Note menu installer unpacks and repacks cache.psarc with RocksmithToolkitLib and edits cache7.7z with
+    SevenZipSharp, the same libraries the 4.x GUI used, taken from upstream's RuntimeAssets. RocksmithToolkitLib loads
+    System.Windows.Forms, so the Windows Desktop framework is referenced (no WinForms global usings).
+  -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" />
+    <Reference Include="RocksmithToolkitLib"><HintPath>..\..\External\RSMods\RuntimeAssets\RocksmithToolkitLib.dll</HintPath><Private>true</Private></Reference>
+    <Reference Include="SevenZipSharp"><HintPath>..\..\External\RSMods\RuntimeAssets\SevenZipSharp.dll</HintPath><Private>true</Private></Reference>
+    <Reference Include="Newtonsoft.Json"><HintPath>..\..\External\RSMods\RuntimeAssets\Newtonsoft.Json.dll</HintPath><Private>true</Private></Reference>
+    <Reference Include="MiscUtil"><HintPath>..\..\External\RSMods\RuntimeAssets\MiscUtil.dll</HintPath><Private>true</Private></Reference>
+    <Reference Include="zlib.net"><HintPath>..\..\External\RSMods\RuntimeAssets\zlib.net.dll</HintPath><Private>true</Private></Reference>
+    <Reference Include="X360"><HintPath>..\..\External\RSMods\RuntimeAssets\X360.dll</HintPath><Private>true</Private></Reference>
+    <!-- The rest of RuntimeAssets' top-level libraries (the 7z64.dll native, RocksmithToolkitLib's own dependencies)
+         ship beside the app as loose files, the way upstream's GUI.Avalonia ships them. -->
+    <None Include="..\..\External\RSMods\RuntimeAssets\*.dll"
+          Exclude="..\..\External\RSMods\RuntimeAssets\RocksmithToolkitLib.dll;..\..\External\RSMods\RuntimeAssets\SevenZipSharp.dll;..\..\External\RSMods\RuntimeAssets\Newtonsoft.Json.dll;..\..\External\RSMods\RuntimeAssets\MiscUtil.dll;..\..\External\RSMods\RuntimeAssets\zlib.net.dll;..\..\External\RSMods\RuntimeAssets\X360.dll"
+          Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <!-- RocksmithToolkitLib refuses to start (even to unpack a psarc) without its tools\ and ddc\ folders beside the app. -->
+    <None Include="..\..\External\RSMods\RuntimeAssets\tools\**\*.*"
+          Link="tools\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <None Include="..\..\External\RSMods\RuntimeAssets\ddc\**\*.*"
+          Link="ddc\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <!-- The pinned UsbDk package and its licence, the same embedded resource names the 4.x GUI used. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\build\resources\UsbDk\UsbDk_1.0.22_x64.msi" LogicalName="RSMods.UsbDk_1.0.22_x64.msi" />
+    <EmbeddedResource Include="..\..\build\resources\UsbDk\LICENSE.txt" LogicalName="RSMods.UsbDk_LICENSE.txt" />
+  </ItemGroup>
+
+</Project>
