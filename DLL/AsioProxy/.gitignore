@@ -1,6 +1,0 @@
-# Standalone build outputs (built by build.sh; not part of the .sln yet)
-*.obj
-*.dll
-*.exp
-*.lib
-*.exe
