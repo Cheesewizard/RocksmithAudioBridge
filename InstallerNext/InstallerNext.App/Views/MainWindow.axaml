@@ -1,0 +1,47 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="RocksmithAudioBridge.Setup.App.Views.MainWindow"
+        Title="Rocksmith Audio Bridge Setup"
+        Width="760" Height="600" MinWidth="620" MinHeight="480"
+        WindowStartupLocation="CenterScreen"
+        Icon="/AudioBridge256.ico">
+
+  <Grid RowDefinitions="Auto,*">
+    <Border Padding="28,20" Background="#20242B">
+      <StackPanel Spacing="4">
+        <TextBlock FontSize="26" FontWeight="SemiBold" Foreground="White" Text="Rocksmith Audio Bridge" />
+        <TextBlock FontSize="14" Foreground="#C8CDD5" Text="Installs the mod, its audio driver and the Rocksmith Audio Bridge app" />
+      </StackPanel>
+    </Border>
+
+    <Grid Grid.Row="1" Margin="24" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto" RowSpacing="12">
+      <StackPanel Spacing="4">
+        <TextBlock FontSize="16" FontWeight="SemiBold" Text="Rocksmith 2014 folder" />
+        <TextBlock Opacity="0.75" TextWrapping="Wrap" Text="The folder with Rocksmith2014.exe and cache.psarc." />
+      </StackPanel>
+
+      <Grid Grid.Row="1" ColumnDefinitions="*,Auto" ColumnSpacing="10">
+        <TextBox x:Name="FolderBox" VerticalContentAlignment="Center" />
+        <Button x:Name="BrowseButton" Grid.Column="1" MinWidth="92" Content="Browse…" />
+      </Grid>
+
+      <WrapPanel Grid.Row="2" Orientation="Horizontal">
+        <CheckBox x:Name="StartMenuBox" Margin="0,0,18,0" IsChecked="True" Content="Start menu shortcut" />
+        <CheckBox x:Name="DesktopBox" Margin="0,0,18,0" Content="Desktop shortcut" />
+        <CheckBox x:Name="LaunchBox" Margin="0,0,18,0" IsChecked="True" Content="Open the app afterwards" />
+      </WrapPanel>
+
+      <TextBlock x:Name="StatusText" Grid.Row="3" FontWeight="SemiBold" TextWrapping="Wrap" />
+
+      <TextBox x:Name="LogBox" Grid.Row="4" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap"
+               FontFamily="Consolas,Courier New,monospace" FontSize="12" />
+
+      <Grid Grid.Row="5" ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="10">
+        <Button x:Name="PlanButton" Content="Show plan" />
+        <ProgressBar x:Name="Busy" Grid.Column="1" IsIndeterminate="True" IsVisible="False" Margin="12,0" />
+        <Button x:Name="UninstallButton" Grid.Column="2" Content="Uninstall" IsVisible="False" />
+        <Button x:Name="InstallButton" Grid.Column="3" MinWidth="150" Padding="18,10" Classes="accent" Content="Install" />
+      </Grid>
+    </Grid>
+  </Grid>
+</Window>

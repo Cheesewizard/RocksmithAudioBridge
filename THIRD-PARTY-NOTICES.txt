@@ -1,0 +1,202 @@
+Rocksmith Audio Bridge: third-party notices
+===========================================
+
+Rocksmith Audio Bridge is Copyright (c) 2026 Cheesewizard and licensed under the MIT License (LICENSE.txt), for the
+code Cheesewizard wrote. NOTICE.txt explains its relation to upstream RSMods. This file lists the third-party
+components that ship in a Rocksmith Audio Bridge release, which file each one is in, its licence, and where the
+licence text is. Paths under ThirdParty\ are relative to this file (the installer puts it in
+<Rocksmith 2014>\RocksmithAudioBridge\).
+
+What ships where
+----------------
+  xinput1_3.dll            upstream RSMods (External/RSMods, published without a licence; its code remains the
+                           property of its authors) built with our mods compiled in
+  RocksmithAudioBridgeAsio.dll, RocksmithAudioBridgeAsio64.dll, RocksmithAudioBridgeDriverHost.exe
+                           our ASIO bridge driver and its 64-bit host (MIT, ours)
+  RocksmithAudioBridgeVstHost.exe
+                           the VST host, built with JUCE and therefore AGPLv3 (see JUCE below)
+  stompbox-capi.dll        the Stompbox engine, GPL-3.0, a separate DLL
+  RSMods\RSMods.exe and its folder
+                           upstream RSMods' configurator, installed unchanged from upstream's payload
+  RSMods\AudioBridge\      our helper exe (MIT, ours) with ONNX Runtime, soxr.dll and rswindowcapture.dll
+  RocksmithAudioBridge\    our desktop app (MIT, ours), self-contained .NET 8 with Avalonia
+  UsbDk                    installed system-wide from the official UsbDk 1.0.22 x64 MSI (Apache-2.0)
+
+
+Compiled into xinput1_3.dll (our mods)
+--------------------------------------
+Signalsmith Stretch        MIT License. Copyright (c) 2022 Geraint Luff / Signalsmith Audio Ltd.
+                           ThirdParty\SignalsmithStretch\LICENSE.txt
+signalsmith-linear         MIT License. Copyright (c) 2025 Signalsmith Audio.
+                           ThirdParty\SignalsmithStretch\signalsmith-linear-LICENSE.txt
+UsbDk headers              Apache License 2.0. Copyright (c) 2013-2014 Red Hat, Inc. Developed by Daynix Computing
+                           LTD. Two headers (UsbDkHelper.h, UsbDkData.h) are copied into Mod/AudioBridge/Cable.
+                           ThirdParty\UsbDk\LICENSE.txt (the Apache License 2.0 text).
+VexFlow                    MIT License. Copyright (c) 2010 Mohit Muthanna Cheppudira. Layout ideas adapted in the
+                           Note by Note tab window. ThirdParty\VexFlow\LICENSE.txt
+
+Compiled into xinput1_3.dll (upstream RSMods' own libraries, inherited)
+-----------------------------------------------------------------------
+Dear ImGui                 MIT License. Copyright (c) Omar Cornut.
+Roboto font                Apache License 2.0. Copyright Google. Embedded by upstream (RobotoFont.cpp).
+JSON for Modern C++        MIT License. Copyright (c) Niels Lohmann.
+SimpleIni                  MIT License. Copyright (c) Brodie Thiesfield.
+RtMidi                     MIT-style licence. Copyright (c) Gary P. Scavone.
+Microsoft Detours          Inherited from upstream RSMods (DLL/Lib/Detours).
+Each is under External/RSMods/DLL/Lib in the source; the MIT text below applies to the MIT ones.
+
+RocksmithAudioBridgeVstHost.exe
+-------------------------------
+JUCE                       GNU Affero General Public License v3. Copyright (c) Raw Material Software Limited.
+                           The VST host is therefore licensed under the AGPLv3: ThirdParty\VstHost\LICENSE.txt
+                           (with where its source is), JUCE's licence: ThirdParty\VstHost\JUCE-LICENSE.txt.
+                           JUCE stays in the VST host only; no other part of the product links it.
+JUCE bundled libraries     zlib, libpng, libjpeg, libwebp, HarfBuzz, SheenBidi, lunasvg / plutovg and the VST3 SDK
+                           (MIT, Steinberg Media Technologies GmbH; VST is a registered trademark of Steinberg),
+                           each under its own licence: ThirdParty\VstHost\THIRD-PARTY-NOTICES.txt
+TONE3000 plugin engine     MIT License. Copyright (c) 2026 TONE3000. ThirdParty\VstHost\Tone3000-LICENSE.txt
+NeuralAmpModelerCore       MIT License. Copyright (c) 2023 Steven Atkinson. ThirdParty\VstHost\NeuralAmpModelerCore-LICENSE.txt
+AudioDSPTools              MIT License. Copyright (c) 2023 Steven Atkinson. ThirdParty\VstHost\AudioDSPTools-LICENSE.txt
+Eigen                      Mozilla Public License 2.0. ThirdParty\VstHost\Eigen-COPYING.MPL2.txt. Eigen's source is
+                           at https://gitlab.com/libeigen/eigen and in VstHost/Lib/Tone3000 of our source.
+
+stompbox-capi.dll
+-----------------
+Stompbox                   GNU General Public License v3. Mike Oliphant and contributors. A separate DLL the VST
+                           host loads. ThirdParty\Stompbox\LICENSE.txt, ThirdParty\Stompbox\THIRD-PARTY-NOTICES.txt
+                           (with where its corresponding source is).
+
+NAM and Airwindows plug-ins
+---------------------------
+When a release includes them, they ship as their own VST3 files under their own licences, next to their licence
+texts. They are not linked into any of our binaries.
+
+RSMods\AudioBridge\ (helper exe)
+--------------------------------
+ONNX Runtime               MIT License. Copyright (c) Microsoft Corporation. ThirdParty\onnxruntime\LICENSE.txt and
+                           its own notices: ThirdParty\onnxruntime\ThirdPartyNotices.txt
+SoX Resampler (soxr)       GNU Lesser General Public License 2.1. Copyright (c) 2007-18 robs@users.sourceforge.net.
+                           Shipped as a separate soxr.dll, which may be replaced by the user.
+                           ThirdParty\soxr\COPYING.LGPL, ThirdParty\soxr\LICENCE. Source:
+                           https://sourceforge.net/projects/soxr/ and RSModsPlus/Native/soxr in our source.
+Newtonsoft.Json 13         MIT License. Copyright (c) 2007 James Newton-King.
+Rocksmith2014PsarcLib, BouncyCastle, Pfim, ww2ogg, revorb, oggdec
+                           Inherited from upstream RSMods' runtime assets, each under its own licence.
+
+RocksmithAudioBridge\ (desktop app)
+-----------------------------------
+.NET 8 runtime             MIT License. Copyright (c) .NET Foundation and Contributors. (Self-contained publish.)
+Avalonia                   MIT License. Copyright (c) AvaloniaUI OU and The Avalonia Project contributors.
+Avalonia.Themes.Fluent     MIT License. Same as Avalonia.
+CommunityToolkit.Mvvm      MIT License. Copyright (c) .NET Foundation and Contributors.
+NAudio.Wasapi              MIT License. Copyright (c) 2020 Mark Heath.
+Microsoft.Win32.Registry, System.Security.Permissions
+                           MIT License. Copyright (c) .NET Foundation and Contributors.
+Inter font                 SIL Open Font License 1.1. Copyright (c) 2016 The Inter Project Authors
+                           (https://github.com/rsms/inter). Embedded in Avalonia.Fonts.Inter.dll. Text below.
+RocksmithToolkitLib, SevenZipSharp, 7-Zip (7z64.dll), MiscUtil, zlib.net, X360, ddc and the tools\ helpers
+                           Inherited from upstream RSMods' runtime assets (External/RSMods/RuntimeAssets) for the
+                           Note by Note menu installer, each under its own licence.
+
+Installer (RocksmithAudioBridge-Setup.exe)
+------------------------------------------
+.NET 8 runtime, Avalonia, Avalonia.Themes.Fluent, Inter font: as above. Upstream RSMods' Installer.Core is compiled
+in (External/RSMods/Installer.Core, published without a licence, used as upstream's framework).
+
+UsbDk
+-----
+UsbDk 1.0.22               Apache License 2.0. Copyright (c) Red Hat, Inc. Developed by Daynix Computing LTD.
+                           The official x64 MSI, installed system-wide as a shared runtime for direct USB capture of
+                           the Real Tone Cable; Uninstall asks whether to remove it. ThirdParty\UsbDk\LICENSE.txt
+                           (also written to RSMods\UsbDk\LICENSE.txt).
+
+No part of aubio is included. Note by Note's onset detector is an independent implementation.
+
+
+==============================================================================
+The MIT License (for each component above marked MIT, with its own copyright line)
+==============================================================================
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit
+persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+==============================================================================
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007 (Inter)
+==============================================================================
+
+Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+This license is copied below, and is also available with a FAQ at: https://openfontlicense.org
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide development of collaborative font projects, to
+support the font creation efforts of academic and linguistic communities, and to provide a free and open framework in
+which fonts may be shared and improved in partnership with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and redistributed freely as long as they are not sold
+by themselves. The fonts, including any derivative works, can be bundled, embedded, redistributed and/or sold with any
+software provided that any reserved names are not used by derivative works. The fonts and derivatives, however, cannot
+be released under any other type of license. The requirement for fonts to remain under this license does not apply to
+any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright Holder(s) under this license and clearly marked
+as such. This may include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the copyright statement(s).
+
+"Original Version" refers to the collection of Font Software components as distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to, deleting, or substituting -- in part or in whole -- any
+of the components of the Original Version, by changing formats or by porting the Font Software to a new environment.
+
+"Author" refers to any designer, engineer, programmer, technical writer or other person who contributed to the Font
+Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining a copy of the Font Software, to use, study,
+copy, merge, embed, modify, redistribute, and sell modified and unmodified copies of the Font Software, subject to the
+following conditions:
+
+1) Neither the Font Software nor any of its individual components, in Original or Modified Versions, may be sold by
+itself.
+
+2) Original or Modified Versions of the Font Software may be bundled, redistributed and/or sold with any software,
+provided that each copy contains the above copyright notice and this license. These can be included either as
+stand-alone text files, human-readable headers or in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font Name(s) unless explicit written permission is
+granted by the corresponding Copyright Holder. This restriction only applies to the primary font name as presented to
+the users.
+
+4) The name(s) of the Copyright Holder(s) and the Author(s) of the Font Software shall not be used to promote, endorse
+or advertise any Modified Version, except to acknowledge the contribution(s) of the Copyright Holder(s) and the
+Author(s) or with their explicit written permission.
+
+5) The Font Software, modified or unmodified, in part or in whole, must be distributed entirely under this license,
+and must not be distributed under any other license. The requirement for fonts to remain under this license does not
+apply to any document created using the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+ANY WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT,
+TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT
+OR OTHERWISE, ARISING FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM OTHER DEALINGS IN THE FONT
+SOFTWARE.

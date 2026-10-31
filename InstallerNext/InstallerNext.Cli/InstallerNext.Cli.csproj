@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Console shell over InstallerNext.Core: dry runs, headless install / uninstall, and CI's manifest validation
+       (a console exe so scripts wait for it and read its exit code; the wizard is a GUI-subsystem exe). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PlatformTarget>x64</PlatformTarget>
+    <RootNamespace>RocksmithAudioBridge.Setup.Cli</RootNamespace>
+    <AssemblyName>RocksmithAudioBridge.Setup.Cli</AssemblyName>
+    <Product>Rocksmith Audio Bridge</Product>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\InstallerNext.Core\InstallerNext.Core.csproj" />
+  </ItemGroup>
+
+</Project>

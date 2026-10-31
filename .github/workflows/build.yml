@@ -1,0 +1,244 @@
+# Rocksmith Audio Bridge: build, test and package on Windows.
+#
+# Order (from the migration audit): check out with submodules -> upstream framework + GUI.Core / Installer.Core tests
+# -> our tests -> build the DLL (Mod/ linked into upstream's DLL/ExternalMods/RocksmithAudioBridge) -> dump and
+# validate the manifest -> upstream's configurator publish scripts -> ASIO proxy x86/x64, DriverHost64, VST host ->
+# helper exe (ONNX models) + WindowCapture -> desktop app -> installer -> release on tag.
+#
+# Steps that need secrets or inputs that only exist on the maintainer's PC today are guarded with `if:` and marked
+# TODO, so the workflow runs green without them:
+#   - ML_MODELS_URL (secret): a zip of ml-training/models (fretnet_guitarset.onnx, fretnet_bass_scale.onnx), the
+#     artifact store for what RSMODSPLUS_TOOLS_DIR points at locally. Without it the helper exe, the payload and the
+#     installer are skipped (the installer projects still build and test).
+#   - TONES_TOKEN (secret): read access to the private Cheesewizard/RocksmithAudioBridge-Tones release (starter tones).
+#   - SIGNING_CERT_BASE64 / SIGNING_CERT_PASSWORD (secrets): code signing. No paid signing today.
+name: build
+
+on:
+  push:
+    branches: [develop, 'release/**', 'feature/**', 'feature_*']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      DOTNET_NOLOGO: 'true'
+      DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+      HAS_ML_MODELS: ${{ secrets.ML_MODELS_URL != '' }}
+      HAS_TONES: ${{ secrets.TONES_TOKEN != '' }}
+      HAS_SIGNING: ${{ secrets.SIGNING_CERT_BASE64 != '' }}
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Check out (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Set up MSBuild (VS 2022)
+        uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: '[17.0,18.0)'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/packages.config') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: UsbDk MSI (pinned by hash; embedded by App/RocksmithAudioBridge.Core)
+        run: ./scripts/AcquireUsbDk.ps1
+
+      # ---- upstream tests (before Mod/ is linked into DLL/ExternalMods: the framework tests refuse external mods) ----
+      - name: Upstream mod framework tests
+        run: ./External/RSMods/DLL/Framework/Tests/BuildAndRun.ps1
+
+      - name: Upstream GUI.Core tests
+        run: dotnet test External/RSMods/GUI.Core.Tests/GUI.Core.Tests.csproj -c Release
+
+      - name: Upstream Installer.Core tests
+        run: dotnet test External/RSMods/Installer.Core.Tests/Installer.Core.Tests.csproj -c Release
+
+      # ---- our managed tests ---------------------------------------------------------------------------------------
+      - name: App core tests
+        run: dotnet test App/RocksmithAudioBridge.Core.Tests/RocksmithAudioBridge.Core.Tests.csproj -c Release
+
+      - name: Installer tests
+        run: dotnet test InstallerNext/InstallerNext.Tests/InstallerNext.Tests.csproj -c Release
+
+      # ---- the game DLL and its manifest ---------------------------------------------------------------------------
+      - name: Build the DLL (upstream RSMods + Mod/ as ExternalMods/RocksmithAudioBridge) and dump the manifest
+        run: ./Mod/Build-ModDll.ps1 -Configuration Release
+
+      - name: Check the DLL is ours
+        run: |
+          $special = (Get-Item build/mod/xinput1_3.dll).VersionInfo.SpecialBuild
+          Write-Host "SpecialBuild: $special"
+          if ($special -notlike '*RocksmithAudioBridge*') { throw "xinput1_3.dll does not carry our SpecialBuild stamp." }
+
+      - name: Validate mods.manifest.json (parses with upstream's ManifestService; keys, ini, types; our mods present)
+        run: |
+          dotnet build InstallerNext/InstallerNext.Cli/InstallerNext.Cli.csproj -c Release
+          ./InstallerNext/InstallerNext.Cli/bin/Release/net8.0-windows/RocksmithAudioBridge.Setup.Cli.exe --validate-manifest build/mod/mods.manifest.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # Static ModRegistrar constructors run under rundll32 during the dump and must have no side effects: dump again
+      # from an empty working folder and require that only the manifest appears there, identical to the first dump.
+      - name: Manifest dump has no side effects and is deterministic
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'dump-check'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          $out = Join-Path $dir 'mods.manifest.json'
+          $dll = (Resolve-Path build/mod/xinput1_3.dll).Path
+          Start-Process -FilePath "$env:WINDIR\SysWOW64\rundll32.exe" -ArgumentList "`"$dll`",DumpManifest `"$out`"" -WorkingDirectory $dir -Wait
+          $files = @(Get-ChildItem -Force -Recurse $dir | Select-Object -ExpandProperty Name)
+          if ($files.Count -ne 1 -or $files[0] -ne 'mods.manifest.json') { throw "The dump wrote more than the manifest: $($files -join ', ')" }
+          if ((Get-FileHash $out).Hash -ne (Get-FileHash build/mod/mods.manifest.json).Hash) { throw 'Two dumps of the same DLL differ.' }
+
+      # ---- upstream's configurator payload -------------------------------------------------------------------------
+      - name: Upstream configurator publish
+        run: ./External/RSMods/Build/Publish-Configurator.ps1
+
+      - name: Upstream configurator payload
+        run: ./External/RSMods/Build/New-ConfiguratorPayload.ps1
+
+      # ---- native pieces (never deployed: DeployToGame=false) ------------------------------------------------------
+      - name: ASIO proxy driver x86
+        run: msbuild Driver/AsioProxy/RocksmithAudioBridge.vcxproj -nologo -m -v:m -p:Configuration=Release -p:Platform=Win32 -p:DeployToGame=false
+
+      - name: ASIO proxy driver x64 guest
+        run: msbuild Driver/AsioProxy/RocksmithAudioBridge.vcxproj -nologo -m -v:m -p:Configuration=Release -p:Platform=x64 -p:DeployToGame=false
+
+      - name: DriverHost64
+        run: msbuild Driver/AsioProxy/DriverHost64/RocksmithAudioBridgeDriverHost.vcxproj -nologo -m -v:m -p:Configuration=Release -p:Platform=x64 -p:DeployToGame=false
+
+      # Optional at run time (the VST host plays without it); its build fetches the pinned Stompbox commit.
+      - name: Stompbox engine (GPL-3.0, separate DLL)
+        continue-on-error: true
+        run: ./VstHost/Stompbox/Build-Stompbox.ps1
+
+      - name: VST host (JUCE, AGPLv3)
+        run: msbuild VstHost/RocksmithAudioBridgeVstHost.vcxproj -nologo -m -v:m -p:Configuration=Release -p:Platform=x64 -p:DeployToGame=false
+
+      # ---- helper exe (needs the FretNet ONNX models) --------------------------------------------------------------
+      # TODO: publish ml-training/models to an artifact store and set the ML_MODELS_URL secret. Locally the models come
+      # from RSMODSPLUS_TOOLS_DIR.
+      - name: Fetch ONNX models (TODO, needs ML_MODELS_URL)
+        if: env.HAS_ML_MODELS == 'true'
+        env:
+          ML_MODELS_URL: ${{ secrets.ML_MODELS_URL }}
+        run: |
+          $tools = Join-Path $env:RUNNER_TEMP 'rsmodsplus-tools'
+          New-Item -ItemType Directory -Force (Join-Path $tools 'ml-training') | Out-Null
+          Invoke-WebRequest -Uri $env:ML_MODELS_URL -OutFile (Join-Path $env:RUNNER_TEMP 'models.zip')
+          Expand-Archive (Join-Path $env:RUNNER_TEMP 'models.zip') -DestinationPath (Join-Path $tools 'ml-training') -Force
+          if (-not (Test-Path (Join-Path $tools 'ml-training/models/fretnet_guitarset.onnx'))) { throw 'models.zip must hold models/fretnet_guitarset.onnx and models/fretnet_bass_scale.onnx' }
+          "RSMODSPLUS_TOOLS_DIR=$tools" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Helper exe (ONNX Runtime, soxr, WindowCapture)
+        if: env.HAS_ML_MODELS == 'true'
+        run: dotnet build Helper/Helper.csproj -c Release
+
+      - name: WindowCapture only (the helper build includes it when it runs)
+        if: env.HAS_ML_MODELS != 'true'
+        run: ./Helper/BuildWindowCapture.ps1 -OutputDirectory Helper/Native/bin
+
+      # ---- desktop app and installer -------------------------------------------------------------------------------
+      - name: Desktop app (build)
+        run: dotnet build App/RocksmithAudioBridge.App.csproj -c Release
+
+      - name: Installer (build)
+        run: dotnet build InstallerNext/InstallerNext.sln -c Release
+
+      # TODO: set TONES_TOKEN (read access to Cheesewizard/RocksmithAudioBridge-Tones) to ship the starter tones.
+      - name: Starter tones (TODO, needs TONES_TOKEN)
+        if: env.HAS_TONES == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.TONES_TOKEN }}
+        run: ./scripts/AcquireStarterTones.ps1
+
+      - name: Package payload and installer
+        if: env.HAS_ML_MODELS == 'true'
+        run: |
+          $tones = @()
+          if ($env:HAS_TONES -eq 'true') { $tones = @('-WithStarterTones') }
+          ./scripts/Package-Release.ps1 -SkipModDll -SkipNative -SkipConfigurator -SkipHelper @tones
+
+      # TODO: code signing once a certificate exists (no paid signing today).
+      - name: Sign (TODO, needs SIGNING_CERT_BASE64)
+        if: env.HAS_SIGNING == 'true' && env.HAS_ML_MODELS == 'true'
+        run: |
+          Write-Host 'TODO: signtool sign /fd sha256 /tr <timestamp> build/release/installer/RocksmithAudioBridge-Setup.exe and the payload binaries.'
+
+      # ---- artifacts -----------------------------------------------------------------------------------------------
+      - name: Upload the DLL and manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: mod-dll
+          path: |
+            build/mod/xinput1_3.dll
+            build/mod/mods.manifest.json
+          if-no-files-found: error
+
+      - name: Upload the installer
+        if: env.HAS_ML_MODELS == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: build/release/installer/RocksmithAudioBridge-Setup.exe
+          if-no-files-found: error
+
+      - name: Upload the build record (commit + every payload file's SHA-256)
+        if: env.HAS_ML_MODELS == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-info
+          path: build/release/payload/app/build-info.txt
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Check the installer was built
+        run: |
+          if [ ! -f artifacts/installer/RocksmithAudioBridge-Setup.exe ]; then
+            echo "No installer artifact: the build ran without ML_MODELS_URL, so there is nothing to release." >&2
+            exit 1
+          fi
+
+      - name: Draft the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            artifacts/installer/RocksmithAudioBridge-Setup.exe
+            artifacts/mod-dll/mods.manifest.json

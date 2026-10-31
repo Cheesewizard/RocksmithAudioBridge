@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Rocksmith Audio Bridge installer logic with no UI: the install / uninstall plan, its runner (real or dry run), the
+    starter tones, shortcuts, the payload layout and the mod manifest validator. The Avalonia wizard (InstallerNext.App)
+    and the console runner (InstallerNext.Cli) are thin shells over it; InstallerNext.Tests runs the plans against temp
+    folders.
+
+    Upstream RSMods' Installer.Core (External/RSMods/Installer.Core) is compiled in as linked source, the same way
+    App/RocksmithAudioBridge.Core links upstream's GUI.Core files: a ProjectReference would build inside the submodule
+    (obj/ and bin/ under External/RSMods), and the submodule is pinned and committed separately. The files are used
+    byte-identical; an upstream change arrives with the submodule bump. Installer.Core needs only the BCL and
+    Microsoft.Win32.Registry, so nothing else comes with it.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <!-- Off project-wide because the linked upstream files predate nullable reference types; ours opt in. -->
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <PlatformTarget>x64</PlatformTarget>
+    <RootNamespace>RocksmithAudioBridge.Setup</RootNamespace>
+    <AssemblyName>RocksmithAudioBridge.Setup.Core</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="InstallerNext.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
+  </ItemGroup>
+
+  <!-- Upstream Installer.Core, as source. -->
+  <ItemGroup>
+    <Compile Include="..\..\External\RSMods\Installer.Core\*.cs" Link="Upstream\%(Filename)%(Extension)" />
+    <Compile Include="..\..\External\RSMods\Installer.Core\Payload\*.cs" Link="Upstream\Payload\%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <!-- Our own reusable logic (driver registration and status, the RS_ASIO and menu verbs, the manifest model). -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\App\RocksmithAudioBridge.Core\RocksmithAudioBridge.Core.csproj" />
+  </ItemGroup>
+
+</Project>

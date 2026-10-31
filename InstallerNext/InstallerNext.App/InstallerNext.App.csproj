@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Rocksmith Audio Bridge's installer: a one-window Avalonia wizard over InstallerNext.Core, the same stack and shape as
+    upstream's installer (External/RSMods/Installer: Avalonia 11 + Fluent, folder, options, Install). With command-line
+    arguments it runs CommandLine instead (attached to the parent console), so the shipped exe also does the dry run
+    and the headless install / uninstall.
+    The release payload (scripts/Package-Release.ps1) is embedded as payload.zip when PayloadZip points at it; a build
+    without it finds payload\ beside the exe or takes the payload switch.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PlatformTarget>x64</PlatformTarget>
+    <RootNamespace>RocksmithAudioBridge.Setup.App</RootNamespace>
+    <AssemblyName>RocksmithAudioBridge-Setup</AssemblyName>
+    <ApplicationIcon>AudioBridge256.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Product>Rocksmith Audio Bridge</Product>
+    <PayloadZip Condition="'$(PayloadZip)' == ''">$(MSBuildThisFileDirectory)..\..\build\release\payload.zip</PayloadZip>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.22" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\InstallerNext.Core\InstallerNext.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="AudioBridge256.ico" />
+    <EmbeddedResource Include="$(PayloadZip)" LogicalName="payload.zip" Condition="Exists('$(PayloadZip)')" />
+  </ItemGroup>
+
+</Project>

@@ -4,80 +4,19 @@ for the code Cheesewizard wrote.
 
 Upstream RSMods
 ---------------
-This project is a fork of RSMods (https://github.com/Lovrom8/RSMods) by Lovrom8 (Lovro),
-ffio1 and contributors. RSMods is published without a licence. Its code remains
-the property of its authors and is not covered by the MIT License above.
+Rocksmith Audio Bridge runs as external mods inside RSMods
+(https://github.com/Lovrom8/RSMods) by Lovrom8 (Lovro), ffio1 and contributors:
+its game DLL is upstream RSMods built from the submodule in External/RSMods with
+our mods (Mod/) compiled in. RSMods is published without a licence. Its code
+remains the property of its authors and is not covered by the MIT License above.
 
-Rocksmith Audio Bridge is an independent extension of RSMods, maintained
-separately. Please report problems at
+Rocksmith Audio Bridge is maintained separately. Please report problems at
 https://github.com/Cheesewizard/RocksmithAudioBridge/issues, not to the RSMods authors.
 
 Third-party components
 ----------------------
-Signalsmith Stretch       MIT License, (c) Geraint Luff / Signalsmith Audio Ltd.
-                          DLL/Audio/ThirdParty/SignalsmithStretch/LICENSE.txt
-SoX Resampler (soxr)      GNU LGPL 2.1, (c) robs@users.sourceforge.net.
-                          Shipped as a separate soxr.dll with its licence text
-                          (ThirdParty/soxr in the runtime bundle).
-ONNX Runtime              MIT License, (c) Microsoft Corporation. Licence and
-                          third-party notices ship in ThirdParty/onnxruntime.
-Dear ImGui (v1.85)        MIT License, (c) Omar Cornut. DLL/Lib/ImGUI
-Roboto font               Apache License 2.0, (c) Google. Embedded in
-                          DLL/Lib/ImGUI/RobotoFont.cpp.
-JSON for Modern C++       MIT License, (c) Niels Lohmann. DLL/Lib/Json/json.hpp
-JUCE 9                    GNU AGPLv3, (c) Raw Material Software Limited.
-                          VstHost/Lib/JUCE/LICENSE.txt. Used only by the VST host
-                          (RocksmithAudioBridgeVstHost.exe), which is therefore
-                          licensed under the AGPLv3: VstHost/LICENSE.txt.
-VST3 SDK                  MIT License, (c) Steinberg Media Technologies GmbH.
-                          Bundled with JUCE (VstHost/Lib/JUCE/modules/
-                          juce_audio_processors_headless/format_types/VST3_SDK).
-                          VST is a registered trademark of Steinberg Media
-                          Technologies GmbH.
-JUCE bundled libraries    Compiled into the VST host from JUCE's modules, each
-                          under its own licence. Licence paths are under
-                          VstHost/Lib/JUCE. JUCE's LICENSE.txt ships next to the
-                          host as RSMods/VstHost-JUCE-LICENSE.txt, and these
-                          libraries' notices (VstHost/THIRD-PARTY-NOTICES.txt) as
-                          RSMods/VstHost-ThirdParty-Notices.txt.
-                          zlib: zlib License, (c) Jean-loup Gailly and Mark Adler.
-                            modules/juce_core/zip/zlib/LICENSE
-                          libpng: PNG Reference Library License, (c) The PNG
-                            Reference Library Authors.
-                            modules/juce_graphics/image_formats/pnglib/LICENSE
-                          libjpeg: IJG License, (c) Thomas G. Lane, Guido
-                            Vollbeding. This software is based in part on the
-                            work of the Independent JPEG Group.
-                            modules/juce_graphics/image_formats/jpglib/README
-                          libwebp: BSD 3-Clause License, (c) Google Inc.
-                            modules/juce_graphics/image_formats/libwebp/COPYING
-                          HarfBuzz: Old MIT License, (c) HarfBuzz contributors.
-                            modules/juce_graphics/fonts/harfbuzz/COPYING
-                          SheenBidi: Apache License 2.0, (c) Muhammad Tayyab Akram.
-                            modules/juce_graphics/unicode/sheenbidi/LICENSE
-                          lunasvg and plutovg: MIT License, (c) Samuel Ugochukwu.
-                            modules/juce_graphics/drawables/lunasvg/LICENSE and
-                            lunasvg/plutovg/LICENSE
-                          The LV2 and ARA SDKs that JUCE also bundles are not
-                          compiled in (LV2 and ARA hosting are off).
-SimpleIni                 MIT License, (c) Brodie Thiesfield. DLL/Lib/Ini/SimpleIni.h
-RtMidi                    MIT-style licence, (c) Gary P. Scavone. DLL/Lib/Midi
-NAudio                    MIT License, (c) Mark Heath and contributors.
-TwitchLib                 MIT License, (c) TwitchLib contributors.
-Microsoft Detours         DLL/Lib/Detours (header dated 1995-2001), inherited
-                          from upstream RSMods.
-UsbDk 1.0.22              Apache License 2.0, (c) Red Hat, Inc. Developed by
-                          Daynix Computing LTD. Two of its headers are copied into
-                          DLL/AudioBridge/Cable (UsbDkHelper.h, UsbDkData.h). The
-                          official x64 MSI is fetched at build time, embedded in
-                          RSMods.exe and installed system-wide as a shared runtime
-                          for the direct USB capture. Uninstall asks whether to remove it.
-                          Its licence is written to RSMods/UsbDk/LICENSE.txt.
-
-The settings application also bundles libraries inherited unchanged from
-upstream RSMods (GUI/Lib: Rocksmith Custom Song Toolkit libraries, 7-Zip,
-SevenZipSharp, BouncyCastle, SharpZipLib, Newtonsoft.Json, NLog, Ookii.Dialogs,
-Pfim, ddc and others). Each remains under its own licence.
+THIRD-PARTY-NOTICES.txt lists every third-party component a release ships, which
+file it is in, its licence and where the licence text is.
 
 No part of aubio is included. Note by Note's onset detector
-(DLL/NoteByNote/Detection/HfcOnsetDetector.hpp) is an independent implementation.
+(Mod/NoteByNote/Detection/HfcOnsetDetector.hpp) is an independent implementation.
