@@ -1,3 +1,93 @@
+# Rocksmith Audio Bridge 4.3 release notes
+
+The mod now runs on the **Learn & Play** edition of Rocksmith 2014 Remastered, ASIO interfaces whose driver is 64-bit only can be used, and in ASIO mode the bridge measures your real latency instead of trusting the driver. The noise suppressor becomes a **Noise gate pedal** that keeps your sustain, other guitar cables work in Cable mode, and multiplayer recordings get a dry take per player. To update, run the installer over your existing install; your `RSMods.ini` settings and key bindings are kept.
+
+## RS_ASIO
+ASIO users need [RS_ASIO](https://github.com/mdias/rs_asio/releases) 0.6.1 or newer; 0.7.2 or newer is recommended. The settings app's Audit tab checks this for you.
+
+## New
+
+### Learn & Play support
+The mod now supports the Learn & Play edition of Rocksmith 2014 Remastered (the December 2024 update) with every feature: the Audio Bridge, the Tone designer, Note by Note, Drop Pedal and Speaker Mode, Riff Repeater and the Real Tone Cable. The September build of the game keeps working as before.
+
+### 64-bit ASIO drivers
+Some interfaces only install a 64-bit ASIO driver, which 32-bit Rocksmith cannot load. The bridge now runs such a driver in a separate 64-bit program and plays the game through it.
+- **Switch output** on the Output page now lists these interfaces too, and labels every ASIO interface **ASIO 32-bit** or **ASIO 64-bit**. Pick a 64-bit one and the bridge opens it live, like any other.
+- A 64-bit driver plays one buffer later than a 32-bit one. When an interface has both builds, the bridge keeps using the 32-bit one.
+- This needs `RS_ASIO.ini` pointed at the Audio Bridge (the Audit tab's **Set up for me** does this). In Cable mode, the ASIO output for the game's sound still lists 32-bit drivers only.
+
+### Measured latency in ASIO mode
+The guitar to ear readout in the overlay header now works on an ASIO interface, and the bridge measures it instead of guessing.
+- **The game's own delay is measured by itself.** In the menus, with nobody playing, the bridge sends three short chirps through the game's amp in place of your guitar and times them (about a second of silence). It does this once per interface, buffer size and sample rate, and keeps the result, so the next launch shows it at once. While the Tone designer or an external amp sim plays, its delay is measured the same way.
+- **Your interface can be measured too.** General > Latency > **Measure the interface...** times the interface's own input and output delay with a guitar cable from the headphone jack into the guitar input, instead of trusting what its driver reports. **Use the driver's figures** goes back.
+- **Recalibrate** on the same card measures the game again now.
+- Each figure says where it comes from: **measured**, **est.** or **guess**. General > Display > **Latency readout** shows a compact one on the game screen (it needs the Audio diagnostics HUD).
+
+### Noise gate pedal
+The noise suppressor is now a **Noise gate pedal** that keeps your sustain. The old suppressor cut notes while you could still hear them, worst with a noisy interface and a high-gain amp. The gate listens only to the guitar's own range, so hiss and hum no longer decide when it closes, and it fades each note out smoothly instead of chopping it.
+- On the Input page, **Open pedal** shows it as a stomp box over the game (the settings app has the same pedal), with four dials: **Threshold** (where it opens), **Decay** (how long a note fades once it closes), **Reduction** (how far it turns the noise down) and **Attack** (how fast it opens), plus a light that shows when it is open, a level meter with the threshold marked on it, and a footswitch.
+- Set the threshold just above where the meter rests when you're not playing. If you had the old suppressor set very low, raise it until the noise between notes is gone.
+- **Each Tone designer tone can have its own gate.** While a saved tone plays, turning the pedal's dials or footswitch changes that tone only, and it is remembered at once, so a clean tone can have the gate off and a high-gain tone on. Tones you have not changed use the global gate, and **Use the global gate** on the pedal puts a tone back.
+- The gate also cleans the amp sim's input. The Tone designer and external amp sims used to get the raw guitar signal, so a noisy interface reached a high-gain amp unfiltered. They now get the gated signal, on ASIO and on the Real Tone Cable alike. The game's own input is not changed.
+
+### A dry take per player
+In multiplayer, an audio take now saves each player's clean guitar on its own: Player 2's beside Player 1's (`-dry-p2.wav` next to `-dry.wav`), with the one full game mix as before. All files of a take start at the same moment, and both dry takes share one level, so they stay in step for re-amping.
+
+### Look ahead tablature for Note by Note
+Pick **Look ahead** as Note by Note's target style for a scrolling tablature window of the whole song, at the difficulty you are playing each phrase at (**Compare with 100%** shows the full chart). Scroll it or click and drag the notes sideways to read ahead.
+- Notes are spaced by time and marked like printed tab: hammer-ons and pull-offs, slides, bends with pre-bends and releases, tied notes, vibrato, accents, tremolo picking, taps, fret-hand mutes, harmonics, pinch harmonics and palm mutes. Marks above the staff stack instead of overlapping.
+- Chord names over the chords, bar lines with measure numbers, named section lines and the shaded Riff Repeater loop, which starts at the left edge when it fits. **Dock to top** pins the window across the top of the screen.
+- Make the window taller and the tab becomes a page of rows of whole bars, filling the window's width and height. Each row is only as tall as its own marks need, and the docked window can grow to most of the screen.
+- While the window is open, note detection is off and each note is held whatever you play, so you read the tab at your own pace. `Right Arrow` moves on to the next note; collapse the window to play as normal.
+- Pick your own highlight colour for the current note and the loop from a colour wheel on the toolbar. The number on the current note turns black or white, whichever reads better.
+- The window leaves the keyboard alone, so the hotkeys and `Right Arrow` keep working, and the mouse cursor only shows while you move the mouse.
+
+### Drop Pedal controls in the overlay
+The overlay's Drop Pedal page now has controls, so you no longer need the hotkeys:
+- **-** and **+** buttons shift the pitch a semitone at a time. If the pedal is off, the first press turns Drop Pedal on.
+- **Off / Drop Pedal / Speaker Mode** picks the mode directly. Speaker Mode still stays on until the song ends, and the page says so.
+- **My guitar is in** sets the tuning your strings are really in (E standard down to F standard), replacing the one-way `F9` cycle, which is gone (`F9` is now free). It is saved, so an Eb player sets it once instead of every launch. In multiplayer a **Player 2** card sets Player 2's, saved separately.
+- **Match song**, in the tuner or during a song, sets the shift so your guitar plays in the song's tuning, with the tuning named on the button.
+
+## Changes
+- **The overlay opens where you left it.** It reopens on the last page you used, also after a restart. The first time it opens on the Tone designer in ASIO mode, or on the Drop Pedal page in Cable mode. **Tone designer** (the Amp sim page, renamed) now sits at the top of the list, and the **Note by Note** page only shows while Note by Note is switched on in Riff Repeater (or when its menu switch is missing, so the repair message stays visible).
+- **Note by Note is out of beta.** Its main problem, notes drawn grey after a Riff Repeater loop restart, is fixed in this release (see Fixes). Bass support is still experimental.
+- **Input page, one tab per player.** The Input page has a tab for Player 1, Player 2, and the mic while `RS_ASIO.ini` sends it through the bridge. Each tab shows what the input is (ASIO interface or Real Tone Cable), its level, that source's settings, then the processing. Picking each input's interface and channel moves here from the Output page, where an **Output pair** card remains for interfaces with more than one pair of outputs. The **Real Tone Cable for Player 2** switch moves here from the General page.
+- **Input processing for Player 1 only, for now.** Input gain, the noise gate and the compressor run on Player 1. Player 2's own processing is planned.
+- **"Not running this launch".** Input processing starts at game launch only when one of its switches is on. If you switch the first one on mid-session, the Processing card now says so: restart the game once to start it.
+- **Other guitar cables work in Cable mode.** The bridge used to play only a cable that reports the Real Tone Cable's USB ID, so a cable that reports a different one gave no guitar sound. Now, with no Real Tone Cable plugged in, Player 1 plays on the Windows default recording device, the way the game takes other cables when `Rocksmith.ini` has `RealToneCableOnly=0` (the default). The Input page has an **Input device** picker for Player 1 to choose any recording device. A Real Tone Cable plays exactly as before and still takes over when plugged in; once one has played, the bridge waits for it instead of switching to another device. Other devices are read through Windows, so they do not get the Real Tone Cable's direct USB latency.
+- **The overlay key can be changed.** General > **Overlay key** > **Change key** picks a different key than `\` to open and close the overlay, for keyboards where `\` is awkward or in another place. Letters, digits and keys the game, Windows, Steam or another hotkey already use are refused, and `Esc` always cancels, so the overlay can't be left without a key. Plugin windows of the Tone designer follow the new key too.
+- **Restart Tone designer** replaces Force close on the Tone designer page. It also covers a Tone designer that is running but not connected, or still loading, and reloads the last saved chain without restarting the game.
+- **The hum filter is removed.** It thinned the tone and left a faint echo after each pick, worst on palm mutes and light notes on the high E, and removed little real hum. The noise gate already silences hum between notes. If you had it on, it now stays off, and its controls are gone from the overlay and the settings app.
+
+## Fixes
+- **Real Tone Cable routing works with `ExclusiveMode=0` in `Rocksmith.ini`.** The game could fail to open its output ("No audio output device"). The bridge now owns the real device in Cable mode, so that setting no longer matters there.
+- **Rocksmith no longer shows as running in Steam after you quit.** A plugin that hung while the Tone designer closed kept its program alive. The Tone designer now closes itself when the game has gone.
+- **Note by Note: notes keep their colour when a Riff Repeater loop restarts.** After the loop came round, every note of the new pass was drawn grey until you played the first one.
+- **Real Tone Cable: the game's sound and guitar always open in low-latency mode.** On some setups the game fell back to a slower polling mode, which added delay.
+- **When the game's sound cannot start, the Output page says so** ("Audio could not start") instead of showing that it is switching devices.
+- **Tone designer: Reload retries a plugin that failed to load in the background.** Reload used to be greyed out for such a plugin; it now loads it again.
+
+### Fixed earlier, missing from those release notes
+These fixes shipped in an earlier update but were not listed at the time.
+- **4.1: the input calibration screen keeps your guitar at high frame rates.** Above about 100 fps it read past its buffer and the guitar could drop out. From RSMods 1.2.8.4.
+- **4.1: hotkeys of mods you have switched off no longer act** (Toggle Loft, for example). From RSMods 1.2.8.4.
+- **4.1: alt-tab out of exclusive fullscreen no longer breaks the on-screen mod text.** From RSMods 1.2.8.4.
+- **4.2: opening a folder or program from the overlay no longer freezes the game for a moment.**
+
+## Known issues
+- Rocksmith can crash on PCs where Windows forces **Mandatory ASLR** on every program (it moves the game in memory, so no mod can patch it safely). Turn it off for `Rocksmith2014.exe` in Windows Security > App & browser control > Exploit protection > Program settings.
+- Speaker Mode: on a heavily loaded PC, a short high-pitched tone can play while a song loads. Starting at a moderate volume is a good habit.
+- Two-player Drop Pedal works when both players use the same kind of input, both ASIO or both Real Tone Cable.
+- The Tone designer plays one guitar (Player 1). For two-player songs, use the game's amp.
+- With auto-tuning on, the Drop Pedal / Speaker Mode shift is sometimes applied when the song loads rather than while you browse the song list.
+- In Cable mode the game tones latency figure is still estimated from your playing, and can be well off while a song plays. Treat it as rough; ASIO mode measures it.
+- Note by Note: a note marker can flicker briefly as a note is accepted.
+
+Report problems with the **Make bug report** button on the settings app's Rocksmith Audio Bridge tab, or on [this repository](https://github.com/Cheesewizard/RocksmithAudioBridge/issues).
+
+---
+
 # Rocksmith Audio Bridge 4.2 release notes
 
 Two big additions: the **Tone designer**, which plays your guitar through your own VST3 plugins (amp sims, pedals, NAM captures) inside Rocksmith, and **live audio routing**, which lets you pick any interface and channel for each player while the game runs. Real Tone Cable players get both, plus much lower latency. To update, run the installer over your existing install; your `RSMods.ini` settings and key bindings are kept.
