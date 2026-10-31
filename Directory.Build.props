@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   DEPLOY OWNER LOCK. MSBuild imports this file into every project of the solution before the
-  project's own properties, so it can switch deploying off for all of them at once (DeployToGame.targets,
-  DLL.vcxproj's post-build copy of xinput1_3.dll, NoteByNoteProbe.vcxproj's probe copy).
+  project's own properties, so it can switch deploying off for all of them at once (DeployToGame.targets:
+  the bridge driver, DriverHost64 and the VST host).
 
   Several checkouts (a main folder and its worktrees) can build the same projects into the one game folder,
   and whichever finishes last wins, silently. The game folder may carry RSModsDeployOwner.txt holding the

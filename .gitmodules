@@ -1,0 +1,3 @@
+[submodule "External/RSMods"]
+	path = External/RSMods
+	url = https://github.com/Lovrom8/RSMods.git

@@ -293,7 +293,10 @@ Installer/Resources/
 /Tests
 /docs
 /tools
-/DLL/AsioProxy/test
+/Driver/AsioProxy/test
+# 4.x folders (DLL/, GUI/, Installer/) are gone from the tree; these keep their leftover local build files out.
+/DLL/
+/GUI/
 /DLL/Audio/test
 /DLL/Installer/
 /private-debugging/
