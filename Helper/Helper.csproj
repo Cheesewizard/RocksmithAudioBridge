@@ -1,0 +1,82 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Rocksmith Audio Bridge's helper exe: the jobs the game DLL hands to a separate process (decoding a song for
+       Speaker Mode's cache, the video take, ...). In the framework build RSMods.exe is upstream's configurator, so these
+       moved here. Installed as <game>\RSMods\AudioBridge\RocksmithAudioBridge.Helper.exe with tools\ next to it. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net472</TargetFramework>
+    <!-- rswindowcapture.dll is 64-bit. -->
+    <PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>RocksmithAudioBridge.Helper</AssemblyName>
+    <RootNamespace>RocksmithAudioBridge.Helper</RootNamespace>
+    <!-- The 4.x WinForms app compiles some of these files too, so they stay at its language version. -->
+    <LangVersion>7.3</LangVersion>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <Product>Rocksmith Audio Bridge</Product>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="Rocksmith2014PsarcLib">
+      <HintPath>..\External\RSMods\RuntimeAssets\Rocksmith2014PsarcLib.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <!-- The Tone designer's jobs (ToneDesigner\): song index, backups, .rabsong song tone sets. Newtonsoft.Json 13 (not the
+       4.x app's 12.0.3): .rabsong files are shared between players, and 13 caps JSON nesting (GHSA-5crp-9r3c-p9vr). The
+       helper runs from its own folder, so its copy never meets the 4.x app's. -->
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+  </ItemGroup>
+
+  <!-- Note by Note's ML service (NoteByNote\MlServiceHost.cs, the ml-service command). The ML sources compile straight into
+       this exe instead of a ProjectReference to RSModsPlus\RSModsPlus.csproj: that library is an old-style project with a
+       PackageReference, which `dotnet build` (no Microsoft.NuGet.targets) cannot compile, and converting it to SDK style
+       breaks the 4.x app's build in VS 2022 here (no .NET SDK resolver installed). Mirror any change to the library's
+       items here: sources (wildcard), CqtBasis.bin, both FretNet models (same logical names, EmbeddedModel.cs reads them
+       from its own assembly), ONNX Runtime, soxr.dll. -->
+  <PropertyGroup>
+    <MlModelPath Condition="'$(MlModelPath)' == '' And '$(RSMODSPLUS_TOOLS_DIR)' != ''">$(RSMODSPLUS_TOOLS_DIR)\ml-training\models\fretnet_guitarset.onnx</MlModelPath>
+    <MlBassModelPath Condition="'$(MlBassModelPath)' == '' And '$(RSMODSPLUS_TOOLS_DIR)' != ''">$(RSMODSPLUS_TOOLS_DIR)\ml-training\models\fretnet_bass_scale.onnx</MlBassModelPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\RSModsPlus\MachineLearning\*.cs" Link="MachineLearning\%(Filename)%(Extension)" />
+    <Reference Include="System.Numerics" />
+    <EmbeddedResource Include="..\RSModsPlus\MachineLearning\CqtBasis.bin" LogicalName="RSModsPlus.MachineLearning.CqtBasis.bin" Link="MachineLearning\CqtBasis.bin" />
+    <EmbeddedResource Include="$(MlModelPath)" LogicalName="RSModsPlus.MachineLearning.FretNet.onnx" />
+    <EmbeddedResource Include="$(MlBassModelPath)" LogicalName="RSModsPlus.MachineLearning.FretNetBass.onnx" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.24.4" />
+    <None Include="..\RSModsPlus\Native\bin\soxr.dll" Link="soxr.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\RSModsPlus\Native\soxr\COPYING.LGPL" Link="ThirdParty\soxr\COPYING.LGPL" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\RSModsPlus\Native\soxr\LICENCE" Link="ThirdParty\soxr\LICENCE" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="BuildNativeResampler" BeforeTargets="PrepareForBuild">
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\RSModsPlus\BuildNative.ps1&quot; -OutputDirectory &quot;$(MSBuildProjectDirectory)\..\RSModsPlus\Native\bin&quot;" />
+  </Target>
+  <Target Name="ValidateMlModel" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('$(MlModelPath)')" Text="FretNet model missing. Set RSMODSPLUS_TOOLS_DIR to the folder that holds ml-training\models, or pass /p:MlModelPath=absolute-path." />
+    <Error Condition="!Exists('$(MlBassModelPath)')" Text="Bass FretNet model missing. Set RSMODSPLUS_TOOLS_DIR to the folder that holds ml-training\models, or pass /p:MlBassModelPath=absolute-path." />
+  </Target>
+
+  <!-- Speaker Mode's decoder chain: Wwise WEM -> Ogg -> repaired Ogg -> 16-bit WAV. -->
+  <ItemGroup>
+    <None Include="..\External\RSMods\RuntimeAssets\tools\ww2ogg.exe" Link="tools\ww2ogg.exe" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\External\RSMods\RuntimeAssets\tools\revorb.exe" Link="tools\revorb.exe" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\External\RSMods\RuntimeAssets\tools\oggdec.exe" Link="tools\oggdec.exe" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\External\RSMods\RuntimeAssets\tools\packed_codebooks_aoTuV_603.bin" Link="tools\packed_codebooks_aoTuV_603.bin" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- The video take's Windows Graphics Capture recorder and muxer (Native/WindowCapture, CMake). The 4.x WinForms app
+       builds the same library into the same folder for its bundled runtime. -->
+  <Target Name="BuildWindowCapture" BeforeTargets="PrepareForBuild">
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\BuildWindowCapture.ps1&quot; -OutputDirectory &quot;$(MSBuildProjectDirectory)\Native\bin&quot;" />
+  </Target>
+  <ItemGroup>
+    <None Include="Native\bin\rswindowcapture.dll" Link="rswindowcapture.dll" CopyToOutputDirectory="PreserveNewest" />
+    <Compile Remove="Native\**" />
+    <None Remove="Native\WindowCapture\**" />
+  </ItemGroup>
+
+</Project>
