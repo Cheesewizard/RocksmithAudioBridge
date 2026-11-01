@@ -130,14 +130,23 @@ namespace RSMods
                 startupHint.Text = "That saved profile was not found. Choose another profile or select Choose in game.";
                 return;
             }
-            // Reuse the existing controls and save handlers, keeping both views in
-            // sync and preserving the inherited auto-load behavior.
-            if (choice.Automatic)
+            // Both views edit the same next-launch keys. Refresh the legacy
+            // controls without firing duplicate saves, then explicitly persist
+            // both values (the overlay may have changed them since this opened).
+            bool saving = AllowSaving;
+            try
             {
-                if (string.IsNullOrEmpty(choice.Name)) listBox_AutoLoadProfiles.ClearSelected();
-                else listBox_AutoLoadProfiles.SelectedItem = choice.Name;
+                AllowSaving = false;
+                if (choice.Automatic)
+                {
+                    if (string.IsNullOrEmpty(choice.Name)) listBox_AutoLoadProfiles.ClearSelected();
+                    else listBox_AutoLoadProfiles.SelectedItem = choice.Name;
+                }
+                checkBox_AutoLoadProfile.Checked = choice.Automatic;
             }
-            checkBox_AutoLoadProfile.Checked = choice.Automatic;
+            finally { AllowSaving = saving; }
+            if (choice.Automatic) SaveSettings_Save(ReadSettings.ProfileToLoadIdentifier, choice.Name ?? "");
+            SaveSettings_Save(ReadSettings.ForceProfileEnabledIdentifier, choice.Automatic ? "on" : "off");
             RefreshStartupSetup();
         }
     }

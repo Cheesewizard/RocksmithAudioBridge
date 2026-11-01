@@ -390,6 +390,8 @@ namespace RSMods
         // setting is added HERE and nowhere else; the bridge asserts every write is on this list.
         public static readonly string[] BridgeOwnedIdentifiers =
         {
+            ForceProfileEnabledIdentifier,
+            ProfileToLoadIdentifier,
             CableForPlayerTwoIdentifier,
             AsioInputGainIdentifier,
             NoiseGateThresholdIdentifier,

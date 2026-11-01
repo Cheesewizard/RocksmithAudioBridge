@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "OverlayShell.hpp"
 #include "OverlayUi.hpp"
+#include "StartupPanel.hpp"
 #include "Lib/ImGUI/imgui_internal.h"   // SetItemUsingMouseWheel (the pedalboard scrolls sideways)
 #include "NoteByNote/Ui/NoteByNoteHudLayout.hpp"
 #include "AudioBridge/Engine/AudioBridgeEngine.hpp"
@@ -4504,7 +4505,8 @@ namespace Overlay
 
 		void GeneralPage()
 		{
-			PageHeader("General", "Overlays and library tools.");
+			PageHeader("General", "Startup, overlays and library tools.");
+			StartupPanel::Draw(ImGui::IsWindowAppearing() || std::strcmp(CurrentPageName(), "General") != 0);
 
 			// Here rather than under Amp sim: it silences the game's amp, Tone designer and an external app alike.
 			BeginCard("Tuner");

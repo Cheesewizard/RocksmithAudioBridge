@@ -37,13 +37,18 @@ offline hook is attempted. Unknown versions and failed checks are logged.
 
 ## Settings UI
 
-The Game startup card maps three readable choices to the existing two INI keys.
+The in-game General / Game startup card and the desktop card map three readable
+choices to the existing two INI keys. The in-game card caches settings on entry,
+uses the existing overlay layout helpers, and writes only on explicit edits. It
+never reloads the live settings map or changes the loaded profile mid-session.
 It writes only those keys with the same Windows INI API used by the surrounding
 setup page. The existing full INI writer already preserves unknown sections,
-including `[Startup]`. Profile choices reuse the original controls/save handlers;
+including `[Startup]`. The desktop profile choices reuse the original controls/save handlers;
 the dropdown reads each installation's existing profile list. Missing configured
 profiles are shown explicitly and not silently replaced. Profile changes are
-disabled while the game runs; startup mode remains editable for the next launch.
+disabled in the desktop app while the game runs; in-game startup preferences are
+all editable for the next launch. The desktop app synchronizes the profile keys
+on activation so a later desktop save preserves in-game edits.
 
 ## Validation checklist
 

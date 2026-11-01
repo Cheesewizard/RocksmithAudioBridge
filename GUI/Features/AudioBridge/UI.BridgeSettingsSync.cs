@@ -19,7 +19,7 @@ namespace RSMods
 			foreach (string identifier in ReadSettings.BridgeOwnedIdentifiers)
 			{
 				string value = ReadSettings.ProcessSettings(identifier);
-				if (!string.IsNullOrWhiteSpace(value))
+				if (!string.IsNullOrWhiteSpace(value) || identifier == ReadSettings.ProfileToLoadIdentifier)
 					SyncBridgeOwnedSetting(identifier, value);
 			}
 		}

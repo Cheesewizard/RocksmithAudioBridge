@@ -90,7 +90,7 @@ settings and opens an email to the developer.
 
 ## Faster startup
 
-In the settings app, open **Rocksmith Audio Bridge → Game startup** and choose
+In game, press **`\`**, open **General > Game startup**, and choose
 **Ubisoft at startup**:
 
 | Option | What happens on the next launch |
@@ -99,12 +99,13 @@ In the settings app, open **Rocksmith Audio Bridge → Game startup** and choose
 | **Skip sign-in** | Skips the optional Ubisoft sign-in screen. Automatic connection attempts stay unchanged. |
 | **Start offline** | Skips sign-in and the profile's automatic Ubisoft connection attempt, avoiding its wait and failure dialogs. |
 
-Choose **Profile → Choose in game** to select your profile yourself. To continue
-automatically, choose a saved profile by name or **Continue with selected
+Choose **Profile at startup > Choose in game** to select your profile yourself. To continue
+automatically, choose **Use a named profile**, enter its exact name and press
+**Save profile**, or choose **Continue with selected
 profile**, which accepts the game's current selection. No profile name is built
 into the mod. This uses the existing RSMods auto-load feature; profile selection
-still uses its keyboard navigation. Change the automatic profile with Rocksmith
-closed. Ubisoft startup options can be saved while playing and apply next launch.
+still uses its keyboard navigation. All in-game startup preferences apply next launch, including profile changes.
+The desktop settings app also offers a saved-profile picker with Rocksmith closed.
 
 The native skips currently support the **December 2024 Learn & Play executable
 on Windows**. Unknown builds keep the original startup. Instruction mismatches
