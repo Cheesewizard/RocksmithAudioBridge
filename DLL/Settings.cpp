@@ -291,6 +291,8 @@ void Settings::Initialize()
 		{"RemoveSkylineEnabled", "off"},
 		{"GreenScreenWallEnabled", "off"},
 		{"ForceProfileEnabled", "off"},
+		{"SkipOptionalUbisoftLogin", "off"},
+		{"OfflineStartup", "off"},
 		{"FretlessModeEnabled", "off"},
 		{"RemoveInlaysEnabled", "off"},
 		{"ToggleLoftWhen", "manual"},
@@ -543,6 +545,8 @@ void Settings::ReadModSettings() {
 	modSettings["RemoveSkylineEnabled"] = reader.GetValue("Toggle Switches", "Skyline", "off");
 	modSettings["GreenScreenWallEnabled"] = reader.GetValue("Toggle Switches", "GreenScreenWall", "off");
 	modSettings["ForceProfileEnabled"] = reader.GetValue("Toggle Switches", "ForceProfileLoad", "off");
+	modSettings["SkipOptionalUbisoftLogin"] = reader.GetValue("Startup", "SkipOptionalUbisoftLogin", "off");
+	modSettings["OfflineStartup"] = reader.GetValue("Startup", "OfflineStartup", "off");
 	modSettings["FretlessModeEnabled"] = reader.GetValue("Toggle Switches", "Fretless", "off");
 	modSettings["RemoveInlaysEnabled"] = reader.GetValue("Toggle Switches", "Inlays", "off");
 	modSettings["ToggleLoftWhen"] = reader.GetValue("Toggle Switches", "ToggleLoftWhen", "manual");

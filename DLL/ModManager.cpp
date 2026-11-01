@@ -11,6 +11,7 @@
 #include "DropPedal/SpeakerMode/WwiseMusicHook.hpp"
 #include "AudioBridge/Cable/CableInput.hpp"
 #include "Core/Extensions.hpp"
+#include "Mods/Startup.hpp"
 
 namespace ModManager {
 	bool IsHookGroupSkipped(const char* group) {
@@ -285,6 +286,7 @@ namespace ModManager {
 			inputConditionerHookActive = true;
 		}
 		Extensions::AudioHooksInstalled();
+		Startup::Install();
 
 		if (!skipAudio) AudioDevices::SetupMicrophones();
 		if (!IsHookGroupSkipped("bugfix")) ApplyBugPrevention();
