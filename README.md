@@ -88,6 +88,48 @@ Settings tab shows its result on a small Audit card. If something goes wrong,
 **Make bug report** on the Rocksmith Audio Bridge tab zips your logs and
 settings and opens an email to the developer.
 
+## Faster startup
+
+In game, press **`\`**, open **General > Game startup**, and choose
+**Ubisoft at startup**:
+
+| Option | What happens on the next launch |
+| --- | --- |
+| **Normal sign-in** | Keeps Rocksmith's original sign-in and connection flow. This is the default. |
+| **Skip sign-in** | Skips the optional Ubisoft sign-in screen. Automatic connection attempts stay unchanged. |
+| **Start offline** | Skips sign-in and the profile's automatic Ubisoft connection attempt, avoiding its wait and failure dialogs. |
+
+Choose **Profile at startup > Choose in game** to select your profile yourself. To continue
+automatically, choose **Use a named profile**, enter its exact name and press
+**Save profile**, or choose **Continue with selected
+profile**, which accepts the game's current selection. No profile name is built
+into the mod. This uses the existing RSMods auto-load feature; profile selection
+still uses its keyboard navigation. All in-game startup preferences apply next launch, including profile changes.
+The desktop settings app also offers a saved-profile picker with Rocksmith closed.
+
+The native skips currently support the **December 2024 Learn & Play executable
+on Windows**. Unknown builds keep the original startup. Instruction mismatches
+leave the affected skip unapplied and log the reason in `RSMods_debug.txt`. Local songs and profiles
+continue to load. This option does not block networking system-wide or change
+account authentication, game ownership checks, or online features selected later.
+Audio buffer settings are unaffected; faster startup does not imply lower audio
+latency or higher in-song FPS.
+
+For manual configuration in `RSMods.ini`:
+
+```ini
+[Startup]
+SkipOptionalUbisoftLogin = on
+OfflineStartup = on
+```
+
+Both options default to `off`. `OfflineStartup=on` includes the sign-in skip.
+Set both to `off` to restore normal startup. Automatic profile settings remain
+under `[Toggle Switches]`: `ForceProfileLoad=off` chooses in game;
+`ForceProfileLoad=on` uses `ProfileToLoad` (empty accepts the current selection).
+
+Implementation details and a validation checklist are in [STARTUP.md](STARTUP.md).
+
 ## The overlay
 
 Press `\` in game to open the Audio Bridge overlay. Each feature below says

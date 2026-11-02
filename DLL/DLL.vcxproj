@@ -19,6 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Mods\Startup.cpp" />
     <ClCompile Include="Overlay\OverlayInputCapture.cpp" />
     <ClCompile Include="AudioBridge\Input\InputCaptureHook.cpp" />
     <ClCompile Include="AudioBridge\Cable\CableInput.cpp" />
@@ -448,6 +449,9 @@
     <ClInclude Include="RSColor.h" />
     <ClInclude Include="SongTimer.hpp" />
     <ClInclude Include="SongTuning.hpp" />
+    <ClInclude Include="Mods\Startup.hpp" />
+    <ClInclude Include="Mods\StartupPreferences.hpp" />
+    <ClInclude Include="Overlay\StartupPanel.hpp" />
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="Tests.hpp" />
     <ClInclude Include="Tuning.h" />

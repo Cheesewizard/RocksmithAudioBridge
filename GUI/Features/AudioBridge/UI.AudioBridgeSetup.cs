@@ -80,6 +80,7 @@ namespace RSMods
 			InitializeAsioDriverSetup(setup);
 			page.Controls.Add(setup);
 
+			InitializeStartupSetup(page);
 			InitializeRecordingFolderSetup(page);
 			InitializeBugReportSetup(page);
 

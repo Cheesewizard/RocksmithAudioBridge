@@ -177,6 +177,7 @@
     <Compile Include="Audio\StudioCheck.cs" />
     <Compile Include="Audio\StudioNumber.cs" />
     <Compile Include="Features\AudioBridge\UI.BridgeSettingsSync.cs" />
+    <Compile Include="Features\AudioBridge\UI.StartupSetup.cs" />
     <Compile Include="Features\AudioBridge\UI.AudioBridgeSetup.cs" />
     <Compile Include="Features\AudioBridge\UI.AudioBridgeTab.cs" />
     <Compile Include="Features\RsAsio\UI.RsAsioTab.cs" />
