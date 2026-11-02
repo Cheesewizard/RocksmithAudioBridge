@@ -50,7 +50,46 @@ disabled in the desktop app while the game runs; in-game startup preferences are
 all editable for the next launch. The desktop app synchronizes the profile keys
 on activation so a later desktop save preserves in-game edits.
 
-## Validation checklist
+## Recorded validation
+
+Testing so far covers one Windows installation with the supported Learn & Play
+executable. This contribution is based on `release/4.3`; compare against that
+branch to keep unrelated release changes out of the startup review.
+
+- Built the contribution DLL in Master/Win32 and settings app in Release/x64.
+  The GUI build reused the released, unchanged RocksmithAudioBridge.dll ML
+  dependency; private ML model sources were not rebuilt.
+- An ordinary Steam launch of the contribution's native module reached local
+  startup state 4, followed RendezVous.SkipLogin, and reached the main menu.
+  RS_ASIO 0.7.4 bound to ASIO4ALL in Real mode at 128 frames. Audio INIs were
+  unchanged during feature validation.
+- The installed variant of the in-game General card also reached the main menu
+  through an ordinary Steam launch. Its local native hook prototype differs
+  from the contribution module, so later local tests do not count as repeated
+  runtime validation of the exact PR binary.
+- Passed 14 startup-preference persistence checks and an 11-check harness using
+  the actual desktop UI partial. The actual ImGui startup panel was rendered
+  offscreen for visual inspection; these checks do not replace full desktop UI
+  end-to-end testing.
+
+Other PCs, real cached Ubisoft sessions, all sign-in/profile combinations, and
+full desktop UI end-to-end behavior still require validation. No general
+startup-time or FPS improvement is claimed.
+
+### Separate local audio observations
+
+A subsequent intermittent startup crash on the test PC also occurred before
+the new startup hooks were installed. A separate local RS_ASIO compatibility
+build completed two consecutive Steam launches. The exact crash cause and a
+permanent resolution remain unproven; that RS_ASIO build is not part of this
+contribution.
+
+A loss of instrument input was traced to an existing Realtek ASIO input
+selection. Restoring the test setup's ASIO4ALL input restored signal. The
+startup feature does not write that driver preference. These observations do
+not establish compatibility for every audio setup.
+
+## Remaining validation checklist
 
 - [ ] Build the DLL in Master/Win32 and settings app in Release/x64.
 - [ ] Absent keys: original startup; profile defaults to Choose in game.
